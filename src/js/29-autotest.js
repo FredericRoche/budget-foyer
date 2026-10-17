@@ -163,13 +163,14 @@ async function autotest(){
     v("trésorerie : premier jour sous zéro", a1.premierBas?.date, "2027-05-15");
     vrai("trésorerie : virement proposé suffisant", analyseTresorerie(simulerTresorerie({depart: "2027-03-31", jours: 120, supplements: [{date: a1.avant, montant: a1.virement, libelle: "v"}]})).premierBas === undefined);
     const grosse = vivants("echeances").find(e => e.libelle === "Grosse dépense");
-    enregistrer("echeances", Object.assign(grosse, {projet: "Travaux", financement: "epargne"}));
-    const hautAvant = LIVRE.parametres.seuilHaut; LIVRE.parametres.seuilHaut = 5000;
-    const s2 = simulerTresorerie({depart: "2027-03-31", jours: 120}); const pj = s2.projets[0];
-    vrai("projet : pris sur le compte tant qu'il suffit, le reste sur l'épargne, sans découvert",
-      pj && pj.duCourant > 0 && pj.epargne > 0 && Math.abs(pj.duCourant + pj.epargne - 30000) < 0.01 && analyseTresorerie(s2).premierBas === undefined, pj);
-    vrai("projet : la marche courante garde le seuil haut", Math.min(...s2.jours.filter(j => j.date >= "2027-05-15").map(j => j.solde)) >= 5000 - 0.01);
-    LIVRE.parametres.seuilHaut = hautAvant;
+    enregistrer("echeances", Object.assign(grosse, {projet: "Travaux"}));
+    enregistrer("echeances", {libelle: "Cession de titres", montant: 50000, recurrence: "unique", debut: "2027-04-10", compte: cj.id, categorie: "Patrimoine", sousCategorie: "Cession"});
+    const s2 = simulerTresorerie({depart: "2027-03-31", jours: 120});
+    vrai("projet et cession : hors de la marche courante", analyseTresorerie(s2).premierBas === undefined && !s2.evenements.some(e => /Grosse|Cession/.test(e.libelle)));
+    const k2 = simulerEpargne({depart: "2027-03-31", jours: 120});
+    v("épargne : cession puis paiement du projet", [k2.jours.find(j => j.date === "2027-04-10").solde, k2.jours[k2.jours.length - 1].solde], [50000, 20000]);
+    const tj = simulerTresorerie({depart: "2027-03-31", jours: 120, perimetre: "tout"});
+    v("compte joint réel : marche courante + capital", Math.round(tj.jours[tj.jours.length - 1].solde - s2.jours[s2.jours.length - 1].solde), 20000);
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
   finally {
     LIVRE = memoire.LIVRE; Object.assign(SESSION, memoire.session); LIVRE_MODIFIE = memoire.modifie; planifierSauvegarde = sauvegardePlanifiee; invaliderIndex();

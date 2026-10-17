@@ -79,7 +79,7 @@ async function saisirValorisation(compte){
   const corps = h("div");
   if (compte && ["courant", "carte", "especes"].includes(compte.type)){ corps.appendChild(h("p", null, "Le solde de « " + compte.nom + " » vient des relevés importés.")); await dialogue({titre: compte.nom, corps}); return; }
   corps.append(comptes.length ? null : h("p", {class: "neg"}, "Créez d'abord le compte (Réglages › Comptes)."), h("div", {class: "grille-champs"}, champ("Compte", sel), champ("Date", date), champ("Valeur", valeur)),
-    h("p", {class: "note"}, "Plus simple : déposez le relevé PDF dans « Importer les relevés », la valeur et la date y sont lues."));
+    h("p", {class: "note"}, "Plus simple : déposez le relevé PDF dans « Importer », la valeur et la date y sont lues."));
   const ok = await dialogue({titre: "Saisir une valorisation", corps, actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
     const v = lireMontant(valeur.value); if (isNaN(v)){ message("Valeur illisible.", true); return false; }
     enregistrer("valorisations", {compte: sel.value, date: date.value, valeur: v, source: ""}); return true;

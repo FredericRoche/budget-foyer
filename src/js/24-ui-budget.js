@@ -17,7 +17,7 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
       const b = enregistrer("budgets", {annee: an + 1, nom: "Budget " + (an + 1) + " (copie de " + an + ")", fige: false, actif: true, lignes: JSON.parse(JSON.stringify(budget.lignes)).map(l => Object.assign(l, {id: "lb-" + idAleatoire(8)}))});
       etat.mois = (an + 1) + "-01"; etat.budget = b.id; rafraichirEcran();
     }}, "Copier pour " + (an + 1)) : null]));
-  if (!budget){ c.appendChild(h("p", {class: "vide"}, "Reprenez le budget depuis le classeur d'inventaire (Importer les relevés), ou copiez celui d'une autre année (Réglages).")); return; }
+  if (!budget){ c.appendChild(h("p", {class: "vide"}, "Reprenez le budget depuis le classeur d'inventaire (écran Importer), ou copiez celui d'une autre année (Réglages).")); return; }
   const lignes = tableauBudget(budget, an, d1, d2, lieu);
   const lb = lignes.filter(l => l.ligne);
   const tb = somme(lb, l => l.budget), tr = somme(lignes, l => l.realise);

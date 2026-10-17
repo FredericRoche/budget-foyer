@@ -1,8 +1,8 @@
 /* ================= Import des relevés et documents ================= */
 let FICHIERS_EN_COURS = [];   // [{lu, compte, prep, statut, erreur}]
 
-declarerEcran("import", {titre: "Importer les relevés", rendre(c, etat){
-  c.appendChild(entete("Importer les relevés", "Les fichiers sont lus sur cet appareil ; rien n'est envoyé ailleurs.",
+declarerEcran("import", {titre: "Importer", rendre(c, etat){
+  c.appendChild(entete("Importer", "Relevés, factures, plans, classeur, règles et justificatifs · les fichiers sont lus sur cet appareil ; rien n'est envoyé ailleurs.",
     [h("button", {onclick: async () => { const f = await choisirFichier(".csv,.xlsx,.pdf,.json,image/*", true); if (f && f.length) await deposerFichiers(f); }}, "Choisir des fichiers…"),
      FICHIERS_EN_COURS.length ? h("button", {class: "discret", onclick: () => { FICHIERS_EN_COURS = []; rafraichirEcran(); }}, "Vider la liste") : null]));
   const depot = h("div", {class: "depot"}, h("strong", null, "Déposez ici tous les fichiers du mois d'un coup"), " (CSV, Excel, PDF) : chacun est reconnu.",

@@ -18,7 +18,7 @@ Sur le second PC : même adresse, même stockage, puis le mot de passe. Les deux
 
 ## 2. Mise en route (Réglages › Démarrage)
 
-1. **Importer les relevés** : déposez votre fichier de règles initiales (JSON, conservé hors du dépôt), puis le classeur d'inventaire v7. L'application reprend l'historique classé, le budget 2027 et les hypothèses, ces dernières comme échéances à confirmer. Le classeur n'est pas modifié.
+1. **Importer** : déposez votre fichier de règles initiales (JSON, conservé hors du dépôt), puis le classeur d'inventaire v7. L'application reprend l'historique classé, le budget 2027 et les hypothèses, ces dernières comme échéances à confirmer. Le classeur n'est pas modifié.
 2. Déposez les relevés du mois (voir la routine ci-dessous).
 3. **Réglages › Comptes** : vérifiez les titulaires des cartes et le compte de trésorerie.
 4. **Trésorerie** : confirmez ou corrigez les échéances proposées (pensions, loyer, travaux, voiture), et ajoutez les cessions de titres quand les quantités seront arrêtées.
@@ -26,7 +26,7 @@ Sur le second PC : même adresse, même stockage, puis le mot de passe. Les deux
 
 Un **plan** (fichier JSON au format « budget-foyer-plan ») peut aussi être déposé : il ajoute d'un coup un budget, des échéances et des règles. Il sert par exemple à un budget provisoire de quelques mois. Un budget de même nom est remplacé ; ses notes s'affichent au survol des lignes et sous les échéances.
 
-## 3. Routine du mois (écran « Importer les relevés »)
+## 3. Routine du mois (écran « Importer »)
 
 Déposez tous les fichiers d'un coup ; chacun est reconnu.
 
@@ -69,7 +69,9 @@ Le téléphone ne peut ni lire les comptes ni relire ses dépôts. Sur le PC, l'
 - **Tableau de bord** : dépensé et reste à dépenser du mois, trésorerie au plus bas, patrimoine net, écarts, répartition par lieu.
 - **Budget et réalisé** : par mois, cumul ou année, filtre par lieu. Un clic sur une ligne ouvre ses opérations. Le bouton « Copier pour 2028 » prépare l'année suivante.
 - **Bilan et résultat** : patrimoine à une date (soldes relevés, valorisations lues dans les PDF), compte de résultat par nature, avec un contrôle qui rapproche les deux.
-- **Trésorerie** : projection jour par jour sur 12 mois, seuils bas et haut, virement conseillé avant un découvert, échéances.
+- **Trésorerie** : la marche courante seule (revenus, budget, impôts), projetée jour par jour sur 12 mois, avec seuils bas et haut, virement conseillé avant un découvert, échéances.
+- **Épargne** : livrets et assurances-vie (leurs revenus y restent), plus les cessions de titres, moins le financement des projets et les approvisionnements du compte courant ; courbe sur 12 mois et alerte si elle passe sous zéro.
+- **Projets** : travaux, voiture… hors marche courante ; coût, payé, reste, échéancier en appels de fonds et paiements rattachés (champ « Projet » d'une opération). Une échéance devient un projet dès qu'elle porte un nom de projet.
 
 ## 7. Sécurité et sauvegardes
 

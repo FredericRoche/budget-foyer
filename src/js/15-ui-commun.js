@@ -170,12 +170,12 @@ function construireNavigation(){
   const lien = (nom, texte, pastille, alerte) => h("a", {class: ECRAN_COURANT === nom ? "actif" : "", onclick: () => aller(nom)}, texte,
     pastille ? h("span", {class: "pastille" + (alerte ? " alerte" : "")}, pastille) : null);
   n.append(lien("accueil", "Tableau de bord"), lien("traiter", "À traiter", a.total || null),
-    h("div", {class: "rubrique"}, "Comptes"), lien("operations", "Opérations"), lien("import", "Importer les relevés"),
+    h("div", {class: "rubrique"}, "Comptes"), lien("operations", "Opérations"), lien("import", "Importer"),
     lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(j => j.statut === "a_rapprocher").length || null),
     lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Commerçants"),
     h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), lien("patrimoine", "Bilan et résultat"),
     lien("tresorerie", "Trésorerie", ana?.premierBas ? "!" : null, true),
-    nomsProjets().length ? lien("projets", "Projets") : null,
+    lien("epargne", "Épargne"), lien("projets", "Projets"),
     h("div", {class: "rubrique"}, "Appareil"), lien("reglages", "Réglages"),
     h("div", {class: "pied-nav", id: "etat-synchro"}));
   majEtatSynchro();
