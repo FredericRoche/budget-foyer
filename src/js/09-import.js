@@ -135,17 +135,19 @@ function appliquerReleve(prep){
 function preparerFacture(lu, compte){
   const deja = vivants("factures").find(f => f.arrete === lu.arrete && f.compteDebit === compte?.id);
   const precedente = vivants("factures").filter(f => f.compteDebit === compte?.id && f.arrete < lu.arrete).sort((a, b) => a.arrete < b.arrete ? 1 : -1)[0];
-  // Sans facture précédente : la période couvre le mois qui précède l'arrêté.
-  const debut = precedente ? ajouterJours(precedente.arrete, 1) : ajouterJours(ajouterMois(lu.arrete, -1), 1);
+  // Achats du lendemain de la fin de période précédente jusqu'à la fin de période (deux jours ouvrés avant l'arrêté).
+  // Sans facture précédente : la période précédente est supposée close à la fin du mois d'avant.
+  const fin = finPeriodeCarte(lu.arrete);
+  const debut = ajouterJours(precedente ? (precedente.finPeriode || finPeriodeCarte(precedente.arrete)) : finPeriodeCarte(dernierJourOuvre(ajouterMois(debutDeMois(lu.arrete), -1))), 1);
   const cartes = vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL" && (c.compteDebit === compte?.id || !c.compteDebit));
-  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= lu.arrete && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && (!o.dateDebit || o.debitEstime))));
+  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= fin && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && (!o.dateDebit || o.debitEstime))));
   const total = -somme(ops, o => versCentimes(o.montant)) / 100;
   const parCarte = cartes.map(c => ({compte: c, total: -somme(ops.filter(o => o.compte === c.id), o => versCentimes(o.montant)) / 100})).filter(x => x.total);
-  return {lu, compte, deja, debut, ops, total, parCarte, ecart: Math.round((lu.montant - total) * 100) / 100};
+  return {lu, compte, deja, debut, fin, ops, total, parCarte, ecart: Math.round((lu.montant - total) * 100) / 100};
 }
 function appliquerFacture(prep){
   const f = enregistrer("factures", Object.assign(prep.deja || {}, {arrete: prep.lu.arrete, dateDebit: prep.lu.dateDebit, dateValeur: prep.lu.dateValeur,
-    montant: prep.lu.montant, compteDebit: prep.compte.id, fichier: prep.lu.nom, ecart: prep.ecart, debutPeriode: prep.debut}));
+    montant: prep.lu.montant, compteDebit: prep.compte.id, fichier: prep.lu.nom, ecart: prep.ecart, debutPeriode: prep.debut, finPeriode: prep.fin}));
   for (const o of prep.ops) enregistrer("operations", Object.assign(o, {dateDebit: prep.lu.dateDebit, debitEstime: false, facture: f.id}));
   const empreinte = "facture|" + prep.compte.id + "|" + prep.lu.arrete;
   if (!vivants("operations").some(o => o.empreinte === empreinte)){
@@ -168,6 +170,7 @@ function appliquerValorisation(lu, compte){
 function apresImport(){
   apparierTransferts();
   affecterDebitsAmex();
+  estimerDebitsCartes();
   rapprocherTout();
 }
 /* Prélèvement Amex sur le compte courant ↔ paiement reçu sur le compte Amex ; virements entre comptes du foyer. */
@@ -202,7 +205,7 @@ function affecterDebitsAmex(){
 }
 
 /* Achats carte repris d'un historique, sans facture ni prélèvement rattachés : date de débit estimée (debitEstime).
-   Cartes LCL : arrêté au dernier jour ouvré du mois de l'achat, ou du mois suivant si l'achat lui est postérieur.
+   Cartes LCL : facture au dernier jour ouvré du mois, pour les achats jusqu'à deux jours ouvrés plus tôt ; au-delà, mois suivant.
    Amex : chaque prélèvement « American Express » du compte de débit solde, dans l'ordre, les achats les plus anciens
    dont la somme lui est égale (à 1 € près) ; un achat ancien resté seul va au prélèvement qui le suit.
    Un débit postérieur à la dernière donnée connue reste « à venir » : c'est l'encours. Renvoie le nombre d'opérations modifiées. */
@@ -218,7 +221,7 @@ function estimerDebitsCartes(){
     if (c.banque === "LCL"){
       for (const o of achats){
         let a = dernierJourOuvre(o.date);
-        if (o.date > a) a = dernierJourOuvre(ajouterMois(debutDeMois(o.date), 1));
+        if (o.date > finPeriodeCarte(a)) a = dernierJourOuvre(ajouterMois(debutDeMois(o.date), 1));
         voulu.set(o, a <= fin ? a : null);
       }
     } else if (c.carte === "AMEX"){

@@ -63,12 +63,13 @@ async function autotest(){
       const kl = enregistrer("comptes", {nom: "Cartes", type: "carte", banque: "LCL", carte: "LCL-NV", compteDebit: cc.id});
       const ka = enregistrer("comptes", {nom: "Amex", type: "carte", banque: "Amex", carte: "AMEX", compteDebit: cc.id});
       const op = (compte, date, montant, libelle) => enregistrer("operations", {compte, date, dateDebit: date, montant, libelle, origine: "reprise"});
-      const l1 = op(kl.id, "2027-02-10", -20, "A"), l2 = op(kl.id, "2027-02-27", -5, "B"), l3 = op(kl.id, "2027-03-10", -7, "C");
+      const l1 = op(kl.id, "2027-02-10", -20, "A"), l2 = op(kl.id, "2027-02-25", -5, "B"), l3 = op(kl.id, "2027-03-10", -7, "C");
       const a1 = op(ka.id, "2027-01-20", -30, "D"), a2 = op(ka.id, "2027-02-02", -10, "E"), a3 = op(ka.id, "2027-02-09", -15, "F");
       op(cc.id, "2027-02-12", -40, "PRLV SEPA AMERICAN EXPRESS"); op(cc.id, "2027-03-15", 0, "fin des données");
       estimerDebitsCartes();
       v("reprise LCL : débit au dernier jour ouvré, puis à venir", [l1.dateDebit, l2.dateDebit, l3.dateDebit], ["2027-02-26", null, null]);
       v("reprise Amex : achats soldés par le prélèvement, suivant à venir", [a1.dateDebit, a2.dateDebit, a3.dateDebit], ["2027-02-12", "2027-02-12", null]);
+      v("facture LCL : achats arrêtés deux jours ouvrés avant", finPeriodeCarte("2026-09-30"), "2026-09-28");
       v("reprise : correction idempotente", estimerDebitsCartes(), 0);
       LIVRE = avant;
     }

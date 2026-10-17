@@ -134,6 +134,14 @@ function dernierJourOuvre(iso){
   while (d.getDay() === 0 || d.getDay() === 6 || ferie(isoDe(d))) d.setDate(d.getDate() - 1);
   return isoDe(d);
 }
+function reculerJoursOuvres(iso, n){
+  let d = dateDe(iso);
+  while (n > 0){ d.setDate(d.getDate() - 1); if (d.getDay() !== 0 && d.getDay() !== 6 && !ferie(isoDe(d))) n--; }
+  return isoDe(d);
+}
+/* Facture des cartes LCL « au » jj/mm : elle porte sur les achats arrêtés deux jours ouvrés plus tôt
+   (constaté sur les factures du 31/08/2026 et du 30/09/2026 : achats du 28/08 au 28/09). */
+function finPeriodeCarte(arrete){ return reculerJoursOuvres(arrete, 2); }
 function ferie(iso){ return ["01-01", "05-01", "05-08", "07-14", "08-15", "11-01", "11-11", "12-25"].includes(iso.slice(5)); }
 /* « 31/03/2027 », « 31/03/27 », « 31.03.2027 », « 2027-03-31 » → ISO ; mm/jj si ordre = "mj" (Amex). */
 function lireDate(texte, ordre){

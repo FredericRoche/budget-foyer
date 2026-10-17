@@ -30,8 +30,8 @@ async function demarrerDemonstration(){
     }
   };
   await importer(["regles-fictives.json", "Dépenses fictives - inventaire v7.xlsx"]);
-  await importer(["T_cpte_09999_000099Z_du_01-09-2026_au_16-10-2026.csv", "T_cpte_09999_000099Z_carte_Carte_Platinum+_X111_du_30-09-2026_au_16-10-2026.csv",
-    "T_cpte_09999_000099Z_carte_Carte_Premier_X222_du_30-09-2026_au_16-10-2026.csv", "CB_FACTURE_RETRAIT_DT_DIFFERE_30-09-2026.pdf", "activity.csv",
+  await importer(["T_cpte_09999_000099Z_du_01-09-2026_au_16-10-2026.csv", "T_cpte_09999_000099Z_carte_Carte_Platinum+_X111_du_29-09-2026_au_16-10-2026.csv",
+    "T_cpte_09999_000099Z_carte_Carte_Premier_X222_du_29-09-2026_au_16-10-2026.csv", "CB_FACTURE_RETRAIT_DT_DIFFERE_30-09-2026.pdf", "activity.csv",
     "LIVRETA_09999099999_20260130.pdf", "RELEVETRIMESTRIELASSURANCEVIE_20260720.pdf", "RETRAITE_EXEMPLE_2025.pdf", "PROTEGE_EXEMPLE.pdf"], {X111: "Titulaire A", X222: "Titulaire B", AMEX: "Titulaire A"});
   // Budget de l'année suivante, copié, et échéances confirmées pour une projection lisible
   const b = budgetActif(2026);

@@ -42,8 +42,8 @@ def achats(debut, fin, n):
         r.append((d, -round(random.uniform(a, b), 2), lib, mcc, cat))
     return sorted(r)
 
-sept = achats(D("2026-09-01"), D("2026-09-29"), 34)
-octo = achats(D("2026-09-30"), D("2026-10-16"), 22)
+sept = achats(D("2026-09-01"), D("2026-09-28"), 34)   # facture au 30/09 : achats arrêtés deux jours ouvrés avant
+octo = achats(D("2026-09-29"), D("2026-10-16"), 22)
 # achat groupé au marché (deux tickets, un paiement) et achat de la facturette
 octo.append((D("2026-10-10"), -72.00, "SUMUP *MARCHE DE VILLE", "5499", "Alimentation"))
 octo.append((D("2026-10-12"), -86.00, "SALON LUCIE VILLE", "7230", "Divers"))
@@ -82,8 +82,8 @@ with open(SORTIE / f"T_cpte_{COMPTE.replace(' ', '_')}_du_01-09-2026_au_16-10-20
 # ---------------------------------------------------------------- exports « encours » par carte
 for carte, nom in (("X111", "Carte_Platinum+"), ("X222", "Carte_Premier")):
     ls = sorted(cartes[carte])
-    with open(SORTIE / f"T_cpte_{COMPTE.replace(' ', '_')}_carte_{nom}_{carte}_du_30-09-2026_au_16-10-2026.csv", "w", encoding="utf-8-sig", newline="") as f:
-        f.write(f"30/09/2026;{mt(round(-sum(a[1] for a in ls), 2))};;{COMPTE}\r\n")
+    with open(SORTIE / f"T_cpte_{COMPTE.replace(' ', '_')}_carte_{nom}_{carte}_du_29-09-2026_au_16-10-2026.csv", "w", encoding="utf-8-sig", newline="") as f:
+        f.write(f"29/09/2026;{mt(round(-sum(a[1] for a in ls), 2))};;{COMPTE}\r\n")
         for d, m, lib, mcc, cat in ls: f.write(f"{fr(d)};{mt(m)};Carte;;{lib};;{mcc};{cat}\r\n")
         f.write(f"16/10/2026;0;;{COMPTE}\r\n")
 
@@ -108,7 +108,7 @@ def pdf(nom, lignes_texte, mot_de_passe=None):
         c.setFont("Helvetica", 10); c.drawString(50, y, t); y -= 16
     c.save()
 pdf("CB_FACTURE_RETRAIT_DT_DIFFERE_30-09-2026.pdf", ["Détails de l'opération", "Titulaire M EXEMPLE OU Mme EXEMPLE", f"Compte {COMPTE} Compte de dépôts",
-    f"Montant -{f'{facture_sept:,.2f}'.replace(',', ' ').replace('.', ',')} €", "Détails RELEVE CB AU 29/09/26", "Date de l'opération 30/09/2026", "Date de valeur 30/09/2026",
+    f"Montant -{f'{facture_sept:,.2f}'.replace(',', ' ').replace('.', ',')} €", "Détails RELEVE CB AU 30/09/26", "Date de l'opération 30/09/2026", "Date de valeur 30/09/2026",
     "Nature de l'opération CB FACTURE/RETRAIT DT DIFFERE"])
 pdf("LIVRETA_09999099999_20260130.pdf", ["ECRITURES DE LA PERIODE", "du 01.01.2026 au 30.01.2026 - N° 1", "DATE LIBELLE VALEUR DEBIT CREDIT", "ANCIEN SOLDE 22 950,00",
     "TOTAUX 22 950,00", "SOLDE EN EUROS 22 950,00"])
@@ -173,7 +173,7 @@ ops.append(["Date", "Source", "Libellé", "Détail (relevé PDF)", "Montant banc
 classement = {"BOUCHERIE DU MARCHE VILLE": ("Alimentation", "Courses", "Ville"), "PRIMEUR DE LA PLACE VILLE": ("Alimentation", "Courses", "Ville"), "SUPERMARCHE EXEMPLE CAMPAGNE": ("Alimentation", "Courses", "Campagne"),
               "PHARMACIE CENTRALE VILLE": ("Santé", "Soins et pharmacie", "Ville"), "LIBRAIRIE DES ECOLES VILLE": ("Culture et loisirs", "Livres, presse, sorties, jeux", "Ville"),
               "BRASSERIE DU COIN VILLE": ("Alimentation", "Restaurants et cafés", "Ville"), "STATION SERVICE CAMPAGNE": ("Voiture", "Carburant et recharge", "Campagne"), "FROMAGERIE PERRET VILLE": ("Alimentation", "Courses", "Ville")}
-for d, m, lib, mcc, cat in achats(D("2026-01-02"), D("2026-08-30"), 180):
+for d, m, lib, mcc, cat in achats(D("2026-01-02"), D("2026-08-27"), 180):
     c, s, l = classement[lib]
     ops.append([dt.datetime(d.year, d.month, d.day), "LCL carte", lib, None, m, -m, c, s, None, None, "Courante", "Oui", None, None, None, dt.datetime(d.year, d.month, 1), l])
 for mois in range(1, 9):

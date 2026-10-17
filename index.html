@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-HikZnFAuqsJORUEPlWk5qM7vhjydl1ywjUi/z3LbIJ0=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-M26/Bpsd4Mra475VCtNwR49pwGonrnxVPQMBKNcTJkQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -285,7 +285,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-17.1644";
+const VERSION_APP = "2026-10-17.1655";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -416,6 +416,14 @@ function dernierJourOuvre(iso){
   while (d.getDay() === 0 || d.getDay() === 6 || ferie(isoDe(d))) d.setDate(d.getDate() - 1);
   return isoDe(d);
 }
+function reculerJoursOuvres(iso, n){
+  let d = dateDe(iso);
+  while (n > 0){ d.setDate(d.getDate() - 1); if (d.getDay() !== 0 && d.getDay() !== 6 && !ferie(isoDe(d))) n--; }
+  return isoDe(d);
+}
+/* Facture des cartes LCL « au » jj/mm : elle porte sur les achats arrêtés deux jours ouvrés plus tôt
+   (constaté sur les factures du 31/08/2026 et du 30/09/2026 : achats du 28/08 au 28/09). */
+function finPeriodeCarte(arrete){ return reculerJoursOuvres(arrete, 2); }
 function ferie(iso){ return ["01-01", "05-01", "05-08", "07-14", "08-15", "11-01", "11-11", "12-25"].includes(iso.slice(5)); }
 /* « 31/03/2027 », « 31/03/27 », « 31.03.2027 », « 2027-03-31 » → ISO ; mm/jj si ordre = "mj" (Amex). */
 function lireDate(texte, ordre){
@@ -1985,17 +1993,19 @@ function appliquerReleve(prep){
 function preparerFacture(lu, compte){
   const deja = vivants("factures").find(f => f.arrete === lu.arrete && f.compteDebit === compte?.id);
   const precedente = vivants("factures").filter(f => f.compteDebit === compte?.id && f.arrete < lu.arrete).sort((a, b) => a.arrete < b.arrete ? 1 : -1)[0];
-  // Sans facture précédente : la période couvre le mois qui précède l'arrêté.
-  const debut = precedente ? ajouterJours(precedente.arrete, 1) : ajouterJours(ajouterMois(lu.arrete, -1), 1);
+  // Achats du lendemain de la fin de période précédente jusqu'à la fin de période (deux jours ouvrés avant l'arrêté).
+  // Sans facture précédente : la période précédente est supposée close à la fin du mois d'avant.
+  const fin = finPeriodeCarte(lu.arrete);
+  const debut = ajouterJours(precedente ? (precedente.finPeriode || finPeriodeCarte(precedente.arrete)) : finPeriodeCarte(dernierJourOuvre(ajouterMois(debutDeMois(lu.arrete), -1))), 1);
   const cartes = vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL" && (c.compteDebit === compte?.id || !c.compteDebit));
-  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= lu.arrete && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && (!o.dateDebit || o.debitEstime))));
+  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= fin && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && (!o.dateDebit || o.debitEstime))));
   const total = -somme(ops, o => versCentimes(o.montant)) / 100;
   const parCarte = cartes.map(c => ({compte: c, total: -somme(ops.filter(o => o.compte === c.id), o => versCentimes(o.montant)) / 100})).filter(x => x.total);
-  return {lu, compte, deja, debut, ops, total, parCarte, ecart: Math.round((lu.montant - total) * 100) / 100};
+  return {lu, compte, deja, debut, fin, ops, total, parCarte, ecart: Math.round((lu.montant - total) * 100) / 100};
 }
 function appliquerFacture(prep){
   const f = enregistrer("factures", Object.assign(prep.deja || {}, {arrete: prep.lu.arrete, dateDebit: prep.lu.dateDebit, dateValeur: prep.lu.dateValeur,
-    montant: prep.lu.montant, compteDebit: prep.compte.id, fichier: prep.lu.nom, ecart: prep.ecart, debutPeriode: prep.debut}));
+    montant: prep.lu.montant, compteDebit: prep.compte.id, fichier: prep.lu.nom, ecart: prep.ecart, debutPeriode: prep.debut, finPeriode: prep.fin}));
   for (const o of prep.ops) enregistrer("operations", Object.assign(o, {dateDebit: prep.lu.dateDebit, debitEstime: false, facture: f.id}));
   const empreinte = "facture|" + prep.compte.id + "|" + prep.lu.arrete;
   if (!vivants("operations").some(o => o.empreinte === empreinte)){
@@ -2018,6 +2028,7 @@ function appliquerValorisation(lu, compte){
 function apresImport(){
   apparierTransferts();
   affecterDebitsAmex();
+  estimerDebitsCartes();
   rapprocherTout();
 }
 /* Prélèvement Amex sur le compte courant ↔ paiement reçu sur le compte Amex ; virements entre comptes du foyer. */
@@ -2052,7 +2063,7 @@ function affecterDebitsAmex(){
 }
 
 /* Achats carte repris d'un historique, sans facture ni prélèvement rattachés : date de débit estimée (debitEstime).
-   Cartes LCL : arrêté au dernier jour ouvré du mois de l'achat, ou du mois suivant si l'achat lui est postérieur.
+   Cartes LCL : facture au dernier jour ouvré du mois, pour les achats jusqu'à deux jours ouvrés plus tôt ; au-delà, mois suivant.
    Amex : chaque prélèvement « American Express » du compte de débit solde, dans l'ordre, les achats les plus anciens
    dont la somme lui est égale (à 1 € près) ; un achat ancien resté seul va au prélèvement qui le suit.
    Un débit postérieur à la dernière donnée connue reste « à venir » : c'est l'encours. Renvoie le nombre d'opérations modifiées. */
@@ -2068,7 +2079,7 @@ function estimerDebitsCartes(){
     if (c.banque === "LCL"){
       for (const o of achats){
         let a = dernierJourOuvre(o.date);
-        if (o.date > a) a = dernierJourOuvre(ajouterMois(debutDeMois(o.date), 1));
+        if (o.date > finPeriodeCarte(a)) a = dernierJourOuvre(ajouterMois(debutDeMois(o.date), 1));
         voulu.set(o, a <= fin ? a : null);
       }
     } else if (c.carte === "AMEX"){
@@ -4739,12 +4750,13 @@ async function autotest(){
       const kl = enregistrer("comptes", {nom: "Cartes", type: "carte", banque: "LCL", carte: "LCL-NV", compteDebit: cc.id});
       const ka = enregistrer("comptes", {nom: "Amex", type: "carte", banque: "Amex", carte: "AMEX", compteDebit: cc.id});
       const op = (compte, date, montant, libelle) => enregistrer("operations", {compte, date, dateDebit: date, montant, libelle, origine: "reprise"});
-      const l1 = op(kl.id, "2027-02-10", -20, "A"), l2 = op(kl.id, "2027-02-27", -5, "B"), l3 = op(kl.id, "2027-03-10", -7, "C");
+      const l1 = op(kl.id, "2027-02-10", -20, "A"), l2 = op(kl.id, "2027-02-25", -5, "B"), l3 = op(kl.id, "2027-03-10", -7, "C");
       const a1 = op(ka.id, "2027-01-20", -30, "D"), a2 = op(ka.id, "2027-02-02", -10, "E"), a3 = op(ka.id, "2027-02-09", -15, "F");
       op(cc.id, "2027-02-12", -40, "PRLV SEPA AMERICAN EXPRESS"); op(cc.id, "2027-03-15", 0, "fin des données");
       estimerDebitsCartes();
       v("reprise LCL : débit au dernier jour ouvré, puis à venir", [l1.dateDebit, l2.dateDebit, l3.dateDebit], ["2027-02-26", null, null]);
       v("reprise Amex : achats soldés par le prélèvement, suivant à venir", [a1.dateDebit, a2.dateDebit, a3.dateDebit], ["2027-02-12", "2027-02-12", null]);
+      v("facture LCL : achats arrêtés deux jours ouvrés avant", finPeriodeCarte("2026-09-30"), "2026-09-28");
       v("reprise : correction idempotente", estimerDebitsCartes(), 0);
       LIVRE = avant;
     }
@@ -4888,8 +4900,8 @@ async function demarrerDemonstration(){
     }
   };
   await importer(["regles-fictives.json", "Dépenses fictives - inventaire v7.xlsx"]);
-  await importer(["T_cpte_09999_000099Z_du_01-09-2026_au_16-10-2026.csv", "T_cpte_09999_000099Z_carte_Carte_Platinum+_X111_du_30-09-2026_au_16-10-2026.csv",
-    "T_cpte_09999_000099Z_carte_Carte_Premier_X222_du_30-09-2026_au_16-10-2026.csv", "CB_FACTURE_RETRAIT_DT_DIFFERE_30-09-2026.pdf", "activity.csv",
+  await importer(["T_cpte_09999_000099Z_du_01-09-2026_au_16-10-2026.csv", "T_cpte_09999_000099Z_carte_Carte_Platinum+_X111_du_29-09-2026_au_16-10-2026.csv",
+    "T_cpte_09999_000099Z_carte_Carte_Premier_X222_du_29-09-2026_au_16-10-2026.csv", "CB_FACTURE_RETRAIT_DT_DIFFERE_30-09-2026.pdf", "activity.csv",
     "LIVRETA_09999099999_20260130.pdf", "RELEVETRIMESTRIELASSURANCEVIE_20260720.pdf", "RETRAITE_EXEMPLE_2025.pdf", "PROTEGE_EXEMPLE.pdf"], {X111: "Titulaire A", X222: "Titulaire B", AMEX: "Titulaire A"});
   // Budget de l'année suivante, copié, et échéances confirmées pour une projection lisible
   const b = budgetActif(2026);
