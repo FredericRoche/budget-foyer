@@ -311,6 +311,13 @@ function appliquerPlan(contenu){
     r.comptes = (r.comptes || 0) + 1;
   }
   if (contenu.regles?.length) r.regles = appliquerRegles({regles: contenu.regles});
+  // Reclassement ciblé d'opérations déjà enregistrées, désignées par date, montant et, au besoin, libellé
+  for (const x of contenu.reclasser || []){
+    const cibles = vivants("operations").filter(o => o.date === x.date && Math.abs(o.montant - x.montant) < 0.005 && (!x.contient || norm(o.libelle + " " + (o.detail || "")).toUpperCase().includes(norm(x.contient).toUpperCase())));
+    for (const o of cibles) enregistrer("operations", Object.assign(o, {categorie: x.categorie, sousCategorie: x.sousCategorie || "", nature: x.nature || o.nature, statut: "classe", verrou: true}, x.lieu ? {lieu: x.lieu} : {}));
+    if (x.categorie) ajouterCategorieSilencieuse(x.categorie, x.sousCategorie);
+    r.reclassees = (r.reclassees || 0) + cibles.length;
+  }
   return r;
 }
 

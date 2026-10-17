@@ -144,7 +144,7 @@ async function enregistrerFichier(f, enLot){
       if (!ok) return;
       const r = appliquerReprise(f.prep); message(r.operations + " opérations reprises.");
     }
-    else if (lu.genre === "plan"){ const r = appliquerPlan(lu.contenu); message(r.budgets + " budget(s), " + r.echeances + " échéance(s), " + r.regles + " règle(s)" + (r.comptes ? ", " + r.comptes + " compte(s)" : "") + " importés.");
+    else if (lu.genre === "plan"){ const r = appliquerPlan(lu.contenu); message(r.budgets + " budget(s), " + r.echeances + " échéance(s), " + r.regles + " règle(s)" + (r.comptes ? ", " + r.comptes + " compte(s)" : "") + " importés" + (r.reclassees != null ? " ; " + r.reclassees + " opération(s) reclassée(s)" : "") + ".");
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
     else if (lu.genre === "regles"){ const n = appliquerRegles(lu.contenu); message(n + " règle(s) importée(s).");
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
