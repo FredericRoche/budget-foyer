@@ -32,7 +32,7 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
         h("td", {class: "num"}, euros(x.duCourant, 0)), h("td", {class: "num" + (x.epargne > 0 ? " neg" : "")}, euros(x.epargne, 0)))}));
     const parProjet = regrouper(sim.projets, x => x.projet);
     gauche.appendChild(h("p", {class: "note"}, [...parProjet].map(([n, l]) => n + " : " + euros(-somme(l, x => x.montant), 0) + " sur 12 mois, dont " + euros(somme(l, x => x.epargne), 0) + " depuis l'épargne").join(" ; ") + ". "
-      + "Un paiement de projet est pris sur le compte courant tant que celui-ci reste au-dessus du seuil bas jusqu'à la fin de la projection ; le reste vient de l'épargne, par virement de même date."));
+      + "Un paiement de projet n'est pris sur le compte courant que sur son excédent au-dessus du seuil haut, jusqu'à la fin de la projection ; le reste vient de l'épargne, par virement de même date."));
   }
   g.appendChild(gauche);
 

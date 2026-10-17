@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-cJ61ulwwybdSDaMsNfLsgt6aCGO/arj7HjpTFcOC+Vc=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-lUi0zj02RDW3jiVLFK542T1sZTviLhvt7zmQOJ5LCJk=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -285,7 +285,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-17.1732";
+const VERSION_APP = "2026-10-17.1741";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2810,9 +2810,9 @@ function plusValuesLatentes(debut, fin){
      ouvré ; achats Amex débités au jour habituel du mois suivant ;
    - encours connus des cartes (achats importés, non encore débités).
    Une ligne de budget liée à une échéance n'est pas comptée deux fois.
-   Projets (travaux, voiture…) : hors marche courante du foyer. Chaque paiement est pris sur le compte
-   courant à hauteur de ce qu'il peut céder sans passer sous le seuil bas, ni ce jour-là ni ensuite ;
-   le reste est un virement d'épargne à prévoir, de même date. */
+   Projets (travaux, voiture…) : hors marche courante du foyer. Chaque paiement n'est pris sur le compte
+   courant qu'à hauteur de son excédent au-dessus du seuil haut, ce jour-là et jusqu'à la fin de la
+   projection : la marche courante garde son niveau. Le reste est un virement d'épargne de même date. */
 function jourPrelevementAmex(compteId){
   const vus = vivants("operations").filter(x => (!compteId || x.compte === compteId) && x.montant < 0 && /AMERICAN EXPRESS/i.test(x.libelle))
     .sort((a, b) => a.date < b.date ? 1 : -1).slice(0, 3).map(x => +x.date.slice(8, 10)).sort((a, b) => a - b);
@@ -2891,7 +2891,7 @@ function simulerTresorerie(options){
     jours.push({date: d, flux: f, solde});
   }
   // 5. Projets : part du compte courant, part de l'épargne
-  const seuil = LIVRE.parametres.seuilBas || 0; const projets = [];
+  const seuil = Math.max(LIVRE.parametres.seuilHaut ?? 0, LIVRE.parametres.seuilBas || 0); const projets = [];
   for (const pp of aPayer.sort((a, b) => a.date < b.date ? -1 : 1)){
     const i0 = jours.findIndex(j => j.date >= pp.date); if (i0 < 0) continue;
     const besoin = -pp.montant;
@@ -4287,7 +4287,7 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
         h("td", {class: "num"}, euros(x.duCourant, 0)), h("td", {class: "num" + (x.epargne > 0 ? " neg" : "")}, euros(x.epargne, 0)))}));
     const parProjet = regrouper(sim.projets, x => x.projet);
     gauche.appendChild(h("p", {class: "note"}, [...parProjet].map(([n, l]) => n + " : " + euros(-somme(l, x => x.montant), 0) + " sur 12 mois, dont " + euros(somme(l, x => x.epargne), 0) + " depuis l'épargne").join(" ; ") + ". "
-      + "Un paiement de projet est pris sur le compte courant tant que celui-ci reste au-dessus du seuil bas jusqu'à la fin de la projection ; le reste vient de l'épargne, par virement de même date."));
+      + "Un paiement de projet n'est pris sur le compte courant que sur son excédent au-dessus du seuil haut, jusqu'à la fin de la projection ; le reste vient de l'épargne, par virement de même date."));
   }
   g.appendChild(gauche);
 
@@ -4578,7 +4578,7 @@ function etatProjet(nom, sim){
 declarerEcran("projets", {titre: "Projets", rendre(c, etat){
   const sim = simulerTresorerie();
   const noms = nomsProjets();
-  c.appendChild(entete("Projets", "Hors marche courante du foyer · financés par le compte courant tant qu'il suffit, sinon par l'épargne",
+  c.appendChild(entete("Projets", "Hors marche courante du foyer · financés par l'excédent du compte courant au-dessus du seuil haut (" + euros(LIVRE.parametres.seuilHaut || 0, 0) + "), sinon par l'épargne",
     [h("button", {class: "discret", onclick: () => editerEcheance(null)}, "Nouvelle échéance de projet")]));
   if (!noms.length){ c.appendChild(h("p", {class: "vide"}, "Aucun projet : dans Trésorerie, modifiez une échéance (travaux, voiture…) et donnez-lui un nom de projet.")); return; }
   const etats = noms.map(n => etatProjet(n, sim));
@@ -4981,9 +4981,12 @@ async function autotest(){
     vrai("trésorerie : virement proposé suffisant", analyseTresorerie(simulerTresorerie({depart: "2027-03-31", jours: 120, supplements: [{date: a1.avant, montant: a1.virement, libelle: "v"}]})).premierBas === undefined);
     const grosse = vivants("echeances").find(e => e.libelle === "Grosse dépense");
     enregistrer("echeances", Object.assign(grosse, {projet: "Travaux", financement: "epargne"}));
+    const hautAvant = LIVRE.parametres.seuilHaut; LIVRE.parametres.seuilHaut = 5000;
     const s2 = simulerTresorerie({depart: "2027-03-31", jours: 120}); const pj = s2.projets[0];
     vrai("projet : pris sur le compte tant qu'il suffit, le reste sur l'épargne, sans découvert",
       pj && pj.duCourant > 0 && pj.epargne > 0 && Math.abs(pj.duCourant + pj.epargne - 30000) < 0.01 && analyseTresorerie(s2).premierBas === undefined, pj);
+    vrai("projet : la marche courante garde le seuil haut", Math.min(...s2.jours.filter(j => j.date >= "2027-05-15").map(j => j.solde)) >= 5000 - 0.01);
+    LIVRE.parametres.seuilHaut = hautAvant;
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
   finally {
     LIVRE = memoire.LIVRE; Object.assign(SESSION, memoire.session); LIVRE_MODIFIE = memoire.modifie; planifierSauvegarde = sauvegardePlanifiee; invaliderIndex();

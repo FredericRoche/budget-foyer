@@ -6,9 +6,9 @@
      ouvré ; achats Amex débités au jour habituel du mois suivant ;
    - encours connus des cartes (achats importés, non encore débités).
    Une ligne de budget liée à une échéance n'est pas comptée deux fois.
-   Projets (travaux, voiture…) : hors marche courante du foyer. Chaque paiement est pris sur le compte
-   courant à hauteur de ce qu'il peut céder sans passer sous le seuil bas, ni ce jour-là ni ensuite ;
-   le reste est un virement d'épargne à prévoir, de même date. */
+   Projets (travaux, voiture…) : hors marche courante du foyer. Chaque paiement n'est pris sur le compte
+   courant qu'à hauteur de son excédent au-dessus du seuil haut, ce jour-là et jusqu'à la fin de la
+   projection : la marche courante garde son niveau. Le reste est un virement d'épargne de même date. */
 function jourPrelevementAmex(compteId){
   const vus = vivants("operations").filter(x => (!compteId || x.compte === compteId) && x.montant < 0 && /AMERICAN EXPRESS/i.test(x.libelle))
     .sort((a, b) => a.date < b.date ? 1 : -1).slice(0, 3).map(x => +x.date.slice(8, 10)).sort((a, b) => a - b);
@@ -87,7 +87,7 @@ function simulerTresorerie(options){
     jours.push({date: d, flux: f, solde});
   }
   // 5. Projets : part du compte courant, part de l'épargne
-  const seuil = LIVRE.parametres.seuilBas || 0; const projets = [];
+  const seuil = Math.max(LIVRE.parametres.seuilHaut ?? 0, LIVRE.parametres.seuilBas || 0); const projets = [];
   for (const pp of aPayer.sort((a, b) => a.date < b.date ? -1 : 1)){
     const i0 = jours.findIndex(j => j.date >= pp.date); if (i0 < 0) continue;
     const besoin = -pp.montant;

@@ -19,7 +19,7 @@ function etatProjet(nom, sim){
 declarerEcran("projets", {titre: "Projets", rendre(c, etat){
   const sim = simulerTresorerie();
   const noms = nomsProjets();
-  c.appendChild(entete("Projets", "Hors marche courante du foyer · financés par le compte courant tant qu'il suffit, sinon par l'épargne",
+  c.appendChild(entete("Projets", "Hors marche courante du foyer · financés par l'excédent du compte courant au-dessus du seuil haut (" + euros(LIVRE.parametres.seuilHaut || 0, 0) + "), sinon par l'épargne",
     [h("button", {class: "discret", onclick: () => editerEcheance(null)}, "Nouvelle échéance de projet")]));
   if (!noms.length){ c.appendChild(h("p", {class: "vide"}, "Aucun projet : dans Trésorerie, modifiez une échéance (travaux, voiture…) et donnez-lui un nom de projet.")); return; }
   const etats = noms.map(n => etatProjet(n, sim));
