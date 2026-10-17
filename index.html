@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Ip4p9o7/CBSmezE26r2BACWnCP7SQD1ng0S24DNJZso=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-HikZnFAuqsJORUEPlWk5qM7vhjydl1ywjUi/z3LbIJ0=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -285,7 +285,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-17.1610";
+const VERSION_APP = "2026-10-17.1644";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1242,6 +1242,7 @@ async function ouvrirLivre(motDePasse, souvenir){
   LIVRE = completerLivre(livre);
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";
+  estimerDebitsCartes();   // livres repris avant la correction du 17/10/2026 : achats carte datés comme débités le jour même
   if (!distant) await ecrireCache(source, false).catch(() => {});
   if (LIVRE_MODIFIE) planifierSauvegarde();
   setTimeout(() => synchroniser().catch(() => {}), 500);
@@ -1987,7 +1988,7 @@ function preparerFacture(lu, compte){
   // Sans facture précédente : la période couvre le mois qui précède l'arrêté.
   const debut = precedente ? ajouterJours(precedente.arrete, 1) : ajouterJours(ajouterMois(lu.arrete, -1), 1);
   const cartes = vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL" && (c.compteDebit === compte?.id || !c.compteDebit));
-  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= lu.arrete && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && !o.dateDebit)));
+  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= lu.arrete && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && (!o.dateDebit || o.debitEstime))));
   const total = -somme(ops, o => versCentimes(o.montant)) / 100;
   const parCarte = cartes.map(c => ({compte: c, total: -somme(ops.filter(o => o.compte === c.id), o => versCentimes(o.montant)) / 100})).filter(x => x.total);
   return {lu, compte, deja, debut, ops, total, parCarte, ecart: Math.round((lu.montant - total) * 100) / 100};
@@ -1995,7 +1996,7 @@ function preparerFacture(lu, compte){
 function appliquerFacture(prep){
   const f = enregistrer("factures", Object.assign(prep.deja || {}, {arrete: prep.lu.arrete, dateDebit: prep.lu.dateDebit, dateValeur: prep.lu.dateValeur,
     montant: prep.lu.montant, compteDebit: prep.compte.id, fichier: prep.lu.nom, ecart: prep.ecart, debutPeriode: prep.debut}));
-  for (const o of prep.ops) enregistrer("operations", Object.assign(o, {dateDebit: prep.lu.dateDebit, facture: f.id}));
+  for (const o of prep.ops) enregistrer("operations", Object.assign(o, {dateDebit: prep.lu.dateDebit, debitEstime: false, facture: f.id}));
   const empreinte = "facture|" + prep.compte.id + "|" + prep.lu.arrete;
   if (!vivants("operations").some(o => o.empreinte === empreinte)){
     enregistrer("operations", {compte: prep.compte.id, date: prep.lu.dateDebit, dateDebit: prep.lu.dateDebit, montant: -prep.lu.montant,
@@ -2048,6 +2049,51 @@ function affecterDebitsAmex(){
     if (n < 0) continue;
     for (const o of achats.slice(0, n + 1)) enregistrer("operations", Object.assign(o, {dateDebit: prlv.date, paiementAmex: p.id}));
   }
+}
+
+/* Achats carte repris d'un historique, sans facture ni prélèvement rattachés : date de débit estimée (debitEstime).
+   Cartes LCL : arrêté au dernier jour ouvré du mois de l'achat, ou du mois suivant si l'achat lui est postérieur.
+   Amex : chaque prélèvement « American Express » du compte de débit solde, dans l'ordre, les achats les plus anciens
+   dont la somme lui est égale (à 1 € près) ; un achat ancien resté seul va au prélèvement qui le suit.
+   Un débit postérieur à la dernière donnée connue reste « à venir » : c'est l'encours. Renvoie le nombre d'opérations modifiées. */
+function estimerDebitsCartes(){
+  const ops = vivants("operations");
+  const fin = ops.reduce((m, o) => o.date > m ? o.date : m, "");
+  const visee = o => o.origine === "reprise" && !o.facture && !o.paiementAmex && !(o.lien && o.montant > 0)
+    && (!o.dateDebit || o.debitEstime || o.dateDebit === o.date);
+  const parDate = (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+  const voulu = new Map();
+  for (const c of vivants("comptes").filter(c => c.type === "carte")){
+    const achats = ops.filter(o => o.compte === c.id && visee(o)).sort(parDate);
+    if (c.banque === "LCL"){
+      for (const o of achats){
+        let a = dernierJourOuvre(o.date);
+        if (o.date > a) a = dernierJourOuvre(ajouterMois(debutDeMois(o.date), 1));
+        voulu.set(o, a <= fin ? a : null);
+      }
+    } else if (c.carte === "AMEX"){
+      const prlvs = ops.filter(o => o.compte === c.compteDebit && o.montant < 0 && /AMERICAN EXPRESS/i.test(o.libelle)).sort(parDate);
+      let reste = achats.slice(), dernier = null;
+      for (const p of prlvs){
+        const cand = reste.filter(o => o.date < p.date);
+        let cumul = 0, n = -1;
+        for (let i = 0; i < cand.length; i++){ cumul += -versCentimes(cand[i].montant); if (Math.abs(cumul + versCentimes(p.montant)) <= 100){ n = i; break; } }
+        if (n < 0) continue;
+        for (const o of cand.slice(0, n + 1)) voulu.set(o, p.date);
+        reste = reste.filter(o => !voulu.has(o)); dernier = p.date;
+      }
+      for (const o of reste){
+        const suivant = dernier && o.date < ajouterJours(dernier, -40) ? prlvs.find(p => p.date > o.date) : null;
+        voulu.set(o, suivant ? suivant.date : null);
+      }
+    }
+  }
+  let n = 0;
+  for (const [o, d] of voulu){
+    if ((o.dateDebit || null) === d && !!o.debitEstime === !!d) continue;
+    enregistrer("operations", Object.assign(o, {dateDebit: d, debitEstime: !!d})); n++;
+  }
+  return n;
 }
 
 /* ---------- Plan importé d'un fichier JSON : budgets, échéances et règles ----------
@@ -2236,7 +2282,7 @@ function appliquerReprise(prep, options){
       const emp = empreintes(cid, liste);
       liste.forEach((x, i) => {
         if (idx.has(emp[i])) return;
-        const op = {compte: cid, date: x.date, dateDebit: compte.type === "carte" ? x.date : x.date, montant: Math.round(x.montant * 100) / 100,
+        const op = {compte: cid, date: x.date, dateDebit: compte.type === "carte" ? null : x.date, montant: Math.round(x.montant * 100) / 100,
           libelle: x.libelle, detail: x.detail, ville: x.ville, ref: x.reference, categorie: x.categorie || "À préciser", sousCategorie: x.sousCategorie || "",
           nature: x.nature || "Courante", lieu: x.lieu, pertinent: x.pertinent, empreinte: emp[i], origine: "reprise", statut: "classe", verrou: true, justificatifs: []};
         if (x.categorie) ajouterCategorieSilencieuse(x.categorie, x.sousCategorie);
@@ -2255,6 +2301,7 @@ function appliquerReprise(prep, options){
       lignes: JSON.parse(JSON.stringify(prep.budget.lignes)), origine: budget.id});
   }
   if (o.echeances) for (const e of prep.echeances) enregistrer("echeances", Object.assign({compte: courant.id}, e));
+  estimerDebitsCartes();
   apparierTransferts();
   return {operations: n, budget};
 }
@@ -3114,7 +3161,7 @@ function ecranChoixStockage(boite){
     liste.appendChild(h("button", {onclick: async () => {
       try { const nom = await adaptateurDossier.choisir(); await definirReglage("adaptateur", "dossier"); message("Dossier « " + nom + " » choisi."); afficherVerrou(); }
       catch (e){ if (e.name !== "AbortError") message(e.message, true); }
-    }}, "Dossier OneDrive de ce PC", h("small", null, "Choisissez le dossier « OneDrive › Applications › Budget foyer » (à créer s'il n'existe pas). Aucune inscription Azure nécessaire.")));
+    }}, "Dossier OneDrive de ce PC", h("small", null, "Choisissez un dossier de votre OneDrive, par exemple « OneDrive › Budget foyer ». Aucune inscription Azure nécessaire.")));
   }
   liste.appendChild(h("button", {onclick: () => ecranGraph(vider(boite))}, "OneDrive en ligne (Microsoft)", h("small", null, "Pour les téléphones, ou un PC sans OneDrive installé. Demande l'identifiant de l'application inscrite sur Azure.")));
   liste.appendChild(h("button", {onclick: async () => { await definirReglage("adaptateur", "local"); afficherVerrou(); }}, "Ce navigateur seulement", h("small", null, "Pour un essai : rien n'est partagé avec les autres appareils.")));
@@ -4684,6 +4731,23 @@ async function autotest(){
     /* --- Amex CSV --- */
     const amex = lireCsv("activity.csv", 'Date,Description,Montant\n03/14/2027,RESTAURANT TEST PARIS,"84,50"\n03/20/2027,PRELEVEMENT AUTOMATIQUE,"-84,50"\n');
     v("Amex : date mm/jj et signe", [amex.lignes[0].date, amex.lignes[0].montant, amex.lignes[1].montant], ["2027-03-14", -84.5, 84.5]);
+
+    /* --- Reprise d'historique : date de débit estimée des achats carte, encours à venir --- */
+    {
+      const avant = LIVRE; LIVRE = livreVide("Essai reprise");
+      const cc = enregistrer("comptes", {nom: "Joint", type: "courant", banque: "LCL"});
+      const kl = enregistrer("comptes", {nom: "Cartes", type: "carte", banque: "LCL", carte: "LCL-NV", compteDebit: cc.id});
+      const ka = enregistrer("comptes", {nom: "Amex", type: "carte", banque: "Amex", carte: "AMEX", compteDebit: cc.id});
+      const op = (compte, date, montant, libelle) => enregistrer("operations", {compte, date, dateDebit: date, montant, libelle, origine: "reprise"});
+      const l1 = op(kl.id, "2027-02-10", -20, "A"), l2 = op(kl.id, "2027-02-27", -5, "B"), l3 = op(kl.id, "2027-03-10", -7, "C");
+      const a1 = op(ka.id, "2027-01-20", -30, "D"), a2 = op(ka.id, "2027-02-02", -10, "E"), a3 = op(ka.id, "2027-02-09", -15, "F");
+      op(cc.id, "2027-02-12", -40, "PRLV SEPA AMERICAN EXPRESS"); op(cc.id, "2027-03-15", 0, "fin des données");
+      estimerDebitsCartes();
+      v("reprise LCL : débit au dernier jour ouvré, puis à venir", [l1.dateDebit, l2.dateDebit, l3.dateDebit], ["2027-02-26", null, null]);
+      v("reprise Amex : achats soldés par le prélèvement, suivant à venir", [a1.dateDebit, a2.dateDebit, a3.dateDebit], ["2027-02-12", "2027-02-12", null]);
+      v("reprise : correction idempotente", estimerDebitsCartes(), 0);
+      LIVRE = avant;
+    }
 
     /* --- Classement : règle, puis apprentissage --- */
     enregistrer("regles", {nom: "eau", contient: "EAU EXEMPLE", categorie: "Logement", sousCategorie: "Eau", lieu: "Autres", priorite: 10, active: true});

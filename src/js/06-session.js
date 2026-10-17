@@ -50,6 +50,7 @@ async function ouvrirLivre(motDePasse, souvenir){
   LIVRE = completerLivre(livre);
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";
+  estimerDebitsCartes();   // livres repris avant la correction du 17/10/2026 : achats carte datés comme débités le jour même
   if (!distant) await ecrireCache(source, false).catch(() => {});
   if (LIVRE_MODIFIE) planifierSauvegarde();
   setTimeout(() => synchroniser().catch(() => {}), 500);

@@ -93,7 +93,7 @@ Références : [inscription d'une application (Microsoft Graph)](https://learn.m
 
    Le navigateur du téléphone restera connecté à ce compte Microsoft : un navigateur ou un profil réservé à l'application est préférable. Les applications monopages doivent renouveler leur connexion environ une fois par jour s'il n'y a pas eu d'usage : un clic suffit.
 
-**Sans inscription Microsoft**, les PC fonctionnent par la voie « Dossier OneDrive de ce PC » : choisissez par exemple `OneDrive › Documents › Budget foyer`. Seule la saisie au téléphone manque alors. Si la voie en ligne est activée plus tard, copiez `budget.chiffre` dans `OneDrive › Applications › Budget foyer` après la première connexion.
+**Sans inscription Microsoft**, les PC fonctionnent par la voie « Dossier OneDrive de ce PC » : choisissez par exemple `OneDrive › Budget foyer`. Seule la saisie au téléphone manque alors. Si la voie en ligne est activée plus tard, déplacez le contenu de ce dossier (`budget.chiffre`, `justificatifs`, `sauvegardes`) dans `OneDrive › Applications › Budget foyer` après la première connexion, puis choisissez ce nouveau dossier sur chaque PC.
 
 ---
 

@@ -133,7 +133,7 @@ function appliquerReprise(prep, options){
       const emp = empreintes(cid, liste);
       liste.forEach((x, i) => {
         if (idx.has(emp[i])) return;
-        const op = {compte: cid, date: x.date, dateDebit: compte.type === "carte" ? x.date : x.date, montant: Math.round(x.montant * 100) / 100,
+        const op = {compte: cid, date: x.date, dateDebit: compte.type === "carte" ? null : x.date, montant: Math.round(x.montant * 100) / 100,
           libelle: x.libelle, detail: x.detail, ville: x.ville, ref: x.reference, categorie: x.categorie || "À préciser", sousCategorie: x.sousCategorie || "",
           nature: x.nature || "Courante", lieu: x.lieu, pertinent: x.pertinent, empreinte: emp[i], origine: "reprise", statut: "classe", verrou: true, justificatifs: []};
         if (x.categorie) ajouterCategorieSilencieuse(x.categorie, x.sousCategorie);
@@ -152,6 +152,7 @@ function appliquerReprise(prep, options){
       lignes: JSON.parse(JSON.stringify(prep.budget.lignes)), origine: budget.id});
   }
   if (o.echeances) for (const e of prep.echeances) enregistrer("echeances", Object.assign({compte: courant.id}, e));
+  estimerDebitsCartes();
   apparierTransferts();
   return {operations: n, budget};
 }

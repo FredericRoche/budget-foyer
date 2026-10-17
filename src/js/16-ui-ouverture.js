@@ -66,7 +66,7 @@ function ecranChoixStockage(boite){
     liste.appendChild(h("button", {onclick: async () => {
       try { const nom = await adaptateurDossier.choisir(); await definirReglage("adaptateur", "dossier"); message("Dossier « " + nom + " » choisi."); afficherVerrou(); }
       catch (e){ if (e.name !== "AbortError") message(e.message, true); }
-    }}, "Dossier OneDrive de ce PC", h("small", null, "Choisissez le dossier « OneDrive › Applications › Budget foyer » (à créer s'il n'existe pas). Aucune inscription Azure nécessaire.")));
+    }}, "Dossier OneDrive de ce PC", h("small", null, "Choisissez un dossier de votre OneDrive, par exemple « OneDrive › Budget foyer ». Aucune inscription Azure nécessaire.")));
   }
   liste.appendChild(h("button", {onclick: () => ecranGraph(vider(boite))}, "OneDrive en ligne (Microsoft)", h("small", null, "Pour les téléphones, ou un PC sans OneDrive installé. Demande l'identifiant de l'application inscrite sur Azure.")));
   liste.appendChild(h("button", {onclick: async () => { await definirReglage("adaptateur", "local"); afficherVerrou(); }}, "Ce navigateur seulement", h("small", null, "Pour un essai : rien n'est partagé avec les autres appareils.")));

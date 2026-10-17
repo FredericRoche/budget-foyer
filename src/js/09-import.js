@@ -138,7 +138,7 @@ function preparerFacture(lu, compte){
   // Sans facture précédente : la période couvre le mois qui précède l'arrêté.
   const debut = precedente ? ajouterJours(precedente.arrete, 1) : ajouterJours(ajouterMois(lu.arrete, -1), 1);
   const cartes = vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL" && (c.compteDebit === compte?.id || !c.compteDebit));
-  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= lu.arrete && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && !o.dateDebit)));
+  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= lu.arrete && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && (!o.dateDebit || o.debitEstime))));
   const total = -somme(ops, o => versCentimes(o.montant)) / 100;
   const parCarte = cartes.map(c => ({compte: c, total: -somme(ops.filter(o => o.compte === c.id), o => versCentimes(o.montant)) / 100})).filter(x => x.total);
   return {lu, compte, deja, debut, ops, total, parCarte, ecart: Math.round((lu.montant - total) * 100) / 100};
@@ -146,7 +146,7 @@ function preparerFacture(lu, compte){
 function appliquerFacture(prep){
   const f = enregistrer("factures", Object.assign(prep.deja || {}, {arrete: prep.lu.arrete, dateDebit: prep.lu.dateDebit, dateValeur: prep.lu.dateValeur,
     montant: prep.lu.montant, compteDebit: prep.compte.id, fichier: prep.lu.nom, ecart: prep.ecart, debutPeriode: prep.debut}));
-  for (const o of prep.ops) enregistrer("operations", Object.assign(o, {dateDebit: prep.lu.dateDebit, facture: f.id}));
+  for (const o of prep.ops) enregistrer("operations", Object.assign(o, {dateDebit: prep.lu.dateDebit, debitEstime: false, facture: f.id}));
   const empreinte = "facture|" + prep.compte.id + "|" + prep.lu.arrete;
   if (!vivants("operations").some(o => o.empreinte === empreinte)){
     enregistrer("operations", {compte: prep.compte.id, date: prep.lu.dateDebit, dateDebit: prep.lu.dateDebit, montant: -prep.lu.montant,
@@ -199,6 +199,51 @@ function affecterDebitsAmex(){
     if (n < 0) continue;
     for (const o of achats.slice(0, n + 1)) enregistrer("operations", Object.assign(o, {dateDebit: prlv.date, paiementAmex: p.id}));
   }
+}
+
+/* Achats carte repris d'un historique, sans facture ni prélèvement rattachés : date de débit estimée (debitEstime).
+   Cartes LCL : arrêté au dernier jour ouvré du mois de l'achat, ou du mois suivant si l'achat lui est postérieur.
+   Amex : chaque prélèvement « American Express » du compte de débit solde, dans l'ordre, les achats les plus anciens
+   dont la somme lui est égale (à 1 € près) ; un achat ancien resté seul va au prélèvement qui le suit.
+   Un débit postérieur à la dernière donnée connue reste « à venir » : c'est l'encours. Renvoie le nombre d'opérations modifiées. */
+function estimerDebitsCartes(){
+  const ops = vivants("operations");
+  const fin = ops.reduce((m, o) => o.date > m ? o.date : m, "");
+  const visee = o => o.origine === "reprise" && !o.facture && !o.paiementAmex && !(o.lien && o.montant > 0)
+    && (!o.dateDebit || o.debitEstime || o.dateDebit === o.date);
+  const parDate = (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+  const voulu = new Map();
+  for (const c of vivants("comptes").filter(c => c.type === "carte")){
+    const achats = ops.filter(o => o.compte === c.id && visee(o)).sort(parDate);
+    if (c.banque === "LCL"){
+      for (const o of achats){
+        let a = dernierJourOuvre(o.date);
+        if (o.date > a) a = dernierJourOuvre(ajouterMois(debutDeMois(o.date), 1));
+        voulu.set(o, a <= fin ? a : null);
+      }
+    } else if (c.carte === "AMEX"){
+      const prlvs = ops.filter(o => o.compte === c.compteDebit && o.montant < 0 && /AMERICAN EXPRESS/i.test(o.libelle)).sort(parDate);
+      let reste = achats.slice(), dernier = null;
+      for (const p of prlvs){
+        const cand = reste.filter(o => o.date < p.date);
+        let cumul = 0, n = -1;
+        for (let i = 0; i < cand.length; i++){ cumul += -versCentimes(cand[i].montant); if (Math.abs(cumul + versCentimes(p.montant)) <= 100){ n = i; break; } }
+        if (n < 0) continue;
+        for (const o of cand.slice(0, n + 1)) voulu.set(o, p.date);
+        reste = reste.filter(o => !voulu.has(o)); dernier = p.date;
+      }
+      for (const o of reste){
+        const suivant = dernier && o.date < ajouterJours(dernier, -40) ? prlvs.find(p => p.date > o.date) : null;
+        voulu.set(o, suivant ? suivant.date : null);
+      }
+    }
+  }
+  let n = 0;
+  for (const [o, d] of voulu){
+    if ((o.dateDebit || null) === d && !!o.debitEstime === !!d) continue;
+    enregistrer("operations", Object.assign(o, {dateDebit: d, debitEstime: !!d})); n++;
+  }
+  return n;
 }
 
 /* ---------- Plan importé d'un fichier JSON : budgets, échéances et règles ----------
