@@ -209,6 +209,31 @@ function affecterDebitsAmex(){
    Amex : chaque prélèvement « American Express » du compte de débit solde, dans l'ordre, les achats les plus anciens
    dont la somme lui est égale (à 1 € près) ; un achat ancien resté seul va au prélèvement qui le suit.
    Un débit postérieur à la dernière donnée connue reste « à venir » : c'est l'encours. Renvoie le nombre d'opérations modifiées. */
+/* Achats (triés par date) d'une suite de jours dont la somme vaut cible (centimes, positive) ; le dernier jour
+   peut n'être pris qu'en partie. Renvoie la liste retenue, ou null. */
+function suiteSoldee(cand, cible){
+  const jours = [...new Set(cand.map(o => o.date))].sort();
+  const par = Object.fromEntries(jours.map(d => [d, cand.filter(o => o.date === d)]));
+  const sousEnsembles = l => {
+    if (l.length > 8) return [l];
+    const r = [];
+    for (let m = (1 << l.length) - 1; m > 0; m--) r.push(l.filter((_, i) => m & (1 << i)));
+    return r.sort((a, b) => b.length - a.length);
+  };
+  const total = l => somme(l, o => -versCentimes(o.montant));
+  for (const tol of [1, 100]){
+    for (let e = jours.length - 1; e >= 0; e--){
+      const fins = sousEnsembles(par[jours[e]]).map(l => ({l, t: total(l)}));
+      let base = 0, pleins = [];
+      for (let s = e; s >= 0; s--){
+        if (s < e){ base += total(par[jours[s]]); pleins = par[jours[s]].concat(pleins); }
+        const f = fins.find(x => Math.abs(base + x.t - cible) < tol);
+        if (f) return pleins.concat(f.l);
+      }
+    }
+  }
+  return null;
+}
 function estimerDebitsCartes(){
   const ops = vivants("operations");
   const fin = ops.reduce((m, o) => o.date > m ? o.date : m, "");
@@ -225,16 +250,20 @@ function estimerDebitsCartes(){
         voulu.set(o, a <= fin ? a : null);
       }
     } else if (c.carte === "AMEX"){
+      // Chaque prélèvement solde les achats d'une suite de jours des 45 jours qui le précèdent, de somme égale
+      // (au centime, puis à 1 € près) ; le dernier jour peut n'être pris qu'en partie (arrêté en cours de
+      // journée). La suite qui finit le plus tard est retenue. Le prélèvement du relevé antérieur au début
+      // des données n'a pas ses achats : il reste sans correspondance.
       const prlvs = ops.filter(o => o.compte === c.compteDebit && o.montant < 0 && /AMERICAN EXPRESS/i.test(o.libelle)).sort(parDate);
-      let reste = achats.slice(), dernier = null;
+      let reste = achats.slice();
       for (const p of prlvs){
-        const cand = reste.filter(o => o.date < p.date);
-        let cumul = 0, n = -1;
-        for (let i = 0; i < cand.length; i++){ cumul += -versCentimes(cand[i].montant); if (Math.abs(cumul + versCentimes(p.montant)) <= 100){ n = i; break; } }
-        if (n < 0) continue;
-        for (const o of cand.slice(0, n + 1)) voulu.set(o, p.date);
-        reste = reste.filter(o => !voulu.has(o)); dernier = p.date;
+        const choix = suiteSoldee(reste.filter(o => o.date < p.date && o.date >= ajouterJours(p.date, -45)), -versCentimes(p.montant));
+        if (!choix) continue;
+        for (const o of choix) voulu.set(o, p.date);
+        reste = reste.filter(o => !voulu.has(o));
       }
+      // Achats restés seuls : au prélèvement qui les suit s'ils sont anciens ; les plus récents forment l'encours.
+      const dernier = prlvs.length ? prlvs[prlvs.length - 1].date : null;
       for (const o of reste){
         const suivant = dernier && o.date < ajouterJours(dernier, -40) ? prlvs.find(p => p.date > o.date) : null;
         voulu.set(o, suivant ? suivant.date : null);

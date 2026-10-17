@@ -36,7 +36,9 @@ function simulerTresorerie(options){
   }
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
   // 2. Encours connus des cartes rattachées à ce compte
-  const amexJour = LIVRE.parametres.amexJourPrelevement || 27;
+  // Jour du prélèvement Amex : réglage, sinon jour médian des trois derniers prélèvements constatés, sinon le 27.
+  const vus = vivants("operations").filter(x => x.compte === compte.id && x.montant < 0 && /AMERICAN EXPRESS/i.test(x.libelle)).sort((a, b) => a.date < b.date ? 1 : -1).slice(0, 3).map(x => +x.date.slice(8, 10)).sort((a, b) => a - b);
+  const amexJour = LIVRE.parametres.amexJourPrelevement || (vus.length ? vus[Math.floor(vus.length / 2)] : 27);
   for (const c of vivants("comptes").filter(c => c.type === "carte" && (c.compteDebit === compte.id || !c.compteDebit))){
     const encours = vivants("operations").filter(x => x.compte === c.id && !x.dateDebit && !(x.lien && x.montant > 0) && x.date <= o.depart);
     if (!encours.length) continue;

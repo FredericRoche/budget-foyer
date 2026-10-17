@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-M26/Bpsd4Mra475VCtNwR49pwGonrnxVPQMBKNcTJkQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qPGBLes3bOrRMBwQt5l1RlpB/HANclAoezrCGb+anZ4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -285,7 +285,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-17.1655";
+const VERSION_APP = "2026-10-17.1728";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2067,6 +2067,31 @@ function affecterDebitsAmex(){
    Amex : chaque prélèvement « American Express » du compte de débit solde, dans l'ordre, les achats les plus anciens
    dont la somme lui est égale (à 1 € près) ; un achat ancien resté seul va au prélèvement qui le suit.
    Un débit postérieur à la dernière donnée connue reste « à venir » : c'est l'encours. Renvoie le nombre d'opérations modifiées. */
+/* Achats (triés par date) d'une suite de jours dont la somme vaut cible (centimes, positive) ; le dernier jour
+   peut n'être pris qu'en partie. Renvoie la liste retenue, ou null. */
+function suiteSoldee(cand, cible){
+  const jours = [...new Set(cand.map(o => o.date))].sort();
+  const par = Object.fromEntries(jours.map(d => [d, cand.filter(o => o.date === d)]));
+  const sousEnsembles = l => {
+    if (l.length > 8) return [l];
+    const r = [];
+    for (let m = (1 << l.length) - 1; m > 0; m--) r.push(l.filter((_, i) => m & (1 << i)));
+    return r.sort((a, b) => b.length - a.length);
+  };
+  const total = l => somme(l, o => -versCentimes(o.montant));
+  for (const tol of [1, 100]){
+    for (let e = jours.length - 1; e >= 0; e--){
+      const fins = sousEnsembles(par[jours[e]]).map(l => ({l, t: total(l)}));
+      let base = 0, pleins = [];
+      for (let s = e; s >= 0; s--){
+        if (s < e){ base += total(par[jours[s]]); pleins = par[jours[s]].concat(pleins); }
+        const f = fins.find(x => Math.abs(base + x.t - cible) < tol);
+        if (f) return pleins.concat(f.l);
+      }
+    }
+  }
+  return null;
+}
 function estimerDebitsCartes(){
   const ops = vivants("operations");
   const fin = ops.reduce((m, o) => o.date > m ? o.date : m, "");
@@ -2083,16 +2108,20 @@ function estimerDebitsCartes(){
         voulu.set(o, a <= fin ? a : null);
       }
     } else if (c.carte === "AMEX"){
+      // Chaque prélèvement solde les achats d'une suite de jours des 45 jours qui le précèdent, de somme égale
+      // (au centime, puis à 1 € près) ; le dernier jour peut n'être pris qu'en partie (arrêté en cours de
+      // journée). La suite qui finit le plus tard est retenue. Le prélèvement du relevé antérieur au début
+      // des données n'a pas ses achats : il reste sans correspondance.
       const prlvs = ops.filter(o => o.compte === c.compteDebit && o.montant < 0 && /AMERICAN EXPRESS/i.test(o.libelle)).sort(parDate);
-      let reste = achats.slice(), dernier = null;
+      let reste = achats.slice();
       for (const p of prlvs){
-        const cand = reste.filter(o => o.date < p.date);
-        let cumul = 0, n = -1;
-        for (let i = 0; i < cand.length; i++){ cumul += -versCentimes(cand[i].montant); if (Math.abs(cumul + versCentimes(p.montant)) <= 100){ n = i; break; } }
-        if (n < 0) continue;
-        for (const o of cand.slice(0, n + 1)) voulu.set(o, p.date);
-        reste = reste.filter(o => !voulu.has(o)); dernier = p.date;
+        const choix = suiteSoldee(reste.filter(o => o.date < p.date && o.date >= ajouterJours(p.date, -45)), -versCentimes(p.montant));
+        if (!choix) continue;
+        for (const o of choix) voulu.set(o, p.date);
+        reste = reste.filter(o => !voulu.has(o));
       }
+      // Achats restés seuls : au prélèvement qui les suit s'ils sont anciens ; les plus récents forment l'encours.
+      const dernier = prlvs.length ? prlvs[prlvs.length - 1].date : null;
       for (const o of reste){
         const suivant = dernier && o.date < ajouterJours(dernier, -40) ? prlvs.find(p => p.date > o.date) : null;
         voulu.set(o, suivant ? suivant.date : null);
@@ -2809,7 +2838,9 @@ function simulerTresorerie(options){
   }
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
   // 2. Encours connus des cartes rattachées à ce compte
-  const amexJour = LIVRE.parametres.amexJourPrelevement || 27;
+  // Jour du prélèvement Amex : réglage, sinon jour médian des trois derniers prélèvements constatés, sinon le 27.
+  const vus = vivants("operations").filter(x => x.compte === compte.id && x.montant < 0 && /AMERICAN EXPRESS/i.test(x.libelle)).sort((a, b) => a.date < b.date ? 1 : -1).slice(0, 3).map(x => +x.date.slice(8, 10)).sort((a, b) => a - b);
+  const amexJour = LIVRE.parametres.amexJourPrelevement || (vus.length ? vus[Math.floor(vus.length / 2)] : 27);
   for (const c of vivants("comptes").filter(c => c.type === "carte" && (c.compteDebit === compte.id || !c.compteDebit))){
     const encours = vivants("operations").filter(x => x.compte === c.id && !x.dateDebit && !(x.lien && x.montant > 0) && x.date <= o.depart);
     if (!encours.length) continue;
@@ -4751,12 +4782,14 @@ async function autotest(){
       const ka = enregistrer("comptes", {nom: "Amex", type: "carte", banque: "Amex", carte: "AMEX", compteDebit: cc.id});
       const op = (compte, date, montant, libelle) => enregistrer("operations", {compte, date, dateDebit: date, montant, libelle, origine: "reprise"});
       const l1 = op(kl.id, "2027-02-10", -20, "A"), l2 = op(kl.id, "2027-02-25", -5, "B"), l3 = op(kl.id, "2027-03-10", -7, "C");
+      const a0 = op(ka.id, "2027-01-02", -99, "relevé antérieur incomplet");
       const a1 = op(ka.id, "2027-01-20", -30, "D"), a2 = op(ka.id, "2027-02-02", -10, "E"), a3 = op(ka.id, "2027-02-09", -15, "F");
-      op(cc.id, "2027-02-12", -40, "PRLV SEPA AMERICAN EXPRESS"); op(cc.id, "2027-03-15", 0, "fin des données");
+      op(cc.id, "2027-01-12", -250, "PRLV SEPA AMERICAN EXPRESS"); op(cc.id, "2027-02-12", -40, "PRLV SEPA AMERICAN EXPRESS"); op(cc.id, "2027-03-15", 0, "fin des données");
       estimerDebitsCartes();
       v("reprise LCL : débit au dernier jour ouvré, puis à venir", [l1.dateDebit, l2.dateDebit, l3.dateDebit], ["2027-02-26", null, null]);
-      v("reprise Amex : achats soldés par le prélèvement, suivant à venir", [a1.dateDebit, a2.dateDebit, a3.dateDebit], ["2027-02-12", "2027-02-12", null]);
+      v("reprise Amex : achats soldés par le prélèvement, suivant à venir", [a0.dateDebit, a1.dateDebit, a2.dateDebit, a3.dateDebit], ["2027-01-12", "2027-02-12", "2027-02-12", null]);
       v("facture LCL : achats arrêtés deux jours ouvrés avant", finPeriodeCarte("2026-09-30"), "2026-09-28");
+      v("Amex : arrêté en cours de journée (dernier jour pris en partie)", (suiteSoldee([{date: "2027-01-05", montant: -5}, {date: "2027-01-05", montant: -7}, {date: "2027-01-06", montant: -4}, {date: "2027-01-06", montant: -3}], 1500) || []).map(o => o.montant), [-5, -7, -3]);
       v("reprise : correction idempotente", estimerDebitsCartes(), 0);
       LIVRE = avant;
     }
