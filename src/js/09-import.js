@@ -299,6 +299,17 @@ function appliquerPlan(contenu){
     if (e.categorie) ajouterCategorieSilencieuse(e.categorie, e.sousCategorie);
     enregistrer("echeances", Object.assign(existant || {}, {compte: courant?.id || ""}, e)); r.echeances++;
   }
+  // Comptes (ex. compte-titres) et leurs valorisations datées ; un compte de même nom et de même type est repris.
+  for (const cp of contenu.comptes || []){
+    const {valorisations, ...champs} = cp;
+    const existant = vivants("comptes").find(x => x.nom === cp.nom && x.type === cp.type);
+    const compte = enregistrer("comptes", Object.assign(existant || {actif: true}, champs));
+    for (const v of valorisations || []){
+      const deja = vivants("valorisations").find(x => x.compte === compte.id && x.date === v.date);
+      enregistrer("valorisations", Object.assign(deja || {}, {compte: compte.id, date: v.date, valeur: v.valeur, source: v.source || "plan"}));
+    }
+    r.comptes = (r.comptes || 0) + 1;
+  }
   if (contenu.regles?.length) r.regles = appliquerRegles({regles: contenu.regles});
   return r;
 }
