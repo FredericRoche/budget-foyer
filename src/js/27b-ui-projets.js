@@ -13,6 +13,12 @@ function operationsDuProjet(nom, echeances){
   const vaAuProjet = o => regles.some(r => r.categorie === o.categorie && (!r.sousCategorie || r.sousCategorie === o.sousCategorie));
   return vivants("operations").filter(o => o.projet === nom || (!o.projet && o.nature === "Exceptionnelle" && o.montant < 0 && vaAuProjet(o)));
 }
+/* Prochain paiement net : les échéances d'une même date se compensent (reprise du véhicule au jour du solde). */
+function prochainPaiement(prevu){
+  const parDate = new Map(); for (const p of prevu) parDate.set(p.date, (parDate.get(p.date) || 0) + p.montant);
+  const d = [...parDate.keys()].sort().find(k => parDate.get(k) < -0.005);
+  return d ? {date: d, montant: parDate.get(d)} : null;
+}
 function etatProjet(nom){
   const ech = vivants("echeances").filter(e => e.projet === nom && e.active !== false);
   const prevu = ech.flatMap(e => occurrences(e, ajouterJours(aujourdhui(), 1), "2100-12-31").map(d => ({date: d, montant: e.montant, echeance: e}))).sort((a, b) => a.date < b.date ? -1 : 1);
@@ -63,7 +69,7 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
     [h("button", {class: "discret", onclick: () => editerEcheance(null)}, "Nouvelle échéance de projet")]));
   if (!noms.length){ c.appendChild(h("p", {class: "vide"}, "Aucun projet : dans Trésorerie, modifiez une échéance (travaux, voiture…) et donnez-lui un nom de projet.")); return; }
   const etats = noms.map(etatProjet);
-  const proch = etats.flatMap(x => x.prevu.map(p => Object.assign({projet: x.nom}, p))).sort((a, b) => a.date < b.date ? -1 : 1)[0];
+  const proch = etats.map(x => Object.assign({projet: x.nom}, prochainPaiement(x.prevu) || {date: "9999"})).filter(x => x.montant).sort((a, b) => a.date < b.date ? -1 : 1)[0];
   const ind = h("div", {class: "indicateurs"});
   ind.append(carteInd("Coût total des projets", euros(somme(etats, x => x.total), 0), noms.length + " projet(s)"),
     carteInd("Déjà payé", euros(somme(etats, x => x.paye), 0), somme(etats, x => x.ops.length) + " opération(s)"),
@@ -71,7 +77,7 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
     carteInd("Prochain paiement", proch ? euros(-proch.montant, 0) : "—", proch ? dateFr(proch.date) + " · " + proch.projet : ""));
   c.appendChild(ind);
   c.appendChild(tableau([{titre: "Projet"}, {titre: "Coût total", num: true}, {titre: "Payé", num: true}, {titre: "Reste", num: true}, {titre: "Avancement"}, {titre: "Prochain paiement"}], etats, {ligne: x => {
-    const pr = x.prevu[0]; const pct = x.total ? Math.round(x.paye / x.total * 100) : 0;
+    const pr = prochainPaiement(x.prevu); const pct = x.total ? Math.round(x.paye / x.total * 100) : 0;
     return h("tr", {class: "cliquable" + (etat.projet === x.nom ? " choisie" : ""), onclick: () => { etat.projet = x.nom; rafraichirEcran(); }},
       h("td", null, h("strong", null, x.nom)), h("td", {class: "num"}, euros(x.total, 0)), h("td", {class: "num"}, euros(x.paye, 0)), h("td", {class: "num"}, euros(x.reste, 0)),
       h("td", null, h("div", {class: "jauge"}, h("span", {style: {width: Math.min(100, pct) + "%"}})), h("span", {class: "petit discret"}, pct + " %")),

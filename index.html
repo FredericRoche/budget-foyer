@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-w5bDMrOt8vhs7wJIMWM4x6rXTaH/f8zJyqpKdzNXsVc=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-YLduXV0u5D+357vHzRcOubum/Z/b/didvDmWUc6RdrA=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -285,7 +285,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-17.2113";
+const VERSION_APP = "2026-10-17.2117";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4631,6 +4631,12 @@ function operationsDuProjet(nom, echeances){
   const vaAuProjet = o => regles.some(r => r.categorie === o.categorie && (!r.sousCategorie || r.sousCategorie === o.sousCategorie));
   return vivants("operations").filter(o => o.projet === nom || (!o.projet && o.nature === "Exceptionnelle" && o.montant < 0 && vaAuProjet(o)));
 }
+/* Prochain paiement net : les échéances d'une même date se compensent (reprise du véhicule au jour du solde). */
+function prochainPaiement(prevu){
+  const parDate = new Map(); for (const p of prevu) parDate.set(p.date, (parDate.get(p.date) || 0) + p.montant);
+  const d = [...parDate.keys()].sort().find(k => parDate.get(k) < -0.005);
+  return d ? {date: d, montant: parDate.get(d)} : null;
+}
 function etatProjet(nom){
   const ech = vivants("echeances").filter(e => e.projet === nom && e.active !== false);
   const prevu = ech.flatMap(e => occurrences(e, ajouterJours(aujourdhui(), 1), "2100-12-31").map(d => ({date: d, montant: e.montant, echeance: e}))).sort((a, b) => a.date < b.date ? -1 : 1);
@@ -4681,7 +4687,7 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
     [h("button", {class: "discret", onclick: () => editerEcheance(null)}, "Nouvelle échéance de projet")]));
   if (!noms.length){ c.appendChild(h("p", {class: "vide"}, "Aucun projet : dans Trésorerie, modifiez une échéance (travaux, voiture…) et donnez-lui un nom de projet.")); return; }
   const etats = noms.map(etatProjet);
-  const proch = etats.flatMap(x => x.prevu.map(p => Object.assign({projet: x.nom}, p))).sort((a, b) => a.date < b.date ? -1 : 1)[0];
+  const proch = etats.map(x => Object.assign({projet: x.nom}, prochainPaiement(x.prevu) || {date: "9999"})).filter(x => x.montant).sort((a, b) => a.date < b.date ? -1 : 1)[0];
   const ind = h("div", {class: "indicateurs"});
   ind.append(carteInd("Coût total des projets", euros(somme(etats, x => x.total), 0), noms.length + " projet(s)"),
     carteInd("Déjà payé", euros(somme(etats, x => x.paye), 0), somme(etats, x => x.ops.length) + " opération(s)"),
@@ -4689,7 +4695,7 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
     carteInd("Prochain paiement", proch ? euros(-proch.montant, 0) : "—", proch ? dateFr(proch.date) + " · " + proch.projet : ""));
   c.appendChild(ind);
   c.appendChild(tableau([{titre: "Projet"}, {titre: "Coût total", num: true}, {titre: "Payé", num: true}, {titre: "Reste", num: true}, {titre: "Avancement"}, {titre: "Prochain paiement"}], etats, {ligne: x => {
-    const pr = x.prevu[0]; const pct = x.total ? Math.round(x.paye / x.total * 100) : 0;
+    const pr = prochainPaiement(x.prevu); const pct = x.total ? Math.round(x.paye / x.total * 100) : 0;
     return h("tr", {class: "cliquable" + (etat.projet === x.nom ? " choisie" : ""), onclick: () => { etat.projet = x.nom; rafraichirEcran(); }},
       h("td", null, h("strong", null, x.nom)), h("td", {class: "num"}, euros(x.total, 0)), h("td", {class: "num"}, euros(x.paye, 0)), h("td", {class: "num"}, euros(x.reste, 0)),
       h("td", null, h("div", {class: "jauge"}, h("span", {style: {width: Math.min(100, pct) + "%"}})), h("span", {class: "petit discret"}, pct + " %")),
@@ -5093,6 +5099,7 @@ async function autotest(){
     const rp = appliquerPlan({comptes: [{nom: "Titres essai", type: "titres", banque: "Essai", valorisations: [{date: "2027-03-01", valeur: 1000}, {date: "2027-05-01", valeur: 0}]}]});
     const ct = vivants("comptes").find(x => x.nom === "Titres essai");
     v("plan : compte-titres et valorisations, hors épargne", [rp.comptes, soldeCompte(ct, "2027-04-01"), soldeCompte(ct, "2027-06-01"), estMobilisable(ct)], [1, 1000, 0, false]);
+    v("projet : prochain paiement net de la reprise du même jour", prochainPaiement([{date: "2027-06-15", montant: -61092}, {date: "2027-06-15", montant: 20000}, {date: "2027-07-01", montant: -5}]), {date: "2027-06-15", montant: -41092});
     const tj = simulerTresorerie({depart: "2027-03-31", jours: 120, perimetre: "tout"});
     v("compte joint réel : marche courante + capital", Math.round(tj.jours[tj.jours.length - 1].solde - s2.jours[s2.jours.length - 1].solde), 20000);
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
