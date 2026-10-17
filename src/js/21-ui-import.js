@@ -51,6 +51,8 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
         (detail.prep.doublonsLcl ? detail.prep.doublonsLcl + " doublon(s) LCL écarté(s) (règle ⌈n/2⌉). " : "")));
     }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));
+  // Pleine largeur : la routine du mois se replie sous la liste au lieu d'occuper une colonne en permanence
+  grille.className = "";
   grille.appendChild(gauche);
   grille.appendChild(carteRoutine());
   c.appendChild(grille);
@@ -78,7 +80,10 @@ function carteRoutine(){
   const factures = vivants("factures").sort((a, b) => a.arrete < b.arrete ? 1 : -1)[0];
   if (comptesDeType("carte").some(c => c.banque === "LCL")) ul.appendChild(h("li", null, h("span", null, "Facture des cartes LCL, PDF"), h("span", {class: factures && ecartJours(factures.dateDebit, aujourdhui()) < 35 ? "pos" : "discret"}, factures ? "arrêté " + dateFr(factures.arrete) : "jamais")));
   if (!ul.children.length) ul.appendChild(h("li", null, h("span", {class: "discret"}, "Aucun compte encore : déposez un premier relevé.")));
-  return h("section", {class: "carte"}, h("h2", null, "Routine du mois"), ul);
+  const d = h("details", {class: "carte", style: {marginTop: "1rem"}}, h("summary", {style: {cursor: "pointer"}}, h("strong", null, "Routine du mois"), h("span", {class: "petit discret"}, " — date du dernier relevé de chaque compte (cliquer pour déplier)")), ul);
+  try { d.open = localStorage.getItem("routineOuverte") === "1"; } catch (e) {}
+  d.addEventListener("toggle", () => { try { localStorage.setItem("routineOuverte", d.open ? "1" : "0"); } catch (e) {} });
+  return d;
 }
 
 async function deposerFichiers(fichiers){

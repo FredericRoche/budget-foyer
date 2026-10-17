@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-CSh781hDZ4WHFb72gylMmRBVUnV4XtQcMuBqGOV5WhE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vfH+3IgsjIb6hg92z5FaapXSpQ6Ui0h3E8l4YQqvF/8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -285,7 +285,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-17.2245";
+const VERSION_APP = "2026-10-17.2251";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3803,6 +3803,8 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
         (detail.prep.doublonsLcl ? detail.prep.doublonsLcl + " doublon(s) LCL écarté(s) (règle ⌈n/2⌉). " : "")));
     }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));
+  // Pleine largeur : la routine du mois se replie sous la liste au lieu d'occuper une colonne en permanence
+  grille.className = "";
   grille.appendChild(gauche);
   grille.appendChild(carteRoutine());
   c.appendChild(grille);
@@ -3830,7 +3832,10 @@ function carteRoutine(){
   const factures = vivants("factures").sort((a, b) => a.arrete < b.arrete ? 1 : -1)[0];
   if (comptesDeType("carte").some(c => c.banque === "LCL")) ul.appendChild(h("li", null, h("span", null, "Facture des cartes LCL, PDF"), h("span", {class: factures && ecartJours(factures.dateDebit, aujourdhui()) < 35 ? "pos" : "discret"}, factures ? "arrêté " + dateFr(factures.arrete) : "jamais")));
   if (!ul.children.length) ul.appendChild(h("li", null, h("span", {class: "discret"}, "Aucun compte encore : déposez un premier relevé.")));
-  return h("section", {class: "carte"}, h("h2", null, "Routine du mois"), ul);
+  const d = h("details", {class: "carte", style: {marginTop: "1rem"}}, h("summary", {style: {cursor: "pointer"}}, h("strong", null, "Routine du mois"), h("span", {class: "petit discret"}, " — date du dernier relevé de chaque compte (cliquer pour déplier)")), ul);
+  try { d.open = localStorage.getItem("routineOuverte") === "1"; } catch (e) {}
+  d.addEventListener("toggle", () => { try { localStorage.setItem("routineOuverte", d.open ? "1" : "0"); } catch (e) {} });
+  return d;
 }
 
 async function deposerFichiers(fichiers){
