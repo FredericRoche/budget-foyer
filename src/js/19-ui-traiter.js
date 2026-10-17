@@ -72,6 +72,21 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
     c.appendChild(s3);
   }
 
+  /* 3 bis. Échéances à confirmer (reprise du classeur, plans) : elles comptent déjà dans les projections */
+  const aConfirmer = vivants("echeances").filter(e => e.aConfirmer).sort((a, b) => (a.debut || "") < (b.debut || "") ? -1 : 1);
+  if (aConfirmer.length){
+    const s5 = h("section", {style: {marginTop: "1rem"}});
+    s5.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".4rem"}}, h("h2", {style: {margin: 0}}, "Échéances à confirmer (" + aConfirmer.length + ")"),
+      h("button", {class: "discret mini", onclick: () => { for (const e of aConfirmer) enregistrer("echeances", Object.assign(e, {aConfirmer: false})); rafraichirEcran(); }}, "Tout confirmer")));
+    s5.appendChild(tableau([{titre: "À partir du"}, {titre: "Échéance"}, {titre: "Vision"}, {titre: "Montant", num: true}, {titre: "Récurrence"}, {titre: ""}], aConfirmer, {classe: "serre", ligne: e =>
+      h("tr", null, h("td", null, dateFr(e.debut)), h("td", null, e.libelle, e.note ? h("div", {class: "petit discret"}, e.note) : null),
+        h("td", null, e.projet ? "projet " + e.projet : estCapital(e) ? "épargne" : "marche courante"), montantCellule(e.montant), h("td", null, e.recurrence || "unique"),
+        h("td", null, h("button", {class: "mini primaire", onclick: () => { enregistrer("echeances", Object.assign(e, {aConfirmer: false})); rafraichirEcran(); }}, "Confirmer"), " ",
+          h("button", {class: "mini discret", onclick: () => editerEcheance(e)}, "Modifier")))}));
+    s5.appendChild(h("p", {class: "note"}, "Hypothèses reprises du classeur ou d'un plan : elles comptent déjà dans les projections. Confirmez-les une fois montant et date vérifiés, ou modifiez-les."));
+    c.appendChild(s5);
+  }
+
   /* 4. Rapprochés automatiquement, réversibles */
   const autos = vivants("justificatifs").filter(j => j.auto && j.statut === "rapproche" && !j.vu).sort((a, b) => (a.rapprocheLe || "") < (b.rapprocheLe || "") ? 1 : -1);
   const s4 = h("section", {style: {marginTop: "1rem"}});

@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Cmhm2nGlFwdBlNYFIVxcPAubg9wCies8ncOG+T08eus=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-JddWAI5LoNmLzadhqNL/P/Rf/7ONes8WE9ELjF5y3gc=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -285,7 +285,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-17.1817";
+const VERSION_APP = "2026-10-17.2050";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3509,6 +3509,21 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
         h("button", {class: "mini discret", onclick: () => { enregistrer("factures", Object.assign(f, {ecartVu: true})); rafraichirEcran(); }}, "Vu")))}));
     s3.appendChild(h("p", {class: "note"}, "Un écart vient d'ordinaire d'un achat de fin de période pas encore présent dans l'export « encours » de la carte : il se résorbe au prochain export. Réimportez la facture après l'export pour recalculer."));
     c.appendChild(s3);
+  }
+
+  /* 3 bis. Échéances à confirmer (reprise du classeur, plans) : elles comptent déjà dans les projections */
+  const aConfirmer = vivants("echeances").filter(e => e.aConfirmer).sort((a, b) => (a.debut || "") < (b.debut || "") ? -1 : 1);
+  if (aConfirmer.length){
+    const s5 = h("section", {style: {marginTop: "1rem"}});
+    s5.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".4rem"}}, h("h2", {style: {margin: 0}}, "Échéances à confirmer (" + aConfirmer.length + ")"),
+      h("button", {class: "discret mini", onclick: () => { for (const e of aConfirmer) enregistrer("echeances", Object.assign(e, {aConfirmer: false})); rafraichirEcran(); }}, "Tout confirmer")));
+    s5.appendChild(tableau([{titre: "À partir du"}, {titre: "Échéance"}, {titre: "Vision"}, {titre: "Montant", num: true}, {titre: "Récurrence"}, {titre: ""}], aConfirmer, {classe: "serre", ligne: e =>
+      h("tr", null, h("td", null, dateFr(e.debut)), h("td", null, e.libelle, e.note ? h("div", {class: "petit discret"}, e.note) : null),
+        h("td", null, e.projet ? "projet " + e.projet : estCapital(e) ? "épargne" : "marche courante"), montantCellule(e.montant), h("td", null, e.recurrence || "unique"),
+        h("td", null, h("button", {class: "mini primaire", onclick: () => { enregistrer("echeances", Object.assign(e, {aConfirmer: false})); rafraichirEcran(); }}, "Confirmer"), " ",
+          h("button", {class: "mini discret", onclick: () => editerEcheance(e)}, "Modifier")))}));
+    s5.appendChild(h("p", {class: "note"}, "Hypothèses reprises du classeur ou d'un plan : elles comptent déjà dans les projections. Confirmez-les une fois montant et date vérifiés, ou modifiez-les."));
+    c.appendChild(s5);
   }
 
   /* 4. Rapprochés automatiquement, réversibles */
