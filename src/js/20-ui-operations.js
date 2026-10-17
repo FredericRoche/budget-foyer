@@ -62,6 +62,7 @@ function panneauOperation(o, etat){
   const selCat = selectionCategorie(o.categorie, o.sousCategorie);
   const selNat = selectionNature(o.nature);
   const selLieu = selectionLieu(o.lieu);
+  const selProjet = selection([["", "—"], ...nomsProjets().map(n => [n, n])], o.projet || "");
   const js = (o.justificatifs || []).map(id => obtenir("justificatifs", id)).filter(Boolean);
   const raisons = [...new Set(js.map(j => j.raisonSociale).filter(Boolean))];
   const p = h("aside", {class: "panneau"}, h("div", {class: "outils", style: {justifyContent: "space-between"}}, h("h2", {style: {margin: 0}}, "Détail de l'opération"),
@@ -73,7 +74,7 @@ function panneauOperation(o, etat){
     raisons.length ? [h("label", {style: {marginTop: ".6rem"}}, "Raison sociale lue (justificatifs)"), h("div", {class: "petit discret"}, raisons.join(" · "))] : null,
     h("label", {style: {marginTop: ".5rem"}}, "Commerçant (nom d'usage)"), nomCm,
     h("label", {style: {marginTop: ".5rem"}}, "Nature exacte de la dépense"), nature, sugg,
-    h("dl", {style: {marginTop: ".7rem"}}, h("dt", null, "Catégorie"), h("dd", null, selCat), h("dt", null, "Nature"), h("dd", null, selNat), h("dt", null, "Lieu"), h("dd", null, selLieu),
+    h("dl", {style: {marginTop: ".7rem"}}, h("dt", null, "Catégorie"), h("dd", null, selCat), h("dt", null, "Nature"), h("dd", null, selNat), h("dt", null, "Lieu"), h("dd", null, selLieu), nomsProjets().length ? [h("dt", null, "Projet"), h("dd", null, selProjet)] : null,
       o.ventilation ? [h("dt", null, "Ventilation"), h("dd", null, o.ventilation.map(v => euros(v.montant) + " " + v.sousCategorie + (v.natureExacte ? " (" + v.natureExacte + ")" : "")).join(" · "))] : null,
       h("dt", null, "Justificatifs"), h("dd", null, js.length ? js.map(j => h("button", {class: "lien", onclick: () => voirPiece(j)}, "📎 " + (TYPES_JUSTIF[j.type] || "pièce") + " ")) : h("span", {class: "discret"}, "aucun"),
         h("br"), h("button", {class: "mini discret", style: {marginTop: ".3rem"}, onclick: () => ajouterPieceAOperation(o)}, "Joindre une pièce…")),
@@ -82,7 +83,7 @@ function panneauOperation(o, etat){
     h("button", {class: "primaire mini", onclick: () => {
       const v = valeurCategorie(selCat);
       const corrige = v.categorie !== o.categorie || v.sousCategorie !== o.sousCategorie || selLieu.value !== (o.lieu || "") || selNat.value !== o.nature;
-      Object.assign(o, v, {nature: selNat.value, lieu: selLieu.value, natureExacte: nature.value.trim()});
+      Object.assign(o, v, {nature: selNat.value, lieu: selLieu.value, natureExacte: nature.value.trim(), projet: selProjet.value || null});
       // Nom d'usage du commerçant : renomme la fiche (ou la crée) et la rattache
       let fiche = cm;
       const nom = nomCm.value.trim();

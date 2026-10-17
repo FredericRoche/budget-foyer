@@ -292,8 +292,10 @@ function appliquerPlan(contenu){
     enregistrer("budgets", Object.assign(existant || {}, b)); r.budgets++;
   }
   const courant = obtenir("comptes", LIVRE.parametres.compteTresorerie) || comptesDeType("courant")[0];
-  for (const e of contenu.echeances || []){
-    const existant = vivants("echeances").find(x => x.libelle === e.libelle && x.debut === e.debut);
+  for (let e of contenu.echeances || []){
+    // « remplace » : libellé et date d'une échéance existante à reprendre (date ou libellé modifiés).
+    const cle = e.remplace || e; e = Object.assign({}, e); delete e.remplace;
+    const existant = vivants("echeances").find(x => x.libelle === cle.libelle && x.debut === cle.debut);
     if (e.categorie) ajouterCategorieSilencieuse(e.categorie, e.sousCategorie);
     enregistrer("echeances", Object.assign(existant || {}, {compte: courant?.id || ""}, e)); r.echeances++;
   }

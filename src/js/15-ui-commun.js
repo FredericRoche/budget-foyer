@@ -175,6 +175,7 @@ function construireNavigation(){
     lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Commerçants"),
     h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), lien("patrimoine", "Bilan et résultat"),
     lien("tresorerie", "Trésorerie", ana?.premierBas ? "!" : null, true),
+    nomsProjets().length ? lien("projets", "Projets") : null,
     h("div", {class: "rubrique"}, "Appareil"), lien("reglages", "Réglages"),
     h("div", {class: "pied-nav", id: "etat-synchro"}));
   majEtatSynchro();

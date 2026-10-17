@@ -162,6 +162,11 @@ async function autotest(){
     v("trésorerie : solde de départ (relevé + facture)", Math.round(s1.soldeDepart * 100) / 100, Math.round((11950 - 45.4) * 100) / 100);
     v("trésorerie : premier jour sous zéro", a1.premierBas?.date, "2027-05-15");
     vrai("trésorerie : virement proposé suffisant", analyseTresorerie(simulerTresorerie({depart: "2027-03-31", jours: 120, supplements: [{date: a1.avant, montant: a1.virement, libelle: "v"}]})).premierBas === undefined);
+    const grosse = vivants("echeances").find(e => e.libelle === "Grosse dépense");
+    enregistrer("echeances", Object.assign(grosse, {projet: "Travaux", financement: "epargne"}));
+    const s2 = simulerTresorerie({depart: "2027-03-31", jours: 120}); const pj = s2.projets[0];
+    vrai("projet : pris sur le compte tant qu'il suffit, le reste sur l'épargne, sans découvert",
+      pj && pj.duCourant > 0 && pj.epargne > 0 && Math.abs(pj.duCourant + pj.epargne - 30000) < 0.01 && analyseTresorerie(s2).premierBas === undefined, pj);
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
   finally {
     LIVRE = memoire.LIVRE; Object.assign(SESSION, memoire.session); LIVRE_MODIFIE = memoire.modifie; planifierSauvegarde = sauvegardePlanifiee; invaliderIndex();

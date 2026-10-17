@@ -5,7 +5,16 @@
      virements étalés dans le mois ; achats par cartes LCL débités le dernier jour
      ouvré ; achats Amex débités au jour habituel du mois suivant ;
    - encours connus des cartes (achats importés, non encore débités).
-   Une ligne de budget liée à une échéance n'est pas comptée deux fois. */
+   Une ligne de budget liée à une échéance n'est pas comptée deux fois.
+   Projets (travaux, voiture…) : hors marche courante du foyer. Chaque paiement est pris sur le compte
+   courant à hauteur de ce qu'il peut céder sans passer sous le seuil bas, ni ce jour-là ni ensuite ;
+   le reste est un virement d'épargne à prévoir, de même date. */
+function jourPrelevementAmex(compteId){
+  const vus = vivants("operations").filter(x => (!compteId || x.compte === compteId) && x.montant < 0 && /AMERICAN EXPRESS/i.test(x.libelle))
+    .sort((a, b) => a.date < b.date ? 1 : -1).slice(0, 3).map(x => +x.date.slice(8, 10)).sort((a, b) => a - b);
+  return LIVRE.parametres.amexJourPrelevement || (vus.length ? vus[Math.floor(vus.length / 2)] : 27);
+}
+const financeParEpargne = e => !!e.projet && e.financement !== "courant";
 
 function occurrences(e, debut, fin){
   const r = []; const d0 = e.debut || debut;
@@ -29,16 +38,15 @@ function simulerTresorerie(options){
     if (gros) evenements.push({date, montant, libelle, genre, recurrent: !!recurrent});
   };
   // 1. Échéances
-  const lignesLiees = new Set();
+  const lignesLiees = new Set(); const aPayer = [];
   for (const e of vivants("echeances").filter(x => x.active !== false && (!x.compte || x.compte === compte.id))){
     if (e.ligneBudget) lignesLiees.add(e.ligneBudget);
+    if (financeParEpargne(e)){ for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) aPayer.push({date: d, montant: e.montant, libelle: e.libelle, projet: e.projet}); continue; }
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, e.montant, e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
   }
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
   // 2. Encours connus des cartes rattachées à ce compte
-  // Jour du prélèvement Amex : réglage, sinon jour médian des trois derniers prélèvements constatés, sinon le 27.
-  const vus = vivants("operations").filter(x => x.compte === compte.id && x.montant < 0 && /AMERICAN EXPRESS/i.test(x.libelle)).sort((a, b) => a.date < b.date ? 1 : -1).slice(0, 3).map(x => +x.date.slice(8, 10)).sort((a, b) => a - b);
-  const amexJour = LIVRE.parametres.amexJourPrelevement || (vus.length ? vus[Math.floor(vus.length / 2)] : 27);
+  const amexJour = jourPrelevementAmex(compte.id);
   for (const c of vivants("comptes").filter(c => c.type === "carte" && (c.compteDebit === compte.id || !c.compteDebit))){
     const encours = vivants("operations").filter(x => x.compte === c.id && !x.dateDebit && !(x.lien && x.montant > 0) && x.date <= o.depart);
     if (!encours.length) continue;
@@ -78,7 +86,20 @@ function simulerTresorerie(options){
     const f = flux.get(d) || 0; solde += f;
     jours.push({date: d, flux: f, solde});
   }
-  return {compte, depart: o.depart, soldeDepart, soldeConnu: soldeDepart !== null, jours, evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
+  // 5. Projets : part du compte courant, part de l'épargne
+  const seuil = LIVRE.parametres.seuilBas || 0; const projets = [];
+  for (const pp of aPayer.sort((a, b) => a.date < b.date ? -1 : 1)){
+    const i0 = jours.findIndex(j => j.date >= pp.date); if (i0 < 0) continue;
+    const besoin = -pp.montant;
+    const dispo = besoin > 0 ? Math.max(0, Math.min(...jours.slice(i0).map(j => j.solde)) - seuil) : Infinity;
+    const duCourant = Math.min(dispo, besoin), epargne = Math.round((besoin - duCourant) * 100) / 100;
+    for (let i = i0; i < jours.length; i++) jours[i].solde -= duCourant;
+    jours[i0].flux -= duCourant;
+    evenements.push({date: pp.date, montant: pp.montant, libelle: pp.libelle + " (projet " + pp.projet + ")", genre: "projet"});
+    if (epargne > 0) evenements.push({date: pp.date, montant: epargne, libelle: "Virement d'épargne à prévoir : " + pp.projet, genre: "projet"});
+    projets.push({projet: pp.projet, date: pp.date, libelle: pp.libelle, montant: pp.montant, duCourant: besoin > 0 ? duCourant : 0, epargne});
+  }
+  return {compte, depart: o.depart, soldeDepart, soldeConnu: soldeDepart !== null, jours, projets, evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
 }
 function dernierBudgetAvant(an){
   const annees = anneesBudget().filter(a => a < an);

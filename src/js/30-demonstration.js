@@ -36,7 +36,13 @@ async function demarrerDemonstration(){
   // Budget de l'année suivante, copié, et échéances confirmées pour une projection lisible
   const b = budgetActif(2026);
   if (b && !budgetActif(2027)) enregistrer("budgets", {annee: 2027, nom: "Budget 2027 (copie de 2026)", fige: false, actif: true, lignes: JSON.parse(JSON.stringify(b.lignes))});
-  for (const e of vivants("echeances").filter(e => /Voiture/.test(e.libelle))) enregistrer("echeances", Object.assign(e, {debut: "2027-02-15", aConfirmer: false}));
+  for (const e of vivants("echeances").filter(e => /Voiture/.test(e.libelle))) enregistrer("echeances", Object.assign(e, {debut: "2027-02-15", aConfirmer: false, projet: "Voiture", financement: "epargne"}));
+  // Travaux : projet en trois appels de fonds, financé par l'épargne quand le compte ne suffit pas
+  for (const e of vivants("echeances").filter(e => /Travaux/.test(e.libelle))){
+    for (const [d, m, n] of [["2027-01-15", -15000, "acompte"], ["2027-04-15", -15000, "2e appel"], ["2027-07-15", -10000, "solde"]])
+      enregistrer("echeances", {libelle: "Travaux de la maison : " + n, montant: m, recurrence: "unique", debut: d, compte: e.compte, categorie: e.categorie, sousCategorie: e.sousCategorie, nature: "Exceptionnelle", projet: "Travaux", financement: "epargne"});
+    supprimer("echeances", e.id);
+  }
   // Un ticket lu sur le PC, et une saisie du téléphone dans la boîte (achat groupé au marché)
   try {
     etat("Lecture des tickets (OCR local)…");
