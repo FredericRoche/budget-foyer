@@ -185,6 +185,9 @@ async function autotest(){
     enregistrer("operations", {compte: cj.id, date: "2027-03-05", montant: 1234.56, libelle: "VIREMENT EMPLOYEUR EXEMPLE", categorie: "Revenus", sousCategorie: "Salaire", nature: "Revenu", verrou: true});
     const rr = appliquerPlan({reclasser: [{date: "2027-03-05", montant: 1234.56, contient: "EMPLOYEUR", categorie: "Professionnel", sousCategorie: "Remboursements de frais", nature: "Hors budget"}]});
     v("plan : reclassement ciblé d'une opération validée", [rr.reclassees, vivants("operations").find(o => o.date === "2027-03-05" && o.montant === 1234.56).nature], [1, "Hors budget"]);
+    appliquerPlan({commercants: [{nom: "Pisciniste essai", alias: ["PISCINE ESSAI VILLE"], categorie: "Extérieurs", sousCategorie: "Piscine (entretien)", lieu: "Campagne", verifie: true}]});
+    const fp = trouverCommercant(cleLibelle("PISCINE ESSAI VILLE"), true);
+    v("plan : fiche fournisseur fixée et vérifiée", [fp?.nom, fp?.sousCategorie, fp?.verifie], ["Pisciniste essai", "Piscine (entretien)", true]);
     const tj = simulerTresorerie({depart: "2027-03-31", jours: 120, perimetre: "tout"});
     v("compte joint réel : marche courante + capital", Math.round(tj.jours[tj.jours.length - 1].solde - s2.jours[s2.jours.length - 1].solde), 20000);
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }

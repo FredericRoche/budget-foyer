@@ -310,11 +310,11 @@ function appliquerPlan(contenu){
     }
     r.comptes = (r.comptes || 0) + 1;
   }
-  if (contenu.regles?.length) r.regles = appliquerRegles({regles: contenu.regles});
+  if (contenu.regles?.length || contenu.commercants?.length) r.regles = appliquerRegles({regles: contenu.regles || [], commercants: contenu.commercants || []});
   // Reclassement ciblé d'opérations déjà enregistrées, désignées par date, montant et, au besoin, libellé
   for (const x of contenu.reclasser || []){
     const cibles = vivants("operations").filter(o => o.date === x.date && Math.abs(o.montant - x.montant) < 0.005 && (!x.contient || norm(o.libelle + " " + (o.detail || "")).toUpperCase().includes(norm(x.contient).toUpperCase())));
-    for (const o of cibles) enregistrer("operations", Object.assign(o, {categorie: x.categorie, sousCategorie: x.sousCategorie || "", nature: x.nature || o.nature, statut: "classe", verrou: true}, x.lieu ? {lieu: x.lieu} : {}));
+    for (const o of cibles) enregistrer("operations", Object.assign(o, {categorie: x.categorie, sousCategorie: x.sousCategorie || "", nature: x.nature || o.nature, statut: "classe", verrou: true}, x.lieu ? {lieu: x.lieu} : {}, x.natureExacte ? {natureExacte: x.natureExacte} : {}));
     if (x.categorie) ajouterCategorieSilencieuse(x.categorie, x.sousCategorie);
     r.reclassees = (r.reclassees || 0) + cibles.length;
   }
@@ -337,7 +337,8 @@ function appliquerRegles(contenu){
     fiche.nom = c.nom;
     for (const a of c.alias || []) ajouterAlias(fiche, a);
     Object.assign(fiche, {categorie: c.categorie || fiche.categorie, sousCategorie: c.sousCategorie || fiche.sousCategorie, nature: c.nature || fiche.nature || "Courante",
-      lieu: c.lieu || fiche.lieu || "", fixe: !!c.categorie});
+      lieu: c.lieu || fiche.lieu || "", fixe: !!c.categorie}, c.verifie ? {verifie: true} : {});
+    if (c.natureExacte) fiche.natures = Object.assign(fiche.natures || {}, {[c.natureExacte]: (fiche.natures?.[c.natureExacte] || 0) + 1});
     if (c.categorie) ajouterCategorieSilencieuse(c.categorie, c.sousCategorie);
     if (c.lieu) ajouterLieu(c.lieu);
     enregistrer("commercants", fiche);
