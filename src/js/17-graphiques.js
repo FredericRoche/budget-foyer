@@ -2,7 +2,7 @@
 const COULEURS = {vert: "#1E4636", or: "#9B7D34", garnet: "#6E2A2A", sauge: "#6F8678", filet: "#C9D2CB", encre: "#182A20"};
 
 function grapheTresorerie(sim, ana, hauteur, compact, seuils){
-  const L = 900, H = hauteur || 300, g = 72, dr = 14, ht = 14, bas = 30;
+  const L = 900, H = hauteur || 300, g = 72, dr = 14, ht = 14, bas = 46;
   const j = sim.jours; if (!j.length) return h("div", {class: "vide"}, "Pas de projection.");
   const p = seuils || LIVRE.parametres;
   const vals = j.map(x => x.solde);
@@ -18,7 +18,8 @@ function grapheTresorerie(sim, ana, hauteur, compact, seuils){
   }
   j.forEach((d, i) => { if (d.date.endsWith("-01")){
     svg.appendChild(s("line", {x1: x(i), x2: x(i), y1: H - bas, y2: H - bas + 4, stroke: COULEURS.sauge}));
-    svg.appendChild(s("text", {x: x(i) + 3, y: H - 7, "font-size": 15, fill: COULEURS.sauge}, MOIS_COURT[+d.date.slice(5, 7) - 1]));
+    svg.appendChild(s("text", {x: x(i) + 3, y: H - 24, "font-size": 15, fill: COULEURS.sauge}, MOIS_COURT[+d.date.slice(5, 7) - 1]));
+    svg.appendChild(s("text", {x: x(i) + 3, y: H - 6, "font-size": 13, fill: COULEURS.sauge}, d.date.slice(2, 4)));
   }});
   svg.appendChild(s("line", {x1: g, x2: L - dr, y1: y(p.seuilBas), y2: y(p.seuilBas), stroke: COULEURS.garnet, "stroke-width": 1.5}));
   if (p.seuilHaut <= ymax) svg.appendChild(s("line", {x1: g, x2: L - dr, y1: y(p.seuilHaut), y2: y(p.seuilHaut), stroke: COULEURS.sauge, "stroke-width": 1.5, "stroke-dasharray": "6 4"}));

@@ -1,11 +1,13 @@
-/* ================= Commerçants ================= */
+/* ================= Fournisseurs (fiches « commercants ») ================= */
 declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   const q = norm(etat.recherche || "");
   const nbAchats = new Map(); for (const o of vivants("operations")) if (o.commercant) nbAchats.set(o.commercant, (nbAchats.get(o.commercant) || 0) + 1);
-  const liste = vivants("commercants").filter(x => !q || norm(x.nom + " " + (x.alias || []).join(" ")).includes(q));
+  const liste = vivants("commercants").filter(x => (!q || norm(x.nom + " " + (x.alias || []).join(" ")).includes(q)) && (!etat.aVerifier || !x.verifie));
+  const nbVerifies = vivants("commercants").filter(x => x.verifie).length;
   const recherche = h("input", {type: "search", placeholder: "Rechercher un fournisseur, un alias…", value: etat.recherche || "", style: {width: "16rem"}});
   let t = 0; recherche.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { etat.recherche = recherche.value; rafraichirEcran(); const r = document.querySelector("#contenu input[type=search]"); if (r){ r.focus(); r.setSelectionRange(r.value.length, r.value.length); } }, 250); });
-  c.appendChild(entete("Fournisseurs", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " fournisseurs", [recherche,
+  const filtre = h("label", {class: "case", style: {margin: 0}}, h("input", {type: "checkbox", checked: !!etat.aVerifier, onchange: e => { etat.aVerifier = e.target.checked; rafraichirEcran(); }}), " à vérifier seulement");
+  c.appendChild(entete("Fournisseurs", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " fournisseurs, dont " + nbVerifies + " vérifiés", [recherche, filtre,
     h("button", {class: "discret", onclick: () => fusionDialogue()}, "Fusionner deux fiches…"),
     h("button", {class: "discret", onclick: () => publierExtraitCommercants().then(() => message("Extrait publié pour le téléphone.")).catch(e => message(e.message, true))}, "Publier l'extrait pour le téléphone")]));
   const choisi = etat.choisi ? obtenir("commercants", etat.choisi) : null;
@@ -14,7 +16,7 @@ declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
     {titre: "Achats", num: true, cle: x => nbAchats.get(x.id) || 0}], liste, {classe: "serre", tri: 4, sens: -1, limite: 400, ligne: x => {
       const rep = x.variable ? repartitionCommercant(x) : null;
       return h("tr", {class: "cliquable" + (x === choisi ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
-        h("td", null, x.nom, x.fixe ? h("span", {class: "libbanque"}, "fixé à la main") : null), h("td", {class: "petit"}, (x.alias || []).slice(0, 3).join(" · ") + ((x.alias || []).length > 3 ? " …" : "")),
+        h("td", null, x.verifie ? h("span", {class: "pos", title: "vérifié"}, "✓ ") : null, x.nom, x.fixe ? h("span", {class: "libbanque"}, "fixé à la main") : null), h("td", {class: "petit"}, (x.alias || []).slice(0, 3).join(" · ") + ((x.alias || []).length > 3 ? " …" : "")),
         h("td", null, x.categorie ? x.categorie + " › " + x.sousCategorie : rep ? h("em", null, "variable : " + rep.map(r => r.categorie + " " + Math.round(r.part * 100) + " %").join(", ")) : h("span", {class: "discret"}, "—")),
         h("td", null, etiquetteLieu(x.lieu)), h("td", {class: "num"}, String(nbAchats.get(x.id) || 0)));
     }}));
@@ -41,17 +43,24 @@ function panneauCommercant(x, etat, n){
       natures.length ? [h("dt", null, "Natures employées"), h("dd", null, natures.map(([t, k]) => t + " (" + k + ")").join(" · "))] : null,
       x.siret ? [h("dt", null, "SIRET"), h("dd", null, x.siret)] : null),
     h("div", {class: "outils", style: {marginTop: ".8rem"}},
-      h("button", {class: "primaire mini", onclick: () => {
+      h("button", {class: "primaire mini", onclick: async () => {
         const v = valeurCategorie(cat);
-        Object.assign(x, {nom: nom.value.trim() || x.nom, nature: nature.value, lieu: lieu.value}, v.categorie === "À préciser" ? {categorie: "", sousCategorie: "", fixe: false} : Object.assign(v, {fixe: true}));
+        Object.assign(x, {nom: nom.value.trim() || x.nom, nature: nature.value, lieu: lieu.value, verifie: true}, v.categorie === "À préciser" ? {categorie: "", sousCategorie: "", fixe: false} : Object.assign(v, {fixe: true}));
         enregistrer("commercants", x);
         if (x.fixe){
           let k = 0;
           for (const op of vivants("operations").filter(o => o.commercant === x.id && !o.verrou)){ classerAutomatiquement(op); enregistrer("operations", op); k++; }
-          if (k) message(k + " opération(s) non validée(s) reclassée(s).");
+          // Opérations déjà validées (reprise du classeur, corrections) classées autrement : sur demande seulement
+          const autres = vivants("operations").filter(o => o.commercant === x.id && o.verrou && !o.ventilation && (o.categorie !== x.categorie || o.sousCategorie !== x.sousCategorie || (x.lieu && o.lieu !== x.lieu)));
+          if (autres.length && await dialogue({titre: "Opérations déjà validées", corps: h("p", null, autres.length + " opération(s) validée(s) de « " + x.nom + " » sont classées autrement (par exemple " + autres[0].categorie + " › " + autres[0].sousCategorie + "). Les reclasser en " + x.categorie + " › " + x.sousCategorie + (x.lieu ? ", " + x.lieu : "") + " ?"),
+              actions: [{libelle: "Laisser telles quelles", classe: "discret", valeur: false}, {libelle: "Reclasser", classe: "primaire", valeur: true}]})){
+            for (const op of autres) enregistrer("operations", Object.assign(op, {categorie: x.categorie, sousCategorie: x.sousCategorie, nature: x.nature || op.nature}, x.lieu ? {lieu: x.lieu} : {}));
+            k += autres.length;
+          }
+          if (k) message(k + " opération(s) reclassée(s).");
         }
         rafraichirEcran();
-      }}, "Enregistrer"),
+      }}, "Enregistrer (vérifié)"),
       h("button", {class: "mini discret", onclick: () => aller("operations", {recherche: x.nom, compte: "", mois: ""})}, "Historique des achats")),
     h("p", {class: "note"}, "Le nom, les alias, la catégorie et les natures partent aussi, chiffrés, vers le téléphone en saisie seule ; aucun montant."));
 }

@@ -56,6 +56,12 @@ async function autotest(){
     const amex = lireCsv("activity.csv", 'Date,Description,Montant\n03/14/2027,RESTAURANT TEST PARIS,"84,50"\n03/20/2027,PRELEVEMENT AUTOMATIQUE,"-84,50"\n');
     v("Amex : date mm/jj et signe", [amex.lignes[0].date, amex.lignes[0].montant, amex.lignes[1].montant], ["2027-03-14", -84.5, 84.5]);
 
+    /* --- Fenêtre de dialogue : « Annuler » ferme et rend false --- */
+    {
+      const pr = dialogue({titre: "essai", corps: h("p", null, "x"), actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "OK", classe: "primaire", valeur: true}]});
+      document.querySelector("#dialogue .actions button").click();
+      v("dialogue : Annuler ferme et rend false", [await pr, $("voile").hidden], [false, true]);
+    }
     /* --- Reprise d'historique : date de débit estimée des achats carte, encours à venir --- */
     {
       const avant = LIVRE; LIVRE = livreVide("Essai reprise");

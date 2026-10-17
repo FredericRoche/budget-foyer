@@ -21,7 +21,10 @@ function dialogue(o){
     for (const a of o.actions || [{libelle: "Fermer"}]){
       actions.appendChild(h("button", {class: a.classe || "", onclick: async () => {
         try {
-          const r = a.action ? await a.action() : a.valeur;
+          // Une action qui renvoie false garde la fenêtre ouverte (saisie incomplète) ; un bouton sans action
+          // la ferme toujours, avec sa valeur (false pour « Annuler »).
+          if (!a.action) return fermer(a.valeur ?? true);
+          const r = await a.action();
           if (r !== false) fermer(r === undefined ? a.valeur ?? true : r);
         } catch (e){ message(e.message, true); }
       }}, a.libelle));
