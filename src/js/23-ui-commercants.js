@@ -1,13 +1,26 @@
 /* ================= Fournisseurs (fiches « commercants ») ================= */
+/* Classement constaté sur les opérations d'une fiche (le plus fréquent), quand la fiche n'a pas encore
+   de défaut : une fiche n'en reçoit un qu'à partir de deux achats concordants. */
+function classementConstate(x){
+  const n = new Map();
+  for (const o of vivants("operations").filter(o => o.commercant === x.id && o.categorie && o.categorie !== "À préciser")){
+    const k = [o.categorie, o.sousCategorie || "", o.nature || "", o.lieu || ""].join("|"); n.set(k, (n.get(k) || 0) + 1);
+  }
+  const [k, nb] = [...n].sort((a, b) => b[1] - a[1])[0] || [];
+  if (!k) return null;
+  const [categorie, sousCategorie, nature, lieu] = k.split("|");
+  return {categorie, sousCategorie, nature, lieu, nb};
+}
 declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   const q = norm(etat.recherche || "");
   const nbAchats = new Map(); for (const o of vivants("operations")) if (o.commercant) nbAchats.set(o.commercant, (nbAchats.get(o.commercant) || 0) + 1);
-  const liste = vivants("commercants").filter(x => (!q || norm(x.nom + " " + (x.alias || []).join(" ")).includes(q)) && (!etat.aVerifier || !x.verifie));
+  const liste = vivants("commercants").filter(x => (!q || norm(x.nom + " " + (x.alias || []).join(" ")).includes(q)) && (!etat.aVerifier || !x.verifie) && (!etat.deuxPlus || (nbAchats.get(x.id) || 0) >= 2));
   const nbVerifies = vivants("commercants").filter(x => x.verifie).length;
   const recherche = h("input", {type: "search", placeholder: "Rechercher un fournisseur, un alias…", value: etat.recherche || "", style: {width: "16rem"}});
   let t = 0; recherche.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { etat.recherche = recherche.value; rafraichirEcran(); const r = document.querySelector("#contenu input[type=search]"); if (r){ r.focus(); r.setSelectionRange(r.value.length, r.value.length); } }, 250); });
   const filtre = h("label", {class: "case", style: {margin: 0}}, h("input", {type: "checkbox", checked: !!etat.aVerifier, onchange: e => { etat.aVerifier = e.target.checked; rafraichirEcran(); }}), " à vérifier seulement");
-  c.appendChild(entete("Fournisseurs", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " fournisseurs, dont " + nbVerifies + " vérifiés", [recherche, filtre,
+  const filtre2 = h("label", {class: "case", style: {margin: 0}}, h("input", {type: "checkbox", checked: !!etat.deuxPlus, onchange: e => { etat.deuxPlus = e.target.checked; rafraichirEcran(); }}), " 2 achats et plus");
+  c.appendChild(entete("Fournisseurs", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " fournisseurs, dont " + nbVerifies + " vérifiés", [recherche, filtre, filtre2,
     h("button", {class: "discret", onclick: () => fusionDialogue()}, "Fusionner deux fiches…"),
     h("button", {class: "discret", onclick: () => publierExtraitCommercants().then(() => message("Extrait publié pour le téléphone.")).catch(e => message(e.message, true))}, "Publier l'extrait pour le téléphone")]));
   const choisi = etat.choisi ? obtenir("commercants", etat.choisi) : null;
@@ -17,7 +30,7 @@ declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
       const rep = x.variable ? repartitionCommercant(x) : null;
       return h("tr", {class: "cliquable" + (x === choisi ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
         h("td", null, x.verifie ? h("span", {class: "pos", title: "vérifié"}, "✓ ") : null, x.nom, x.fixe ? h("span", {class: "libbanque"}, "fixé à la main") : null), h("td", {class: "petit"}, (x.alias || []).slice(0, 3).join(" · ") + ((x.alias || []).length > 3 ? " …" : "")),
-        h("td", null, x.categorie ? x.categorie + " › " + x.sousCategorie : rep ? h("em", null, "variable : " + rep.map(r => r.categorie + " " + Math.round(r.part * 100) + " %").join(", ")) : h("span", {class: "discret"}, "—")),
+        h("td", null, x.categorie ? x.categorie + " › " + x.sousCategorie : rep ? h("em", null, "variable : " + rep.map(r => r.categorie + " " + Math.round(r.part * 100) + " %").join(", ")) : (k => k ? h("span", {class: "discret"}, "d'après " + k.nb + " opération" + (k.nb > 1 ? "s" : "") + " : " + k.categorie + " › " + k.sousCategorie) : h("span", {class: "discret"}, "—"))(classementConstate(x))),
         h("td", null, etiquetteLieu(x.lieu)), h("td", {class: "num"}, String(nbAchats.get(x.id) || 0)));
     }}));
   if (choisi) g.appendChild(panneauCommercant(choisi, etat, nbAchats.get(choisi.id) || 0));
@@ -26,9 +39,10 @@ declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
 
 function panneauCommercant(x, etat, n){
   const nom = h("input", {type: "text", value: x.nom});
-  const cat = selectionCategorie(x.categorie || "", x.sousCategorie || "");
-  const nature = selectionNature(x.nature || "Courante");
-  const lieu = selectionLieu(x.lieu || "");
+  const vu = !x.categorie && !x.variable ? classementConstate(x) : null;   // fiche sans défaut : on propose le classement de ses opérations
+  const cat = selectionCategorie(x.categorie || vu?.categorie || "", x.sousCategorie || vu?.sousCategorie || "");
+  const nature = selectionNature(x.nature || vu?.nature || "Courante");
+  const lieu = selectionLieu(x.lieu || vu?.lieu || "");
   const aliasListe = h("div");
   const rendreAlias = () => { vider(aliasListe); for (const a of x.alias || []) aliasListe.appendChild(h("div", {class: "petit"}, a, " ", h("button", {class: "mini discret", onclick: () => { x.alias = x.alias.filter(b => b !== a); enregistrer("commercants", x); invaliderIndex(); rendreAlias(); }}, "✕"))); };
   rendreAlias();
