@@ -1,0 +1,16 @@
+{
+  "name": "Budget du foyer",
+  "short_name": "Budget",
+  "description": "Budget, comptes et trésorerie du foyer ; données chiffrées sur OneDrive.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FBF9F2",
+  "theme_color": "#1E4636",
+  "icons": [
+    {"src": "icone-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icone-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icone-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

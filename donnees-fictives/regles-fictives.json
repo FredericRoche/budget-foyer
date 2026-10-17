@@ -1,0 +1,96 @@
+{
+ "format": "budget-foyer-regles",
+ "v": 1,
+ "lieux": [
+  "Ville",
+  "Campagne",
+  "Autres"
+ ],
+ "regles": [
+  {
+   "nom": "Loyer",
+   "contient": "GERANCE EXEMPLE",
+   "categorie": "Logement",
+   "sousCategorie": "Loyer",
+   "nature": "Courante",
+   "lieu": "Ville",
+   "priorite": 90,
+   "sens": "debit"
+  },
+  {
+   "nom": "Électricité, ville (début de mois)",
+   "contient": "EDF",
+   "jourMax": 12,
+   "categorie": "Logement",
+   "sousCategorie": "Électricité – Ville",
+   "nature": "Courante",
+   "lieu": "Ville",
+   "priorite": 80,
+   "sens": "debit"
+  },
+  {
+   "nom": "Électricité, campagne (fin de mois)",
+   "contient": "EDF",
+   "jourMin": 13,
+   "categorie": "Logement",
+   "sousCategorie": "Électricité – Campagne",
+   "nature": "Courante",
+   "lieu": "Campagne",
+   "priorite": 80,
+   "sens": "debit"
+  },
+  {
+   "nom": "Eau",
+   "contient": "EAUX DE LA VALLEE",
+   "categorie": "Logement",
+   "sousCategorie": "Eau",
+   "lieu": "Campagne",
+   "priorite": 70
+  },
+  {
+   "nom": "Téléphonie",
+   "contient": "ORANGE",
+   "categorie": "Télécom",
+   "sousCategorie": "Box et mobiles",
+   "lieu": "Autres",
+   "priorite": 60
+  },
+  {
+   "nom": "Pensions",
+   "contient": "CAISSE RETRAITE|CAISSE COMPLEMENTAIRE",
+   "categorie": "Revenus",
+   "sousCategorie": "Pensions",
+   "nature": "Revenu",
+   "priorite": 90,
+   "sens": "credit"
+  },
+  {
+   "nom": "Paiement Amex",
+   "contient": "AMERICAN EXPRESS|PRELEVEMENT AUTOMATIQUE",
+   "categorie": "Transfert",
+   "sousCategorie": "Paiement Amex",
+   "nature": "Hors budget",
+   "priorite": 95
+  },
+  {
+   "nom": "Versement livret",
+   "contient": "LIVRET A",
+   "categorie": "Épargne",
+   "sousCategorie": "Versements",
+   "nature": "Hors budget",
+   "priorite": 85
+  }
+ ],
+ "commercants": [
+  {
+   "nom": "Boucherie du Marché",
+   "alias": [
+    "BOUCHERIE DU MARCHE VILLE",
+    "SARL VIANDES DU MARCHE"
+   ],
+   "categorie": "Alimentation",
+   "sousCategorie": "Courses",
+   "lieu": "Ville"
+  }
+ ]
+}

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Crochet git : refuse toute validation contenant une donnée personnelle.
+# Installation : cp outils/crochet-pre-commit .git/hooks/pre-commit
+exec python outils/verifier_donnees.py

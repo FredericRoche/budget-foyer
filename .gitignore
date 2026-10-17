@@ -1,0 +1,19 @@
+# Aucune donnée réelle dans le dépôt public : seuls le code et le jeu fictif sont publiés.
+*.chiffre
+*.xlsx
+*.xls
+*.csv
+*.pdf
+*.json
+*.jpg
+*.jpeg
+*.png
+# … sauf le jeu de démonstration (entièrement fictif) et les icônes de l'application
+!donnees-fictives/**
+!icone-*.png
+
+# Maquettes de conception (contiennent des libellés propres au foyer)
+maquettes/
+# Réglages locaux de l'outil de développement
+.claude/
+__pycache__/
