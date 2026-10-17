@@ -49,6 +49,25 @@ L'application dédoublonne (rien n'est importé deux fois), classe, rapproche le
 - **Justificatifs à rapprocher** : choisissez l'opération candidate, ou « paiement en espèces ».
 - **Rapprochés automatiquement** : relisez-les ; « Défaire » annule.
 - **Écarts de facture de cartes** : le plus souvent, un achat de fin de période à retrouver au prochain export.
+- **Échéances à confirmer** : hypothèses reprises du classeur ou d'un plan ; « Confirmer » une fois montant et date vérifiés, « Modifier » sinon. Elles comptent déjà dans les projections.
+
+### Revue des fournisseurs
+
+Une classification exacte conditionne toutes les analyses. Pour passer le fichier en revue :
+
+1. Écran **Fournisseurs**, case **« à vérifier seulement »** ; la liste est triée par nombre d'achats décroissant. L'en-tête indique l'avancement (« dont N vérifiés »).
+2. Cliquer sur une ligne ouvre la fiche à droite.
+3. **Fournisseur d'un seul type** (restaurant, boucher, pharmacie…) :
+   - corriger au besoin le **nom d'usage** (« SARL LUXEMBOURG » devient « Artaban ») : les anciens libellés restent en alias ;
+   - choisir la **catégorie**, la **nature** et le **lieu** ;
+   - **« Enregistrer (vérifié) »**, puis **« Reclasser »** si l'application propose de corriger les opérations déjà validées : le passé est corrigé et les achats futurs seront classés d'office.
+4. **Fournisseur aux achats variés** (Amazon, grande surface, Apple…) :
+   - laisser la catégorie sur « À préciser » ;
+   - **« Historique des achats »**, puis, pour chaque opération, saisir dans le détail la **nature exacte** (« cadeau d'anniversaire »), la **catégorie** et le **lieu**, puis **Enregistrer** ;
+   - revenir à la fiche et **« Enregistrer (vérifié) »**.
+5. **Doublons** : « Fusionner deux fiches… » en haut de l'écran.
+
+Ordre conseillé : restaurants, courses, Amazon, parfumerie et beauté, vins et spiritueux, abonnements : ce sont les postes discrétionnaires les plus lourds, et ceux où se cachent les cadeaux.
 
 ## 5. Le téléphone en saisie seule
 
