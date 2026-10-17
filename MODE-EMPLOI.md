@@ -45,7 +45,7 @@ L'application dédoublonne (rien n'est importé deux fois), classe, rapproche le
 
 ## 4. Chaque semaine : « À traiter »
 
-- **Opérations à classer** : validez les propositions cochées, ou corrigez la catégorie et le lieu. Une correction est retenue par la fiche du commerçant et s'applique ensuite d'elle-même.
+- **Opérations à classer** : validez les propositions cochées, ou corrigez la catégorie et le lieu. Une correction est retenue par la fiche du fournisseur et s'applique ensuite d'elle-même.
 - **Justificatifs à rapprocher** : choisissez l'opération candidate, ou « paiement en espèces ».
 - **Rapprochés automatiquement** : relisez-les ; « Défaire » annule.
 - **Écarts de facture de cartes** : le plus souvent, un achat de fin de période à retrouver au prochain export.
@@ -56,7 +56,7 @@ Appairage depuis le PC : Réglages › Téléphones, puis lecture du QR code par
 
 Ensuite, pour chaque achat :
 1. « Photographier un ticket » ;
-2. vérifier le montant, la date et le commerçant proposés (la lecture se fait sur le téléphone) ;
+2. vérifier le montant, la date et le fournisseur proposés (la lecture se fait sur le téléphone) ;
 3. ajouter la nature exacte, toucher la catégorie et le lieu ;
 4. « Envoyer ».
 

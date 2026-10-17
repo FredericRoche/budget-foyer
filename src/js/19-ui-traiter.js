@@ -34,7 +34,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
           rafraichirEcran();
         }}, "Valider")));
     }}));
-  sec.appendChild(h("p", {class: "note"}, "Une correction est retenue par la fiche du commerçant et appliquée aux opérations suivantes. Pour une règle plus fine (montant, jour du mois…), voir Réglages › Règles."));
+  sec.appendChild(h("p", {class: "note"}, "Une correction est retenue par la fiche du fournisseur et appliquée aux opérations suivantes. Pour une règle plus fine (montant, jour du mois…), voir Réglages › Règles."));
   c.appendChild(sec);
 
   /* 2. Doublons douteux : lignes identiques le même jour hors export LCL */

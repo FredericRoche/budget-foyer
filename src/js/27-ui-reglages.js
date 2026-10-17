@@ -62,7 +62,7 @@ function reglagesRegles(c){
         h("td", {class: "petit"}, [r.sens === "debit" ? "débit" : r.sens === "credit" ? "crédit" : "", r.montantMin ? "≥ " + euros(+r.montantMin) : "", r.montantMax ? "≤ " + euros(+r.montantMax) : "",
           r.jourMin ? "jour ≥ " + r.jourMin : "", r.jourMax ? "jour ≤ " + r.jourMax : "", r.compte ? libelleCompte(r.compte) : ""].filter(Boolean).join(", ")),
         h("td", null, r.categorie + (r.sousCategorie ? " › " + r.sousCategorie : "")), h("td", null, etiquetteLieu(r.lieu)), h("td", null, h("button", {class: "mini discret", onclick: () => editerRegle(r)}, "Modifier")))}));
-  c.appendChild(h("p", {class: "note"}, "Plusieurs mots possibles dans « contient », séparés par « | » (l'un ou l'autre). La règle de plus haute priorité qui convient l'emporte, avant les fiches commerçants."));
+  c.appendChild(h("p", {class: "note"}, "Plusieurs mots possibles dans « contient », séparés par « | » (l'un ou l'autre). La règle de plus haute priorité qui convient l'emporte, avant les fiches fournisseurs."));
 }
 async function editerRegle(r){
   const x = r || {nom: "", contient: "", priorite: 50, active: true, sens: "debit"};
@@ -125,12 +125,12 @@ function reglagesTelephones(c){
         h("li", null, "Le téléphone ouvre l'application en mode « saisie » et demande la connexion au compte Microsoft (OneDrive en ligne)."),
         h("li", null, "Ajoutez l'application à l'écran d'accueil (menu du navigateur : « Ajouter à l'écran d'accueil »).")),
       qr, h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini", onclick: () => navigator.clipboard.writeText(lien).then(() => message("Lien copié."))}, "Copier le lien"),
-        h("button", {class: "mini discret", onclick: () => { modifierParametres({appairageFait: true}); publierExtraitCommercants().then(() => message("Appairage noté ; extrait des commerçants publié.")).catch(e => message(e.message, true)); }}, "Appairage fait"))),
+        h("button", {class: "mini discret", onclick: () => { modifierParametres({appairageFait: true}); publierExtraitCommercants().then(() => message("Appairage noté ; extrait des fournisseurs publié.")).catch(e => message(e.message, true)); }}, "Appairage fait"))),
     h("section", {class: "carte"}, h("h2", null, "Ce que contient le lien"),
       h("ul", {style: {paddingLeft: "1.2rem"}}, h("li", null, "la clé publique du foyer : le téléphone chiffre ses saisies pour ce livre, sans pouvoir les relire ni lire les comptes ;"),
-        h("li", null, "la clé de l'extrait des commerçants : noms, alias, catégories et natures habituelles, sans aucun montant ni opération ;"),
+        h("li", null, "la clé de l'extrait des fournisseurs : noms, alias, catégories et natures habituelles, sans aucun montant ni opération ;"),
         h("li", null, "aucun mot de passe, aucun identifiant Microsoft.")),
-      h("p", {class: "note"}, "Perte du téléphone : seuls la liste des commerçants et les saisies non encore envoyées seraient exposées. Changez alors la clé de l'extrait (bouton ci-dessous) et réappairez."),
+      h("p", {class: "note"}, "Perte du téléphone : seuls la liste des fournisseurs et les saisies non encore envoyées seraient exposées. Changez alors la clé de l'extrait (bouton ci-dessous) et réappairez."),
       h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Changer la clé de l'extrait ? Les téléphones devront être réappairés.", "Changer", true)){ LIVRE.cles.extrait = versB64(crypto.getRandomValues(new Uint8Array(32))); marquerModifie(); await publierExtraitCommercants().catch(() => {}); rafraichirEcran(); } }}, "Changer la clé de l'extrait"))));
 }
 

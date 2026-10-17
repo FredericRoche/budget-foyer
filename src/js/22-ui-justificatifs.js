@@ -10,7 +10,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
     c.appendChild(h("p", {class: "vide"}, "Aucun justificatif à rapprocher."));
   } else c.appendChild(ecranRapprochement(j, etat, attente));
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Tous les justificatifs"));
-  c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Commerçant", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
+  c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
       h("td", null, x.origine === "mobile" ? "téléphone" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, x.auto ? "rapproché d'office" : "rapproché") : h("span", {class: "neg"}, "à rapprocher")))}));
@@ -56,8 +56,8 @@ function ecranRapprochement(j, etat, attente){
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
-      ligneOcr("Commerçant", cm, fiche ? "fichier des commerçants" : "nouveau"), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du commerçant" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""));
+      ligneOcr("Fournisseur", cm, fiche ? "fichier des fournisseurs" : "nouveau"), ligneOcr("Nature exacte", nat, ""), sugg,
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""));
     champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte});
   });
   const enregistrerSaisie = () => {
@@ -124,7 +124,7 @@ declarerEcran("boite", {titre: "Boîte de saisies", rendre(c){
        await actualiserBoite(); rafraichirEcran();
      }}, "Fusionner dans les comptes") : null]));
   if (SESSION.adaptateur?.nom === "local") c.appendChild(h("div", {class: "bandeau info"}, "Le stockage « ce navigateur seulement » ne reçoit pas les saisies du téléphone : choisissez le dossier OneDrive dans les Réglages."));
-  c.appendChild(tableau([{titre: "Déposée le"}, {titre: "Date"}, {titre: "Commerçant"}, {titre: "Nature exacte"}, {titre: "Montant", num: true}, {titre: "Catégorie"}, {titre: "Payé avec"}, {titre: "Tickets", num: true}], BOITE_CACHE, {
+  c.appendChild(tableau([{titre: "Déposée le"}, {titre: "Date"}, {titre: "Fournisseur"}, {titre: "Nature exacte"}, {titre: "Montant", num: true}, {titre: "Catégorie"}, {titre: "Payé avec"}, {titre: "Tickets", num: true}], BOITE_CACHE, {
     vide: "La boîte est vide.", ligne: e => {
       if (e.erreur) return h("tr", null, h("td", {colspan: 8, class: "neg"}, e.nom + " : illisible (" + e.erreur + ")"));
       const s2 = e.saisie; const t = s2.tickets || [];

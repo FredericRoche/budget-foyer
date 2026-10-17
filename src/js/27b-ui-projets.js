@@ -5,9 +5,13 @@
    porte son nom (panneau de détail), ou si elle a la catégorie et la sous-catégorie d'une de ses
    échéances et la nature « Exceptionnelle ». */
 function nomsProjets(){ return [...new Set(vivants("echeances").map(e => e.projet).filter(Boolean))].sort(); }
+/* Rattachement d'office : nature « Exceptionnelle » et catégorie (avec sa sous-catégorie si elle est
+   précisée) d'une échéance du projet ou de sa liste « rattache » ; le champ « Projet » d'une opération
+   l'emporte toujours (vide = règle d'office). */
 function operationsDuProjet(nom, echeances){
-  const cles = new Set(echeances.filter(e => e.categorie && e.sousCategorie).map(e => e.categorie + "|" + e.sousCategorie));
-  return vivants("operations").filter(o => o.projet === nom || (!o.projet && o.nature === "Exceptionnelle" && cles.has(o.categorie + "|" + o.sousCategorie)));
+  const regles = echeances.flatMap(e => [...(e.rattache || []), e.categorie ? {categorie: e.categorie, sousCategorie: e.sousCategorie} : null]).filter(Boolean);
+  const vaAuProjet = o => regles.some(r => r.categorie === o.categorie && (!r.sousCategorie || r.sousCategorie === o.sousCategorie));
+  return vivants("operations").filter(o => o.projet === nom || (!o.projet && o.nature === "Exceptionnelle" && o.montant < 0 && vaAuProjet(o)));
 }
 function etatProjet(nom){
   const ech = vivants("echeances").filter(e => e.projet === nom && e.active !== false);
@@ -83,6 +87,6 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
   g.appendChild(h("section", null, h("h2", null, "Paiements faits : " + x.nom),
     tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Compte"}, {titre: "Montant", num: true}], x.ops.sort((a, b) => a.date < b.date ? 1 : -1), {classe: "serre", vide: "Aucun paiement rattaché pour l'instant.", ligne: o =>
       h("tr", {class: "cliquable", onclick: () => aller("operations", {choisie: o.id, mois: ""})}, h("td", null, dateFr(o.date)), h("td", null, obtenir("commercants", o.commercant)?.nom || o.libelle), h("td", null, libelleCompte(o.compte)), montantCellule(o.montant))}),
-    h("p", {class: "note"}, "Rattachement : champ « Projet » du détail d'une opération, ou catégorie et sous-catégorie d'une échéance du projet avec la nature « Exceptionnelle ».")));
+    h("p", {class: "note"}, "Rattachement : champ « Projet » du détail d'une opération, ou d'office pour une dépense « Exceptionnelle » de la catégorie d'une échéance du projet (ou des catégories qui lui sont rattachées).")));
   c.appendChild(g);
 }});

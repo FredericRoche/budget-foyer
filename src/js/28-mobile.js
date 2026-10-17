@@ -140,7 +140,7 @@ async function formulaireMobile(corps, saisie, t){
   const valider = () => {
     const m = lireMontant(montant.value);
     if (isNaN(m) || m <= 0){ message("Montant à vérifier.", true); return false; }
-    if (!cm.value.trim()){ message("Indiquez le commerçant.", true); return false; }
+    if (!cm.value.trim()){ message("Indiquez le fournisseur.", true); return false; }
     return true;
   };
   corps.append(
@@ -148,7 +148,7 @@ async function formulaireMobile(corps, saisie, t){
     t?.photo ? h("img", {class: "apercu-photo", src: URL.createObjectURL(new Blob([t.photo.octets], {type: t.photo.mime})), alt: "Ticket", style: {maxHeight: "18vh"}}) : null,
     h("div", {class: "bloc"}, h("label", null, "Montant", t?.montant ? h("span", {class: "propose"}, "proposé") : null), montant),
     h("div", {class: "bloc deux", style: {gap: ".6rem"}}, h("div", null, h("label", null, "Date", t?.date ? h("span", {class: "propose"}, "proposé") : null), date), h("div", null, h("label", null, "Payé avec"), carte)),
-    h("div", {class: "bloc"}, h("label", null, "Commerçant", fiche ? h("span", {class: "propose"}, "reconnu") : t ? h("span", {class: "propose"}, "proposé") : null), cm, liste, lu),
+    h("div", {class: "bloc"}, h("label", null, "Fournisseur", fiche ? h("span", {class: "propose"}, "reconnu") : t ? h("span", {class: "propose"}, "proposé") : null), cm, liste, lu),
     h("div", {class: "bloc"}, h("label", null, "Nature exacte de la dépense"), nat, sugg),
     h("label", null, "Catégorie"), puces, h("label", null, "Lieu"), pucesLieu,
     h("button", {class: "primaire gros", onclick: async () => {

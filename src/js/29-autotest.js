@@ -169,6 +169,9 @@ async function autotest(){
     vrai("projet et cession : hors de la marche courante", analyseTresorerie(s2).premierBas === undefined && !s2.evenements.some(e => /Grosse|Cession/.test(e.libelle)));
     const k2 = simulerEpargne({depart: "2027-03-31", jours: 120});
     v("épargne : cession puis paiement du projet", [k2.jours.find(j => j.date === "2027-04-10").solde, k2.jours[k2.jours.length - 1].solde], [50000, 20000]);
+    enregistrer("operations", {compte: cj.id, date: "2027-03-02", montant: -950, libelle: "VIR ARCHITECTE EXEMPLE", categorie: "Travaux maison", sousCategorie: "Honoraires", nature: "Exceptionnelle"});
+    enregistrer("echeances", Object.assign(grosse, {rattache: [{categorie: "Travaux maison"}]}));
+    v("projet : dépenses déjà faites rattachées par catégorie", etatProjet("Travaux").paye, 950);
     const tj = simulerTresorerie({depart: "2027-03-31", jours: 120, perimetre: "tout"});
     v("compte joint réel : marche courante + capital", Math.round(tj.jours[tj.jours.length - 1].solde - s2.jours[s2.jours.length - 1].solde), 20000);
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }

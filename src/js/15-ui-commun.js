@@ -92,7 +92,7 @@ function etiquetteLieu(lieu){ return lieu ? h("span", {class: classeLieu(lieu)},
 function marqueOrigine(op){
   const o = op.origine;
   if (o === "regle") return h("span", {class: "marque-src regle"}, "règle");
-  if (o === "commercant") return h("span", {class: "marque-src regle"}, "commerçant");
+  if (o === "commercant") return h("span", {class: "marque-src regle"}, "fournisseur");
   if (o === "historique") return h("span", {class: "marque-src histo"}, "historique");
   if (o === "mcc" || o === "banque") return h("span", {class: "marque-src histo"}, o === "mcc" ? "code commerçant" : "banque");
   if (o === "reprise") return h("span", {class: "marque-src"}, "reprise");
@@ -172,7 +172,7 @@ function construireNavigation(){
   n.append(lien("accueil", "Tableau de bord"), lien("traiter", "À traiter", a.total || null),
     h("div", {class: "rubrique"}, "Comptes"), lien("operations", "Opérations"), lien("import", "Importer"),
     lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(j => j.statut === "a_rapprocher").length || null),
-    lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Commerçants"),
+    lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Fournisseurs"),
     h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), lien("patrimoine", "Bilan et résultat"),
     lien("tresorerie", "Trésorerie", ana?.premierBas ? "!" : null, true),
     lien("epargne", "Épargne"), lien("projets", "Projets"),

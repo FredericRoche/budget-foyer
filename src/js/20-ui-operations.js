@@ -19,7 +19,7 @@ function filtrerOperations(etat){
 
 declarerEcran("operations", {titre: "Opérations", rendre(c, etat){
   const ops = filtrerOperations(etat);
-  const recherche = h("input", {type: "search", placeholder: "Rechercher (libellé, commerçant, nature, montant…)", value: etat.recherche || "", style: {width: "17rem"}});
+  const recherche = h("input", {type: "search", placeholder: "Rechercher (libellé, fournisseur, nature, montant…)", value: etat.recherche || "", style: {width: "17rem"}});
   let minuterie = 0;
   recherche.addEventListener("input", () => { clearTimeout(minuterie); minuterie = setTimeout(() => { etat.recherche = recherche.value; rafraichirEcran(); setTimeout(() => { const r = document.querySelector("#contenu input[type=search]"); if (r){ r.focus(); r.setSelectionRange(r.value.length, r.value.length); } }, 0); }, 250); });
   const comptes = selection([["", "Tous les comptes"], ...vivants("comptes").map(x => [x.id, x.nom])], etat.compte || "", {onchange: e => { etat.compte = e.target.value; rafraichirEcran(); }});
@@ -34,7 +34,7 @@ declarerEcran("operations", {titre: "Opérations", rendre(c, etat){
   const choisie = etat.choisie ? obtenir("operations", etat.choisie) : null;
   const grille = h("div", {class: choisie ? "avec-panneau" : ""});
   grille.appendChild(tableau([{titre: "Achat", cle: o => o.date}, {titre: "Débité le", cle: o => o.dateDebit || "9"}, {titre: "Compte", cle: o => libelleCompte(o.compte)},
-    {titre: "Commerçant", cle: o => o.commercant ? obtenir("commercants", o.commercant)?.nom : o.libelle}, {titre: "Nature exacte", cle: o => o.natureExacte || ""},
+    {titre: "Fournisseur", cle: o => o.commercant ? obtenir("commercants", o.commercant)?.nom : o.libelle}, {titre: "Nature exacte", cle: o => o.natureExacte || ""},
     {titre: "Montant", num: true, cle: o => o.montant}, {titre: "Catégorie", cle: o => categorieComplete(o)}, {titre: "Lieu", cle: o => o.lieu || ""}, {titre: "📎"}], ops, {
     classe: "serre", vide: "Aucune opération ne correspond.",
     ligne: o => {
@@ -72,7 +72,7 @@ function panneauOperation(o, etat){
       h("dt", null, "Libellé bancaire"), h("dd", null, o.libelle), h("dt", null, "Montant"), h("dd", null, euros(o.montant)),
       o.lien ? [h("dt", null, "Transfert"), h("dd", null, "lié à " + libelleCompte(obtenir("operations", o.lien)?.compte))] : null),
     raisons.length ? [h("label", {style: {marginTop: ".6rem"}}, "Raison sociale lue (justificatifs)"), h("div", {class: "petit discret"}, raisons.join(" · "))] : null,
-    h("label", {style: {marginTop: ".5rem"}}, "Commerçant (nom d'usage)"), nomCm,
+    h("label", {style: {marginTop: ".5rem"}}, "Fournisseur (nom d'usage)"), nomCm,
     h("label", {style: {marginTop: ".5rem"}}, "Nature exacte de la dépense"), nature, sugg,
     h("dl", {style: {marginTop: ".7rem"}}, h("dt", null, "Catégorie"), h("dd", null, selCat), h("dt", null, "Nature"), h("dd", null, selNat), h("dt", null, "Lieu"), h("dd", null, selLieu), nomsProjets().length ? [h("dt", null, "Projet"), h("dd", null, selProjet)] : null,
       o.ventilation ? [h("dt", null, "Ventilation"), h("dd", null, o.ventilation.map(v => euros(v.montant) + " " + v.sousCategorie + (v.natureExacte ? " (" + v.natureExacte + ")" : "")).join(" · "))] : null,
@@ -101,7 +101,7 @@ function panneauOperation(o, etat){
       rafraichirEcran();
     }}, "Enregistrer"),
     h("button", {class: "mini discret", onclick: () => ventilerOperation(o)}, "Ventiler…"),
-    cm ? h("button", {class: "mini discret", onclick: () => aller("commercants", {choisi: cm.id})}, "Fiche commerçant") : null,
+    cm ? h("button", {class: "mini discret", onclick: () => aller("commercants", {choisi: cm.id})}, "Fiche fournisseur") : null,
     !o.import && !o.empreinte?.startsWith("facture") ? h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer cette opération saisie à la main ?", "Supprimer", true)){ supprimer("operations", o.id); etat.choisie = null; rafraichirEcran(); } }}, "Supprimer") : null));
   return p;
 }
@@ -162,7 +162,7 @@ async function nouvelleOperation(){
   const libelle = h("input", {type: "text"}); const nat = h("input", {type: "text"});
   const cat = selectionCategorie("", ""); const lieu = selectionLieu("");
   const ok = await dialogue({titre: "Nouvelle opération", corps: h("div", {class: "grille-champs"}, champ("Compte", compte), champ("Date", date), champ("Montant (négatif = dépense)", montant),
-    champ("Commerçant ou libellé", libelle), champ("Nature exacte", nat), champ("Catégorie", cat), champ("Lieu", lieu)),
+    champ("Fournisseur ou libellé", libelle), champ("Nature exacte", nat), champ("Catégorie", cat), champ("Lieu", lieu)),
     actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
       const m = lireMontant(montant.value); if (isNaN(m) || !m){ message("Montant illisible.", true); return false; }
       const op = Object.assign({compte: compte.value, date: date.value, dateDebit: date.value, montant: m, libelle: libelle.value.trim() || "Saisie manuelle", natureExacte: nat.value.trim(),
@@ -176,7 +176,7 @@ async function nouvelleOperation(){
 }
 function exporterOperations(ops){
   telecharger(ecrireClasseur([{nom: "Opérations", colonnes: [{titre: "Date d'achat", type: "date", largeur: 12}, {titre: "Débité le", type: "date", largeur: 12}, {titre: "Compte", largeur: 22},
-    {titre: "Libellé bancaire", largeur: 40}, {titre: "Commerçant", largeur: 24}, {titre: "Nature exacte", largeur: 30}, {titre: "Montant", type: "euros", largeur: 13},
+    {titre: "Libellé bancaire", largeur: 40}, {titre: "Fournisseur", largeur: 24}, {titre: "Nature exacte", largeur: 30}, {titre: "Montant", type: "euros", largeur: 13},
     {titre: "Catégorie", largeur: 20}, {titre: "Sous-catégorie", largeur: 26}, {titre: "Nature", largeur: 14}, {titre: "Lieu", largeur: 10}, {titre: "Justificatifs", type: "nombre", largeur: 8}],
     lignes: ops.flatMap(o => partsDe(o).map(p => [o.date, o.dateDebit || "", libelleCompte(o.compte), o.libelle, obtenir("commercants", o.commercant)?.nom || "",
       p.natureExacte || o.natureExacte || "", p.montant, p.categorie || "", p.sousCategorie || "", p.nature || "", p.lieu || "", (o.justificatifs || []).length]))}]),

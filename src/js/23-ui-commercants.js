@@ -1,16 +1,16 @@
 /* ================= Commerçants ================= */
-declarerEcran("commercants", {titre: "Commerçants", rendre(c, etat){
+declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   const q = norm(etat.recherche || "");
   const nbAchats = new Map(); for (const o of vivants("operations")) if (o.commercant) nbAchats.set(o.commercant, (nbAchats.get(o.commercant) || 0) + 1);
   const liste = vivants("commercants").filter(x => !q || norm(x.nom + " " + (x.alias || []).join(" ")).includes(q));
-  const recherche = h("input", {type: "search", placeholder: "Rechercher un commerçant, un alias…", value: etat.recherche || "", style: {width: "16rem"}});
+  const recherche = h("input", {type: "search", placeholder: "Rechercher un fournisseur, un alias…", value: etat.recherche || "", style: {width: "16rem"}});
   let t = 0; recherche.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { etat.recherche = recherche.value; rafraichirEcran(); const r = document.querySelector("#contenu input[type=search]"); if (r){ r.focus(); r.setSelectionRange(r.value.length, r.value.length); } }, 250); });
-  c.appendChild(entete("Commerçants", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " commerçants", [recherche,
+  c.appendChild(entete("Fournisseurs", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " fournisseurs", [recherche,
     h("button", {class: "discret", onclick: () => fusionDialogue()}, "Fusionner deux fiches…"),
     h("button", {class: "discret", onclick: () => publierExtraitCommercants().then(() => message("Extrait publié pour le téléphone.")).catch(e => message(e.message, true))}, "Publier l'extrait pour le téléphone")]));
   const choisi = etat.choisi ? obtenir("commercants", etat.choisi) : null;
   const g = h("div", {class: choisi ? "avec-panneau" : ""});
-  g.appendChild(tableau([{titre: "Commerçant", cle: x => x.nom}, {titre: "Alias reconnus"}, {titre: "Classement par défaut", cle: x => x.categorie || ""}, {titre: "Lieu", cle: x => x.lieu || ""},
+  g.appendChild(tableau([{titre: "Fournisseur", cle: x => x.nom}, {titre: "Alias reconnus"}, {titre: "Classement par défaut", cle: x => x.categorie || ""}, {titre: "Lieu", cle: x => x.lieu || ""},
     {titre: "Achats", num: true, cle: x => nbAchats.get(x.id) || 0}], liste, {classe: "serre", tri: 4, sens: -1, limite: 400, ligne: x => {
       const rep = x.variable ? repartitionCommercant(x) : null;
       return h("tr", {class: "cliquable" + (x === choisi ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},

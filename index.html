@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-NlDUpvKUn11zRtsivZceyEAtGsvPzE1rXDfrAxOqqe8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Cmhm2nGlFwdBlNYFIVxcPAubg9wCies8ncOG+T08eus=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -285,7 +285,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-17.1758";
+const VERSION_APP = "2026-10-17.1817";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3052,7 +3052,7 @@ function etiquetteLieu(lieu){ return lieu ? h("span", {class: classeLieu(lieu)},
 function marqueOrigine(op){
   const o = op.origine;
   if (o === "regle") return h("span", {class: "marque-src regle"}, "règle");
-  if (o === "commercant") return h("span", {class: "marque-src regle"}, "commerçant");
+  if (o === "commercant") return h("span", {class: "marque-src regle"}, "fournisseur");
   if (o === "historique") return h("span", {class: "marque-src histo"}, "historique");
   if (o === "mcc" || o === "banque") return h("span", {class: "marque-src histo"}, o === "mcc" ? "code commerçant" : "banque");
   if (o === "reprise") return h("span", {class: "marque-src"}, "reprise");
@@ -3132,7 +3132,7 @@ function construireNavigation(){
   n.append(lien("accueil", "Tableau de bord"), lien("traiter", "À traiter", a.total || null),
     h("div", {class: "rubrique"}, "Comptes"), lien("operations", "Opérations"), lien("import", "Importer"),
     lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(j => j.statut === "a_rapprocher").length || null),
-    lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Commerçants"),
+    lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Fournisseurs"),
     h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), lien("patrimoine", "Bilan et résultat"),
     lien("tresorerie", "Trésorerie", ana?.premierBas ? "!" : null, true),
     lien("epargne", "Épargne"), lien("projets", "Projets"),
@@ -3473,7 +3473,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
           rafraichirEcran();
         }}, "Valider")));
     }}));
-  sec.appendChild(h("p", {class: "note"}, "Une correction est retenue par la fiche du commerçant et appliquée aux opérations suivantes. Pour une règle plus fine (montant, jour du mois…), voir Réglages › Règles."));
+  sec.appendChild(h("p", {class: "note"}, "Une correction est retenue par la fiche du fournisseur et appliquée aux opérations suivantes. Pour une règle plus fine (montant, jour du mois…), voir Réglages › Règles."));
   c.appendChild(sec);
 
   /* 2. Doublons douteux : lignes identiques le même jour hors export LCL */
@@ -3547,7 +3547,7 @@ function filtrerOperations(etat){
 
 declarerEcran("operations", {titre: "Opérations", rendre(c, etat){
   const ops = filtrerOperations(etat);
-  const recherche = h("input", {type: "search", placeholder: "Rechercher (libellé, commerçant, nature, montant…)", value: etat.recherche || "", style: {width: "17rem"}});
+  const recherche = h("input", {type: "search", placeholder: "Rechercher (libellé, fournisseur, nature, montant…)", value: etat.recherche || "", style: {width: "17rem"}});
   let minuterie = 0;
   recherche.addEventListener("input", () => { clearTimeout(minuterie); minuterie = setTimeout(() => { etat.recherche = recherche.value; rafraichirEcran(); setTimeout(() => { const r = document.querySelector("#contenu input[type=search]"); if (r){ r.focus(); r.setSelectionRange(r.value.length, r.value.length); } }, 0); }, 250); });
   const comptes = selection([["", "Tous les comptes"], ...vivants("comptes").map(x => [x.id, x.nom])], etat.compte || "", {onchange: e => { etat.compte = e.target.value; rafraichirEcran(); }});
@@ -3562,7 +3562,7 @@ declarerEcran("operations", {titre: "Opérations", rendre(c, etat){
   const choisie = etat.choisie ? obtenir("operations", etat.choisie) : null;
   const grille = h("div", {class: choisie ? "avec-panneau" : ""});
   grille.appendChild(tableau([{titre: "Achat", cle: o => o.date}, {titre: "Débité le", cle: o => o.dateDebit || "9"}, {titre: "Compte", cle: o => libelleCompte(o.compte)},
-    {titre: "Commerçant", cle: o => o.commercant ? obtenir("commercants", o.commercant)?.nom : o.libelle}, {titre: "Nature exacte", cle: o => o.natureExacte || ""},
+    {titre: "Fournisseur", cle: o => o.commercant ? obtenir("commercants", o.commercant)?.nom : o.libelle}, {titre: "Nature exacte", cle: o => o.natureExacte || ""},
     {titre: "Montant", num: true, cle: o => o.montant}, {titre: "Catégorie", cle: o => categorieComplete(o)}, {titre: "Lieu", cle: o => o.lieu || ""}, {titre: "📎"}], ops, {
     classe: "serre", vide: "Aucune opération ne correspond.",
     ligne: o => {
@@ -3600,7 +3600,7 @@ function panneauOperation(o, etat){
       h("dt", null, "Libellé bancaire"), h("dd", null, o.libelle), h("dt", null, "Montant"), h("dd", null, euros(o.montant)),
       o.lien ? [h("dt", null, "Transfert"), h("dd", null, "lié à " + libelleCompte(obtenir("operations", o.lien)?.compte))] : null),
     raisons.length ? [h("label", {style: {marginTop: ".6rem"}}, "Raison sociale lue (justificatifs)"), h("div", {class: "petit discret"}, raisons.join(" · "))] : null,
-    h("label", {style: {marginTop: ".5rem"}}, "Commerçant (nom d'usage)"), nomCm,
+    h("label", {style: {marginTop: ".5rem"}}, "Fournisseur (nom d'usage)"), nomCm,
     h("label", {style: {marginTop: ".5rem"}}, "Nature exacte de la dépense"), nature, sugg,
     h("dl", {style: {marginTop: ".7rem"}}, h("dt", null, "Catégorie"), h("dd", null, selCat), h("dt", null, "Nature"), h("dd", null, selNat), h("dt", null, "Lieu"), h("dd", null, selLieu), nomsProjets().length ? [h("dt", null, "Projet"), h("dd", null, selProjet)] : null,
       o.ventilation ? [h("dt", null, "Ventilation"), h("dd", null, o.ventilation.map(v => euros(v.montant) + " " + v.sousCategorie + (v.natureExacte ? " (" + v.natureExacte + ")" : "")).join(" · "))] : null,
@@ -3629,7 +3629,7 @@ function panneauOperation(o, etat){
       rafraichirEcran();
     }}, "Enregistrer"),
     h("button", {class: "mini discret", onclick: () => ventilerOperation(o)}, "Ventiler…"),
-    cm ? h("button", {class: "mini discret", onclick: () => aller("commercants", {choisi: cm.id})}, "Fiche commerçant") : null,
+    cm ? h("button", {class: "mini discret", onclick: () => aller("commercants", {choisi: cm.id})}, "Fiche fournisseur") : null,
     !o.import && !o.empreinte?.startsWith("facture") ? h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer cette opération saisie à la main ?", "Supprimer", true)){ supprimer("operations", o.id); etat.choisie = null; rafraichirEcran(); } }}, "Supprimer") : null));
   return p;
 }
@@ -3690,7 +3690,7 @@ async function nouvelleOperation(){
   const libelle = h("input", {type: "text"}); const nat = h("input", {type: "text"});
   const cat = selectionCategorie("", ""); const lieu = selectionLieu("");
   const ok = await dialogue({titre: "Nouvelle opération", corps: h("div", {class: "grille-champs"}, champ("Compte", compte), champ("Date", date), champ("Montant (négatif = dépense)", montant),
-    champ("Commerçant ou libellé", libelle), champ("Nature exacte", nat), champ("Catégorie", cat), champ("Lieu", lieu)),
+    champ("Fournisseur ou libellé", libelle), champ("Nature exacte", nat), champ("Catégorie", cat), champ("Lieu", lieu)),
     actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
       const m = lireMontant(montant.value); if (isNaN(m) || !m){ message("Montant illisible.", true); return false; }
       const op = Object.assign({compte: compte.value, date: date.value, dateDebit: date.value, montant: m, libelle: libelle.value.trim() || "Saisie manuelle", natureExacte: nat.value.trim(),
@@ -3704,7 +3704,7 @@ async function nouvelleOperation(){
 }
 function exporterOperations(ops){
   telecharger(ecrireClasseur([{nom: "Opérations", colonnes: [{titre: "Date d'achat", type: "date", largeur: 12}, {titre: "Débité le", type: "date", largeur: 12}, {titre: "Compte", largeur: 22},
-    {titre: "Libellé bancaire", largeur: 40}, {titre: "Commerçant", largeur: 24}, {titre: "Nature exacte", largeur: 30}, {titre: "Montant", type: "euros", largeur: 13},
+    {titre: "Libellé bancaire", largeur: 40}, {titre: "Fournisseur", largeur: 24}, {titre: "Nature exacte", largeur: 30}, {titre: "Montant", type: "euros", largeur: 13},
     {titre: "Catégorie", largeur: 20}, {titre: "Sous-catégorie", largeur: 26}, {titre: "Nature", largeur: 14}, {titre: "Lieu", largeur: 10}, {titre: "Justificatifs", type: "nombre", largeur: 8}],
     lignes: ops.flatMap(o => partsDe(o).map(p => [o.date, o.dateDebit || "", libelleCompte(o.compte), o.libelle, obtenir("commercants", o.commercant)?.nom || "",
       p.natureExacte || o.natureExacte || "", p.montant, p.categorie || "", p.sousCategorie || "", p.nature || "", p.lieu || "", (o.justificatifs || []).length]))}]),
@@ -3894,7 +3894,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
     c.appendChild(h("p", {class: "vide"}, "Aucun justificatif à rapprocher."));
   } else c.appendChild(ecranRapprochement(j, etat, attente));
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Tous les justificatifs"));
-  c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Commerçant", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
+  c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
       h("td", null, x.origine === "mobile" ? "téléphone" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, x.auto ? "rapproché d'office" : "rapproché") : h("span", {class: "neg"}, "à rapprocher")))}));
@@ -3940,8 +3940,8 @@ function ecranRapprochement(j, etat, attente){
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
-      ligneOcr("Commerçant", cm, fiche ? "fichier des commerçants" : "nouveau"), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du commerçant" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""));
+      ligneOcr("Fournisseur", cm, fiche ? "fichier des fournisseurs" : "nouveau"), ligneOcr("Nature exacte", nat, ""), sugg,
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""));
     champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte});
   });
   const enregistrerSaisie = () => {
@@ -4008,7 +4008,7 @@ declarerEcran("boite", {titre: "Boîte de saisies", rendre(c){
        await actualiserBoite(); rafraichirEcran();
      }}, "Fusionner dans les comptes") : null]));
   if (SESSION.adaptateur?.nom === "local") c.appendChild(h("div", {class: "bandeau info"}, "Le stockage « ce navigateur seulement » ne reçoit pas les saisies du téléphone : choisissez le dossier OneDrive dans les Réglages."));
-  c.appendChild(tableau([{titre: "Déposée le"}, {titre: "Date"}, {titre: "Commerçant"}, {titre: "Nature exacte"}, {titre: "Montant", num: true}, {titre: "Catégorie"}, {titre: "Payé avec"}, {titre: "Tickets", num: true}], BOITE_CACHE, {
+  c.appendChild(tableau([{titre: "Déposée le"}, {titre: "Date"}, {titre: "Fournisseur"}, {titre: "Nature exacte"}, {titre: "Montant", num: true}, {titre: "Catégorie"}, {titre: "Payé avec"}, {titre: "Tickets", num: true}], BOITE_CACHE, {
     vide: "La boîte est vide.", ligne: e => {
       if (e.erreur) return h("tr", null, h("td", {colspan: 8, class: "neg"}, e.nom + " : illisible (" + e.erreur + ")"));
       const s2 = e.saisie; const t = s2.tickets || [];
@@ -4022,18 +4022,18 @@ declarerEcran("boite", {titre: "Boîte de saisies", rendre(c){
 
 /* ===== 23-ui-commercants.js ===== */
 /* ================= Commerçants ================= */
-declarerEcran("commercants", {titre: "Commerçants", rendre(c, etat){
+declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   const q = norm(etat.recherche || "");
   const nbAchats = new Map(); for (const o of vivants("operations")) if (o.commercant) nbAchats.set(o.commercant, (nbAchats.get(o.commercant) || 0) + 1);
   const liste = vivants("commercants").filter(x => !q || norm(x.nom + " " + (x.alias || []).join(" ")).includes(q));
-  const recherche = h("input", {type: "search", placeholder: "Rechercher un commerçant, un alias…", value: etat.recherche || "", style: {width: "16rem"}});
+  const recherche = h("input", {type: "search", placeholder: "Rechercher un fournisseur, un alias…", value: etat.recherche || "", style: {width: "16rem"}});
   let t = 0; recherche.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { etat.recherche = recherche.value; rafraichirEcran(); const r = document.querySelector("#contenu input[type=search]"); if (r){ r.focus(); r.setSelectionRange(r.value.length, r.value.length); } }, 250); });
-  c.appendChild(entete("Commerçants", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " commerçants", [recherche,
+  c.appendChild(entete("Fournisseurs", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " fournisseurs", [recherche,
     h("button", {class: "discret", onclick: () => fusionDialogue()}, "Fusionner deux fiches…"),
     h("button", {class: "discret", onclick: () => publierExtraitCommercants().then(() => message("Extrait publié pour le téléphone.")).catch(e => message(e.message, true))}, "Publier l'extrait pour le téléphone")]));
   const choisi = etat.choisi ? obtenir("commercants", etat.choisi) : null;
   const g = h("div", {class: choisi ? "avec-panneau" : ""});
-  g.appendChild(tableau([{titre: "Commerçant", cle: x => x.nom}, {titre: "Alias reconnus"}, {titre: "Classement par défaut", cle: x => x.categorie || ""}, {titre: "Lieu", cle: x => x.lieu || ""},
+  g.appendChild(tableau([{titre: "Fournisseur", cle: x => x.nom}, {titre: "Alias reconnus"}, {titre: "Classement par défaut", cle: x => x.categorie || ""}, {titre: "Lieu", cle: x => x.lieu || ""},
     {titre: "Achats", num: true, cle: x => nbAchats.get(x.id) || 0}], liste, {classe: "serre", tri: 4, sens: -1, limite: 400, ligne: x => {
       const rep = x.variable ? repartitionCommercant(x) : null;
       return h("tr", {class: "cliquable" + (x === choisi ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
@@ -4441,7 +4441,7 @@ function reglagesRegles(c){
         h("td", {class: "petit"}, [r.sens === "debit" ? "débit" : r.sens === "credit" ? "crédit" : "", r.montantMin ? "≥ " + euros(+r.montantMin) : "", r.montantMax ? "≤ " + euros(+r.montantMax) : "",
           r.jourMin ? "jour ≥ " + r.jourMin : "", r.jourMax ? "jour ≤ " + r.jourMax : "", r.compte ? libelleCompte(r.compte) : ""].filter(Boolean).join(", ")),
         h("td", null, r.categorie + (r.sousCategorie ? " › " + r.sousCategorie : "")), h("td", null, etiquetteLieu(r.lieu)), h("td", null, h("button", {class: "mini discret", onclick: () => editerRegle(r)}, "Modifier")))}));
-  c.appendChild(h("p", {class: "note"}, "Plusieurs mots possibles dans « contient », séparés par « | » (l'un ou l'autre). La règle de plus haute priorité qui convient l'emporte, avant les fiches commerçants."));
+  c.appendChild(h("p", {class: "note"}, "Plusieurs mots possibles dans « contient », séparés par « | » (l'un ou l'autre). La règle de plus haute priorité qui convient l'emporte, avant les fiches fournisseurs."));
 }
 async function editerRegle(r){
   const x = r || {nom: "", contient: "", priorite: 50, active: true, sens: "debit"};
@@ -4504,12 +4504,12 @@ function reglagesTelephones(c){
         h("li", null, "Le téléphone ouvre l'application en mode « saisie » et demande la connexion au compte Microsoft (OneDrive en ligne)."),
         h("li", null, "Ajoutez l'application à l'écran d'accueil (menu du navigateur : « Ajouter à l'écran d'accueil »).")),
       qr, h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini", onclick: () => navigator.clipboard.writeText(lien).then(() => message("Lien copié."))}, "Copier le lien"),
-        h("button", {class: "mini discret", onclick: () => { modifierParametres({appairageFait: true}); publierExtraitCommercants().then(() => message("Appairage noté ; extrait des commerçants publié.")).catch(e => message(e.message, true)); }}, "Appairage fait"))),
+        h("button", {class: "mini discret", onclick: () => { modifierParametres({appairageFait: true}); publierExtraitCommercants().then(() => message("Appairage noté ; extrait des fournisseurs publié.")).catch(e => message(e.message, true)); }}, "Appairage fait"))),
     h("section", {class: "carte"}, h("h2", null, "Ce que contient le lien"),
       h("ul", {style: {paddingLeft: "1.2rem"}}, h("li", null, "la clé publique du foyer : le téléphone chiffre ses saisies pour ce livre, sans pouvoir les relire ni lire les comptes ;"),
-        h("li", null, "la clé de l'extrait des commerçants : noms, alias, catégories et natures habituelles, sans aucun montant ni opération ;"),
+        h("li", null, "la clé de l'extrait des fournisseurs : noms, alias, catégories et natures habituelles, sans aucun montant ni opération ;"),
         h("li", null, "aucun mot de passe, aucun identifiant Microsoft.")),
-      h("p", {class: "note"}, "Perte du téléphone : seuls la liste des commerçants et les saisies non encore envoyées seraient exposées. Changez alors la clé de l'extrait (bouton ci-dessous) et réappairez."),
+      h("p", {class: "note"}, "Perte du téléphone : seuls la liste des fournisseurs et les saisies non encore envoyées seraient exposées. Changez alors la clé de l'extrait (bouton ci-dessous) et réappairez."),
       h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Changer la clé de l'extrait ? Les téléphones devront être réappairés.", "Changer", true)){ LIVRE.cles.extrait = versB64(crypto.getRandomValues(new Uint8Array(32))); marquerModifie(); await publierExtraitCommercants().catch(() => {}); rafraichirEcran(); } }}, "Changer la clé de l'extrait"))));
 }
 
@@ -4577,9 +4577,13 @@ function reglagesAPropos(c){
    porte son nom (panneau de détail), ou si elle a la catégorie et la sous-catégorie d'une de ses
    échéances et la nature « Exceptionnelle ». */
 function nomsProjets(){ return [...new Set(vivants("echeances").map(e => e.projet).filter(Boolean))].sort(); }
+/* Rattachement d'office : nature « Exceptionnelle » et catégorie (avec sa sous-catégorie si elle est
+   précisée) d'une échéance du projet ou de sa liste « rattache » ; le champ « Projet » d'une opération
+   l'emporte toujours (vide = règle d'office). */
 function operationsDuProjet(nom, echeances){
-  const cles = new Set(echeances.filter(e => e.categorie && e.sousCategorie).map(e => e.categorie + "|" + e.sousCategorie));
-  return vivants("operations").filter(o => o.projet === nom || (!o.projet && o.nature === "Exceptionnelle" && cles.has(o.categorie + "|" + o.sousCategorie)));
+  const regles = echeances.flatMap(e => [...(e.rattache || []), e.categorie ? {categorie: e.categorie, sousCategorie: e.sousCategorie} : null]).filter(Boolean);
+  const vaAuProjet = o => regles.some(r => r.categorie === o.categorie && (!r.sousCategorie || r.sousCategorie === o.sousCategorie));
+  return vivants("operations").filter(o => o.projet === nom || (!o.projet && o.nature === "Exceptionnelle" && o.montant < 0 && vaAuProjet(o)));
 }
 function etatProjet(nom){
   const ech = vivants("echeances").filter(e => e.projet === nom && e.active !== false);
@@ -4655,7 +4659,7 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
   g.appendChild(h("section", null, h("h2", null, "Paiements faits : " + x.nom),
     tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Compte"}, {titre: "Montant", num: true}], x.ops.sort((a, b) => a.date < b.date ? 1 : -1), {classe: "serre", vide: "Aucun paiement rattaché pour l'instant.", ligne: o =>
       h("tr", {class: "cliquable", onclick: () => aller("operations", {choisie: o.id, mois: ""})}, h("td", null, dateFr(o.date)), h("td", null, obtenir("commercants", o.commercant)?.nom || o.libelle), h("td", null, libelleCompte(o.compte)), montantCellule(o.montant))}),
-    h("p", {class: "note"}, "Rattachement : champ « Projet » du détail d'une opération, ou catégorie et sous-catégorie d'une échéance du projet avec la nature « Exceptionnelle ».")));
+    h("p", {class: "note"}, "Rattachement : champ « Projet » du détail d'une opération, ou d'office pour une dépense « Exceptionnelle » de la catégorie d'une échéance du projet (ou des catégories qui lui sont rattachées).")));
   c.appendChild(g);
 }});
 
@@ -4802,7 +4806,7 @@ async function formulaireMobile(corps, saisie, t){
   const valider = () => {
     const m = lireMontant(montant.value);
     if (isNaN(m) || m <= 0){ message("Montant à vérifier.", true); return false; }
-    if (!cm.value.trim()){ message("Indiquez le commerçant.", true); return false; }
+    if (!cm.value.trim()){ message("Indiquez le fournisseur.", true); return false; }
     return true;
   };
   corps.append(
@@ -4810,7 +4814,7 @@ async function formulaireMobile(corps, saisie, t){
     t?.photo ? h("img", {class: "apercu-photo", src: URL.createObjectURL(new Blob([t.photo.octets], {type: t.photo.mime})), alt: "Ticket", style: {maxHeight: "18vh"}}) : null,
     h("div", {class: "bloc"}, h("label", null, "Montant", t?.montant ? h("span", {class: "propose"}, "proposé") : null), montant),
     h("div", {class: "bloc deux", style: {gap: ".6rem"}}, h("div", null, h("label", null, "Date", t?.date ? h("span", {class: "propose"}, "proposé") : null), date), h("div", null, h("label", null, "Payé avec"), carte)),
-    h("div", {class: "bloc"}, h("label", null, "Commerçant", fiche ? h("span", {class: "propose"}, "reconnu") : t ? h("span", {class: "propose"}, "proposé") : null), cm, liste, lu),
+    h("div", {class: "bloc"}, h("label", null, "Fournisseur", fiche ? h("span", {class: "propose"}, "reconnu") : t ? h("span", {class: "propose"}, "proposé") : null), cm, liste, lu),
     h("div", {class: "bloc"}, h("label", null, "Nature exacte de la dépense"), nat, sugg),
     h("label", null, "Catégorie"), puces, h("label", null, "Lieu"), pucesLieu,
     h("button", {class: "primaire gros", onclick: async () => {
@@ -5031,6 +5035,9 @@ async function autotest(){
     vrai("projet et cession : hors de la marche courante", analyseTresorerie(s2).premierBas === undefined && !s2.evenements.some(e => /Grosse|Cession/.test(e.libelle)));
     const k2 = simulerEpargne({depart: "2027-03-31", jours: 120});
     v("épargne : cession puis paiement du projet", [k2.jours.find(j => j.date === "2027-04-10").solde, k2.jours[k2.jours.length - 1].solde], [50000, 20000]);
+    enregistrer("operations", {compte: cj.id, date: "2027-03-02", montant: -950, libelle: "VIR ARCHITECTE EXEMPLE", categorie: "Travaux maison", sousCategorie: "Honoraires", nature: "Exceptionnelle"});
+    enregistrer("echeances", Object.assign(grosse, {rattache: [{categorie: "Travaux maison"}]}));
+    v("projet : dépenses déjà faites rattachées par catégorie", etatProjet("Travaux").paye, 950);
     const tj = simulerTresorerie({depart: "2027-03-31", jours: 120, perimetre: "tout"});
     v("compte joint réel : marche courante + capital", Math.round(tj.jours[tj.jours.length - 1].solde - s2.jours[s2.jours.length - 1].solde), 20000);
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
