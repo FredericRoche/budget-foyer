@@ -15,8 +15,9 @@ function jourPrelevementAmex(compteId){
   return LIVRE.parametres.amexJourPrelevement || (vus.length ? vus[Math.floor(vus.length / 2)] : 27);
 }
 const estCapital = e => !!e.projet || !!e.capital || e.categorie === "Patrimoine";
-/* Épargne mobilisable pour les projets : livrets et assurances-vie, sauf compte exclu dans Réglages › Comptes. */
-const estMobilisable = c => c.actif !== false && (c.mobilisable ?? ["livret", "assurance_vie"].includes(c.type));
+/* Épargne mobilisable : livrets, assurances-vie et épargne retraite (le PER sert de réserve d'appoint
+   quand les revenus ne suffisent pas). Valeurs brutes : la fiscalité latente n'est pas déduite. */
+const estMobilisable = c => c.actif !== false && (c.mobilisable ?? ["livret", "assurance_vie", "retraite"].includes(c.type));
 
 function occurrences(e, debut, fin){
   const r = []; const d0 = e.debut || debut;

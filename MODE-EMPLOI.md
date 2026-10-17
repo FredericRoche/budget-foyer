@@ -70,7 +70,7 @@ Le téléphone ne peut ni lire les comptes ni relire ses dépôts. Sur le PC, l'
 - **Budget et réalisé** : par mois, cumul ou année, filtre par lieu. Un clic sur une ligne ouvre ses opérations. Le bouton « Copier pour 2028 » prépare l'année suivante.
 - **Bilan et résultat** : patrimoine à une date (soldes relevés, valorisations lues dans les PDF), compte de résultat par nature, avec un contrôle qui rapproche les deux.
 - **Trésorerie** : la marche courante seule (revenus, budget, impôts), projetée jour par jour sur 12 mois, avec seuils bas et haut, virement conseillé avant un découvert, échéances.
-- **Épargne** : livrets et assurances-vie (leurs revenus y restent), plus les cessions de titres, moins le financement des projets et les approvisionnements du compte courant ; courbe sur 12 mois et alerte si elle passe sous zéro.
+- **Épargne** : livrets, assurances-vie et PER, en valeur brute sans fiscalité latente (leurs revenus y restent), plus les cessions de titres, moins le financement des projets et les approvisionnements du compte courant ; courbe sur 12 mois et alerte si elle passe sous zéro.
 - **Projets** : travaux, voiture… hors marche courante ; coût, payé, reste, échéancier en appels de fonds et paiements rattachés (champ « Projet » d'une opération). Une échéance devient un projet dès qu'elle porte un nom de projet.
 
 ## 7. Sécurité et sauvegardes

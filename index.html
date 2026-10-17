@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-M1w3taD8CmhEfRm2hS5qLZeIn/2WTTrbnb8UK+CLRqc=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-NlDUpvKUn11zRtsivZceyEAtGsvPzE1rXDfrAxOqqe8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -285,7 +285,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-17.1754";
+const VERSION_APP = "2026-10-17.1758";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2819,8 +2819,9 @@ function jourPrelevementAmex(compteId){
   return LIVRE.parametres.amexJourPrelevement || (vus.length ? vus[Math.floor(vus.length / 2)] : 27);
 }
 const estCapital = e => !!e.projet || !!e.capital || e.categorie === "Patrimoine";
-/* Épargne mobilisable pour les projets : livrets et assurances-vie, sauf compte exclu dans Réglages › Comptes. */
-const estMobilisable = c => c.actif !== false && (c.mobilisable ?? ["livret", "assurance_vie"].includes(c.type));
+/* Épargne mobilisable : livrets, assurances-vie et épargne retraite (le PER sert de réserve d'appoint
+   quand les revenus ne suffisent pas). Valeurs brutes : la fiscalité latente n'est pas déduite. */
+const estMobilisable = c => c.actif !== false && (c.mobilisable ?? ["livret", "assurance_vie", "retraite"].includes(c.type));
 
 function occurrences(e, debut, fin){
   const r = []; const d0 = e.debut || debut;
@@ -4592,7 +4593,7 @@ const carteInd = (lib, val, det, neg) => h("div", {class: "indicateur"}, h("div"
 
 declarerEcran("epargne", {titre: "Épargne", rendre(c, etat){
   const ep = simulerEpargne();
-  c.appendChild(entete("Épargne", "Livrets et assurances-vie (leurs revenus y restent) · cessions de titres · financement des projets et du compte courant"));
+  c.appendChild(entete("Épargne", "Livrets, assurances-vie et PER (leurs revenus y restent ; valeurs brutes, sans fiscalité latente) · cessions de titres · financement des projets et du compte courant"));
   const min = ep.jours.length ? ep.jours.reduce((a, j) => j.solde < a.solde ? j : a, ep.jours[0]) : null;
   const fin = ep.jours.length ? ep.jours[ep.jours.length - 1].solde : ep.soldeDepart;
   const parGenre = g => -somme(ep.evenements.filter(e => e.genre === g && e.montant < 0), e => e.montant);
@@ -4604,7 +4605,7 @@ declarerEcran("epargne", {titre: "Épargne", rendre(c, etat){
   c.appendChild(ind);
   if (min && min.solde < 0) c.appendChild(h("div", {class: "bandeau alerte"}, "L'épargne disponible passe sous zéro le " + dateFr(ep.jours.find(j => j.solde < 0).date)
     + " : il manque " + euros(-min.solde, 0) + " (avancer une cession, décaler un paiement de projet, ou mobiliser un autre placement)."));
-  if (!ep.comptes.length) c.appendChild(h("div", {class: "bandeau info"}, "Aucune épargne mobilisable connue : importez les relevés des livrets et assurances-vie (ou saisissez une valorisation dans Bilan), sinon l'épargne part de 0 €."));
+  if (!ep.comptes.length) c.appendChild(h("div", {class: "bandeau info"}, "Aucune épargne mobilisable connue : importez les relevés des livrets, assurances-vie et PER (ou saisissez une valorisation dans Bilan), sinon l'épargne part de 0 €."));
   c.appendChild(h("section", {class: "carte"}, h("div", {class: "petit discret"}, "Au départ : " + euros(ep.soldeDepart, 0)
       + (ep.comptes.length ? " (" + ep.comptes.map(x => x.compte.nom + " " + euros(x.solde, 0)).join(", ") + ")" : "")),
     grapheTresorerie(ep, null, 260, false, {seuilBas: 0, seuilHaut: Infinity}),

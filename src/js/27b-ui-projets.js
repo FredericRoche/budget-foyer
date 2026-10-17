@@ -21,7 +21,7 @@ const carteInd = (lib, val, det, neg) => h("div", {class: "indicateur"}, h("div"
 
 declarerEcran("epargne", {titre: "Épargne", rendre(c, etat){
   const ep = simulerEpargne();
-  c.appendChild(entete("Épargne", "Livrets et assurances-vie (leurs revenus y restent) · cessions de titres · financement des projets et du compte courant"));
+  c.appendChild(entete("Épargne", "Livrets, assurances-vie et PER (leurs revenus y restent ; valeurs brutes, sans fiscalité latente) · cessions de titres · financement des projets et du compte courant"));
   const min = ep.jours.length ? ep.jours.reduce((a, j) => j.solde < a.solde ? j : a, ep.jours[0]) : null;
   const fin = ep.jours.length ? ep.jours[ep.jours.length - 1].solde : ep.soldeDepart;
   const parGenre = g => -somme(ep.evenements.filter(e => e.genre === g && e.montant < 0), e => e.montant);
@@ -33,7 +33,7 @@ declarerEcran("epargne", {titre: "Épargne", rendre(c, etat){
   c.appendChild(ind);
   if (min && min.solde < 0) c.appendChild(h("div", {class: "bandeau alerte"}, "L'épargne disponible passe sous zéro le " + dateFr(ep.jours.find(j => j.solde < 0).date)
     + " : il manque " + euros(-min.solde, 0) + " (avancer une cession, décaler un paiement de projet, ou mobiliser un autre placement)."));
-  if (!ep.comptes.length) c.appendChild(h("div", {class: "bandeau info"}, "Aucune épargne mobilisable connue : importez les relevés des livrets et assurances-vie (ou saisissez une valorisation dans Bilan), sinon l'épargne part de 0 €."));
+  if (!ep.comptes.length) c.appendChild(h("div", {class: "bandeau info"}, "Aucune épargne mobilisable connue : importez les relevés des livrets, assurances-vie et PER (ou saisissez une valorisation dans Bilan), sinon l'épargne part de 0 €."));
   c.appendChild(h("section", {class: "carte"}, h("div", {class: "petit discret"}, "Au départ : " + euros(ep.soldeDepart, 0)
       + (ep.comptes.length ? " (" + ep.comptes.map(x => x.compte.nom + " " + euros(x.solde, 0)).join(", ") + ")" : "")),
     grapheTresorerie(ep, null, 260, false, {seuilBas: 0, seuilHaut: Infinity}),
