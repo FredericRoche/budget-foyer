@@ -157,7 +157,7 @@ async function nouvelleOperation(){
   const comptes = vivants("comptes").filter(c => ["courant", "carte", "especes"].includes(c.type));
   if (!comptes.length) compteEspeces();
   const compte = selection(vivants("comptes").filter(c => ["courant", "carte", "especes"].includes(c.type)).map(c => [c.id, c.nom]), compteEspeces().id);
-  const date = h("input", {type: "date", value: aujourdhui()});
+  const date = champDate({value: aujourdhui()});
   const montant = h("input", {type: "text", placeholder: "-12,50 pour une dépense"});
   const libelle = h("input", {type: "text"}); const nat = h("input", {type: "text"});
   const cat = selectionCategorie("", ""); const lieu = selectionLieu("");
@@ -165,6 +165,7 @@ async function nouvelleOperation(){
     champ("Fournisseur ou libellé", libelle), champ("Nature exacte", nat), champ("Catégorie", cat), champ("Lieu", lieu)),
     actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
       const m = lireMontant(montant.value); if (isNaN(m) || !m){ message("Montant illisible.", true); return false; }
+      if (!dateSaisieOk(date, "Date")) return false;
       const op = Object.assign({compte: compte.value, date: date.value, dateDebit: date.value, montant: m, libelle: libelle.value.trim() || "Saisie manuelle", natureExacte: nat.value.trim(),
         lieu: lieu.value, origine: "manuel", justificatifs: []}, valeurCategorie(cat));
       op.nature = natureParDefaut(op.categorie); if (m > 0 && op.categorie === "À préciser") op.nature = "Revenu";

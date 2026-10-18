@@ -105,6 +105,36 @@ function marqueOrigine(op){
 function montantCellule(v, attrs, dec){ return h("td", Object.assign({class: "num" + (v < 0 ? " neg" : v > 0 ? " pos" : "")}, attrs || {}), v > 0 ? "+" + euros(v, dec) : euros(v, dec)); }
 
 /* ---------- Tableau triable ---------- */
+/* ---------- Champ de date jj/mm/aaaa ----------
+   Le champ de date natif suit la langue du navigateur et peut afficher mm/jj/aaaa : on le remplace par un
+   champ texte français. Sa propriété value se lit et s'écrit en ISO (aaaa-mm-jj), comme celle du champ natif ;
+   une saisie illisible se lit "" et le champ est signalé. Accepte 18/10/2026, 18.10.26, 18 10 2026, 18102026. */
+const dateValide = iso => !!iso && isoDe(dateDe(iso)) === iso;
+function lireDateFr(txt){
+  const s = String(txt || "").trim(); if (!s) return "";
+  let m = s.match(/^(\d{1,2})[\/.\-\s]+(\d{1,2})[\/.\-\s]+(\d{2}|\d{4})$/) || s.match(/^(\d{2})(\d{2})(\d{4}|\d{2})$/);
+  if (m){ const a = m[3].length === 2 ? "20" + m[3] : m[3]; const iso = a + "-" + pad2(+m[2]) + "-" + pad2(+m[1]); return dateValide(iso) ? iso : null; }
+  m = s.match(/^\d{4}-\d{2}-\d{2}$/);
+  return m && dateValide(s) ? s : null;
+}
+// Contrôle avant enregistrement : date obligatoire (ou facultative) et lisible ; message et refus sinon.
+function dateSaisieOk(el, nom, facultative){
+  const brut = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").get.call(el).trim();
+  if (!brut && facultative) return true;
+  if (!brut || !lireDateFr(brut)){ el.classList.add("invalide"); el.focus(); message((nom || "Date") + " : " + (brut ? "date illisible" : "date à saisir") + " (jj/mm/aaaa).", true); return false; }
+  return true;
+}
+function champDate(attrs){
+  const a = Object.assign({}, attrs); const initiale = a.value || ""; delete a.value; delete a.type;
+  const el = h("input", Object.assign({type: "text", inputmode: "numeric", placeholder: "jj/mm/aaaa", autocomplete: "off", maxlength: 10, class: "champ-date"}, a));
+  const natif = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  Object.defineProperty(el, "value", {configurable: true, get(){ return lireDateFr(natif.get.call(el)) || ""; }, set(v){ natif.set.call(el, v ? dateFr(v) : ""); }});
+  el.value = initiale;
+  const verifier = () => { const brut = natif.get.call(el), iso = lireDateFr(brut); el.classList.toggle("invalide", iso === null); el.title = iso === null ? "Date illisible : jj/mm/aaaa" : ""; if (iso) natif.set.call(el, dateFr(iso)); };
+  el.addEventListener("blur", verifier);
+  el.addEventListener("keydown", e => { if (e.key === "Enter") verifier(); });
+  return el;
+}
 function tableau(colonnes, lignes, options){
   const o = options || {};
   let tri = o.tri || null, sens = o.sens || 1;

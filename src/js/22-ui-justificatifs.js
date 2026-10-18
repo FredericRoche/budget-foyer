@@ -44,7 +44,7 @@ function ecranRapprochement(j, etat, attente){
     if (groupe.length > 1) saisie.appendChild(h("h3", null, "Ticket " + (k + 1)));
     const type = selection(Object.entries(TYPES_JUSTIF), x.type);
     const montant = h("input", {type: "text", value: nombre(x.montant)});
-    const date = h("input", {type: "date", value: x.date});
+    const date = champDate({value: x.date});
     const cm = h("input", {type: "text", value: x.commercantNom || ""});
     const nat = h("input", {type: "text", value: x.natureExacte || "", placeholder: "ce qui a été acheté"});
     const fiche = x.commercant ? obtenir("commercants", x.commercant) : null;
@@ -63,6 +63,7 @@ function ecranRapprochement(j, etat, attente){
   const enregistrerSaisie = () => {
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
+      if (!dateSaisieOk(f.date, "Date")) return false;
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
         lieu: f.lieu.value, carte: f.carte.value}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
@@ -76,7 +77,7 @@ function ecranRapprochement(j, etat, attente){
       enregistrer("justificatifs", f.x);
     }
   };
-  saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini", onclick: () => { enregistrerSaisie(); message("Saisie enregistrée."); rafraichirEcran(); }}, "Enregistrer la saisie"),
+  saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini", onclick: () => { if (enregistrerSaisie() === false) return; message("Saisie enregistrée."); rafraichirEcran(); }}, "Enregistrer la saisie"),
     h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer ce justificatif ?", "Supprimer", true)){ for (const x of groupe){ delier(x); supprimer("justificatifs", x.id); } etat.choisi = null; rafraichirEcran(); } }}, "Supprimer")));
   if (j.texteOCR) saisie.appendChild(h("details", {style: {marginTop: ".5rem"}}, h("summary", {class: "petit"}, "Texte lu sur la pièce"), h("div", {class: "texte-brut"}, j.texteOCR)));
   grille.appendChild(saisie);
@@ -94,19 +95,19 @@ function ecranRapprochement(j, etat, attente){
       const js2 = p.groupe.map(id => obtenir("justificatifs", id)).filter(Boolean);
       cand.appendChild(h("div", {class: "candidat meilleur"}, h("div", null, h("strong", null, "Achat groupé"), " · " + js2.map(x => nombre(x.montant)).join(" + ") + " = ", h("strong", null, euros(-op.montant)),
         h("br"), h("span", {class: "petit"}, libelleCompte(op.compte) + " · " + dateCourte(op.date) + " · " + op.libelle), h("br"), h("span", {class: "petit discret"}, "même jour · même carte · un seul paiement")),
-        h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, p.score + " %"), h("button", {class: "mini primaire", onclick: () => { enregistrerSaisie(); lier(js2, op, false); rafraichirEcran(); }}, "Rapprocher"))));
+        h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, p.score + " %"), h("button", {class: "mini primaire", onclick: () => { if (enregistrerSaisie() === false) return; lier(js2, op, false); rafraichirEcran(); }}, "Rapprocher"))));
     }
     liste.forEach((x, i) => {
       cand.appendChild(h("div", {class: "candidat" + (i === 0 && !propositionsGroupe.length ? " meilleur" : "")}, h("div", null, libelleCompte(x.op.compte) + " · " + dateCourte(x.op.date) + " · " + x.op.libelle, h("br"),
         h("span", {class: "petit"}, euros(x.op.montant) + " · écart de date " + (x.ecart > 0 ? "+" : "") + x.ecart + " j" + (x.sim > 0.4 ? " · nom proche" : ""))),
-        h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, x.score + " %"), h("button", {class: "mini" + (i === 0 ? " primaire" : ""), onclick: () => { enregistrerSaisie(); lier(groupe, x.op, false); rafraichirEcran(); }}, "Rapprocher"))));
+        h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, x.score + " %"), h("button", {class: "mini" + (i === 0 ? " primaire" : ""), onclick: () => { if (enregistrerSaisie() === false) return; lier(groupe, x.op, false); rafraichirEcran(); }}, "Rapprocher"))));
     });
     if (!liste.length && !propositionsGroupe.length) cand.appendChild(h("p", {class: "vide"}, "Aucune opération de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates. Le relevé n'est peut-être pas encore importé."));
     const [av, ap] = fenetre(j);
     cand.appendChild(h("p", {class: "note"}, "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" ? "facture" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office."));
     cand.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}},
-      h("button", {class: "discret", onclick: () => { enregistrerSaisie(); for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => creerOperationEspeces(x)); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
-      h("button", {class: "discret", onclick: () => { enregistrerSaisie(); for (const x of groupe) enregistrer("justificatifs", Object.assign(x, {reporte: aujourdhui()})); const suivant = attente[idx + 1]; etat.choisi = suivant ? suivant.id : null; rafraichirEcran(); }}, "Reporter")));
+      h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => creerOperationEspeces(x)); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
+      h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) enregistrer("justificatifs", Object.assign(x, {reporte: aujourdhui()})); const suivant = attente[idx + 1]; etat.choisi = suivant ? suivant.id : null; rafraichirEcran(); }}, "Reporter")));
   }
   grille.appendChild(cand);
   bloc.appendChild(grille);

@@ -4,7 +4,7 @@ declarerEcran("patrimoine", {titre: "Bilan et résultat", rendre(c, etat){
   const an = +date.slice(0, 4); const debut = an + "-01-01";
   const ref = ajouterJours(debut, -1);
   const b1 = bilan(date), b0 = bilan(ref);
-  const dateSel = h("input", {type: "date", value: date, onchange: e => { etat.date = e.target.value || aujourdhui(); rafraichirEcran(); }});
+  const dateSel = champDate({value: date, onchange: e => { etat.date = e.target.value || aujourdhui(); rafraichirEcran(); }});
   c.appendChild(entete("Bilan et compte de résultat", "Bilan au " + dateFr(date) + " · résultat du 1er janvier au " + dateFr(date), [dateSel,
     h("button", {class: "discret", onclick: () => saisirValorisation()}, "Saisir une valorisation"),
     h("button", {class: "discret", onclick: () => exporterPatrimoine(b1, b0, date)}, "Exporter en Excel")]));
@@ -74,7 +74,7 @@ declarerEcran("patrimoine", {titre: "Bilan et résultat", rendre(c, etat){
 async function saisirValorisation(compte){
   const comptes = vivants("comptes").filter(c => !["courant", "carte", "especes"].includes(c.type));
   const sel = selection(comptes.map(c => [c.id, c.nom]), compte?.id || comptes[0]?.id);
-  const date = h("input", {type: "date", value: aujourdhui()});
+  const date = champDate({value: aujourdhui()});
   const valeur = h("input", {type: "text", placeholder: "ex. 612 400"});
   const corps = h("div");
   if (compte && ["courant", "carte", "especes"].includes(compte.type)){ corps.appendChild(h("p", null, "Le solde de « " + compte.nom + " » vient des relevés importés.")); await dialogue({titre: compte.nom, corps}); return; }
@@ -82,6 +82,7 @@ async function saisirValorisation(compte){
     h("p", {class: "note"}, "Plus simple : déposez le relevé PDF dans « Importer », la valeur et la date y sont lues."));
   const ok = await dialogue({titre: "Saisir une valorisation", corps, actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
     const v = lireMontant(valeur.value); if (isNaN(v)){ message("Valeur illisible.", true); return false; }
+    if (!dateSaisieOk(date, "Date de la valorisation")) return false;
     enregistrer("valorisations", {compte: sel.value, date: date.value, valeur: v, source: ""}); return true;
   }}]});
   if (ok) rafraichirEcran();

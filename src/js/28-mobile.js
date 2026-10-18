@@ -101,7 +101,7 @@ async function formulaireMobile(corps, saisie, t){
   const fiche = t ? commercantPourTicket(t, commercantsExtrait()) : null;
   const dernier = await reglage("mobile_dernier", {});
   const montant = h("input", {type: "text", inputmode: "decimal", class: "montant", value: t?.montant ? nombre(t.montant) : ""});
-  const date = h("input", {type: "date", value: t?.date || aujourdhui()});
+  const date = champDate({value: t?.date || aujourdhui()});
   const cartes = ex?.cartes || [];
   const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || dernier.carte || cartes[0]?.carte || "");
   const nomPropose = fiche ? fiche.nom : t ? nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")) : "";

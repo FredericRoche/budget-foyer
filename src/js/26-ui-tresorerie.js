@@ -74,7 +74,7 @@ async function editerEcheance(e){
   const lib = h("input", {type: "text", value: x.libelle});
   const mt = h("input", {type: "text", value: x.montant ? nombre(x.montant) : "", placeholder: "négatif = sortie"});
   const rec = selection([["unique", "unique"], ["mensuelle", "mensuelle"], ["trimestrielle", "trimestrielle"], ["semestrielle", "semestrielle"], ["annuelle", "annuelle"]], x.recurrence || "unique");
-  const d1 = h("input", {type: "date", value: x.debut || aujourdhui()}); const d2 = h("input", {type: "date", value: x.fin || ""});
+  const d1 = champDate({value: x.debut || aujourdhui()}); const d2 = champDate({value: x.fin || ""});
   const cat = selectionCategorie(x.categorie || "", x.sousCategorie || "");
   const nat = selectionNature(x.nature || "Courante");
   const budget = budgetActif(+(x.debut || aujourdhui()).slice(0, 4));
@@ -94,6 +94,7 @@ async function editerEcheance(e){
       {libelle: "Enregistrer", classe: "primaire", action: () => {
         const m = lireMontant(mt.value); if (isNaN(m) || !lib.value.trim()){ message("Libellé et montant requis.", true); return false; }
         const v = valeurCategorie(cat);
+        if (!dateSaisieOk(d1, "Date") || !dateSaisieOk(d2, "Jusqu'au", true)) return false;
         enregistrer("echeances", Object.assign(x, {libelle: lib.value.trim(), montant: m, recurrence: rec.value, debut: d1.value, fin: d2.value || null, ligneBudget: lb.value || null,
           active: active.checked, aConfirmer: false, nature: nat.value, projet: proj.value.trim() || null, capital: capi.checked}, v.categorie === "À préciser" ? {} : v));
         return true;

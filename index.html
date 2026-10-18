@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-V1/UdCW/FN4RBq9WiKtfkilP+eRMOQ5WXRapaqDtASY=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-8ePqJQLR9bRD9LFTi11pX6ii/Dxx8YWVJfPHQAhz4YQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -302,6 +302,8 @@ nav.basse{display:none}
   .appli{display:block}
   main{padding:0}
 }
+input.champ-date{width:8.5rem; font-variant-numeric:tabular-nums}
+input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
 
 </style>
 </head>
@@ -335,7 +337,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-18.2054";
+const VERSION_APP = "2026-10-18.2105";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3163,6 +3165,36 @@ function marqueOrigine(op){
 function montantCellule(v, attrs, dec){ return h("td", Object.assign({class: "num" + (v < 0 ? " neg" : v > 0 ? " pos" : "")}, attrs || {}), v > 0 ? "+" + euros(v, dec) : euros(v, dec)); }
 
 /* ---------- Tableau triable ---------- */
+/* ---------- Champ de date jj/mm/aaaa ----------
+   Le champ de date natif suit la langue du navigateur et peut afficher mm/jj/aaaa : on le remplace par un
+   champ texte français. Sa propriété value se lit et s'écrit en ISO (aaaa-mm-jj), comme celle du champ natif ;
+   une saisie illisible se lit "" et le champ est signalé. Accepte 18/10/2026, 18.10.26, 18 10 2026, 18102026. */
+const dateValide = iso => !!iso && isoDe(dateDe(iso)) === iso;
+function lireDateFr(txt){
+  const s = String(txt || "").trim(); if (!s) return "";
+  let m = s.match(/^(\d{1,2})[\/.\-\s]+(\d{1,2})[\/.\-\s]+(\d{2}|\d{4})$/) || s.match(/^(\d{2})(\d{2})(\d{4}|\d{2})$/);
+  if (m){ const a = m[3].length === 2 ? "20" + m[3] : m[3]; const iso = a + "-" + pad2(+m[2]) + "-" + pad2(+m[1]); return dateValide(iso) ? iso : null; }
+  m = s.match(/^\d{4}-\d{2}-\d{2}$/);
+  return m && dateValide(s) ? s : null;
+}
+// Contrôle avant enregistrement : date obligatoire (ou facultative) et lisible ; message et refus sinon.
+function dateSaisieOk(el, nom, facultative){
+  const brut = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").get.call(el).trim();
+  if (!brut && facultative) return true;
+  if (!brut || !lireDateFr(brut)){ el.classList.add("invalide"); el.focus(); message((nom || "Date") + " : " + (brut ? "date illisible" : "date à saisir") + " (jj/mm/aaaa).", true); return false; }
+  return true;
+}
+function champDate(attrs){
+  const a = Object.assign({}, attrs); const initiale = a.value || ""; delete a.value; delete a.type;
+  const el = h("input", Object.assign({type: "text", inputmode: "numeric", placeholder: "jj/mm/aaaa", autocomplete: "off", maxlength: 10, class: "champ-date"}, a));
+  const natif = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  Object.defineProperty(el, "value", {configurable: true, get(){ return lireDateFr(natif.get.call(el)) || ""; }, set(v){ natif.set.call(el, v ? dateFr(v) : ""); }});
+  el.value = initiale;
+  const verifier = () => { const brut = natif.get.call(el), iso = lireDateFr(brut); el.classList.toggle("invalide", iso === null); el.title = iso === null ? "Date illisible : jj/mm/aaaa" : ""; if (iso) natif.set.call(el, dateFr(iso)); };
+  el.addEventListener("blur", verifier);
+  el.addEventListener("keydown", e => { if (e.key === "Enter") verifier(); });
+  return el;
+}
 function tableau(colonnes, lignes, options){
   const o = options || {};
   let tri = o.tri || null, sens = o.sens || 1;
@@ -3802,7 +3834,7 @@ async function nouvelleOperation(){
   const comptes = vivants("comptes").filter(c => ["courant", "carte", "especes"].includes(c.type));
   if (!comptes.length) compteEspeces();
   const compte = selection(vivants("comptes").filter(c => ["courant", "carte", "especes"].includes(c.type)).map(c => [c.id, c.nom]), compteEspeces().id);
-  const date = h("input", {type: "date", value: aujourdhui()});
+  const date = champDate({value: aujourdhui()});
   const montant = h("input", {type: "text", placeholder: "-12,50 pour une dépense"});
   const libelle = h("input", {type: "text"}); const nat = h("input", {type: "text"});
   const cat = selectionCategorie("", ""); const lieu = selectionLieu("");
@@ -3810,6 +3842,7 @@ async function nouvelleOperation(){
     champ("Fournisseur ou libellé", libelle), champ("Nature exacte", nat), champ("Catégorie", cat), champ("Lieu", lieu)),
     actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
       const m = lireMontant(montant.value); if (isNaN(m) || !m){ message("Montant illisible.", true); return false; }
+      if (!dateSaisieOk(date, "Date")) return false;
       const op = Object.assign({compte: compte.value, date: date.value, dateDebit: date.value, montant: m, libelle: libelle.value.trim() || "Saisie manuelle", natureExacte: nat.value.trim(),
         lieu: lieu.value, origine: "manuel", justificatifs: []}, valeurCategorie(cat));
       op.nature = natureParDefaut(op.categorie); if (m > 0 && op.categorie === "À préciser") op.nature = "Revenu";
@@ -4050,7 +4083,7 @@ function ecranRapprochement(j, etat, attente){
     if (groupe.length > 1) saisie.appendChild(h("h3", null, "Ticket " + (k + 1)));
     const type = selection(Object.entries(TYPES_JUSTIF), x.type);
     const montant = h("input", {type: "text", value: nombre(x.montant)});
-    const date = h("input", {type: "date", value: x.date});
+    const date = champDate({value: x.date});
     const cm = h("input", {type: "text", value: x.commercantNom || ""});
     const nat = h("input", {type: "text", value: x.natureExacte || "", placeholder: "ce qui a été acheté"});
     const fiche = x.commercant ? obtenir("commercants", x.commercant) : null;
@@ -4069,6 +4102,7 @@ function ecranRapprochement(j, etat, attente){
   const enregistrerSaisie = () => {
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
+      if (!dateSaisieOk(f.date, "Date")) return false;
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
         lieu: f.lieu.value, carte: f.carte.value}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
@@ -4082,7 +4116,7 @@ function ecranRapprochement(j, etat, attente){
       enregistrer("justificatifs", f.x);
     }
   };
-  saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini", onclick: () => { enregistrerSaisie(); message("Saisie enregistrée."); rafraichirEcran(); }}, "Enregistrer la saisie"),
+  saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini", onclick: () => { if (enregistrerSaisie() === false) return; message("Saisie enregistrée."); rafraichirEcran(); }}, "Enregistrer la saisie"),
     h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer ce justificatif ?", "Supprimer", true)){ for (const x of groupe){ delier(x); supprimer("justificatifs", x.id); } etat.choisi = null; rafraichirEcran(); } }}, "Supprimer")));
   if (j.texteOCR) saisie.appendChild(h("details", {style: {marginTop: ".5rem"}}, h("summary", {class: "petit"}, "Texte lu sur la pièce"), h("div", {class: "texte-brut"}, j.texteOCR)));
   grille.appendChild(saisie);
@@ -4100,19 +4134,19 @@ function ecranRapprochement(j, etat, attente){
       const js2 = p.groupe.map(id => obtenir("justificatifs", id)).filter(Boolean);
       cand.appendChild(h("div", {class: "candidat meilleur"}, h("div", null, h("strong", null, "Achat groupé"), " · " + js2.map(x => nombre(x.montant)).join(" + ") + " = ", h("strong", null, euros(-op.montant)),
         h("br"), h("span", {class: "petit"}, libelleCompte(op.compte) + " · " + dateCourte(op.date) + " · " + op.libelle), h("br"), h("span", {class: "petit discret"}, "même jour · même carte · un seul paiement")),
-        h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, p.score + " %"), h("button", {class: "mini primaire", onclick: () => { enregistrerSaisie(); lier(js2, op, false); rafraichirEcran(); }}, "Rapprocher"))));
+        h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, p.score + " %"), h("button", {class: "mini primaire", onclick: () => { if (enregistrerSaisie() === false) return; lier(js2, op, false); rafraichirEcran(); }}, "Rapprocher"))));
     }
     liste.forEach((x, i) => {
       cand.appendChild(h("div", {class: "candidat" + (i === 0 && !propositionsGroupe.length ? " meilleur" : "")}, h("div", null, libelleCompte(x.op.compte) + " · " + dateCourte(x.op.date) + " · " + x.op.libelle, h("br"),
         h("span", {class: "petit"}, euros(x.op.montant) + " · écart de date " + (x.ecart > 0 ? "+" : "") + x.ecart + " j" + (x.sim > 0.4 ? " · nom proche" : ""))),
-        h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, x.score + " %"), h("button", {class: "mini" + (i === 0 ? " primaire" : ""), onclick: () => { enregistrerSaisie(); lier(groupe, x.op, false); rafraichirEcran(); }}, "Rapprocher"))));
+        h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, x.score + " %"), h("button", {class: "mini" + (i === 0 ? " primaire" : ""), onclick: () => { if (enregistrerSaisie() === false) return; lier(groupe, x.op, false); rafraichirEcran(); }}, "Rapprocher"))));
     });
     if (!liste.length && !propositionsGroupe.length) cand.appendChild(h("p", {class: "vide"}, "Aucune opération de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates. Le relevé n'est peut-être pas encore importé."));
     const [av, ap] = fenetre(j);
     cand.appendChild(h("p", {class: "note"}, "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" ? "facture" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office."));
     cand.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}},
-      h("button", {class: "discret", onclick: () => { enregistrerSaisie(); for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => creerOperationEspeces(x)); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
-      h("button", {class: "discret", onclick: () => { enregistrerSaisie(); for (const x of groupe) enregistrer("justificatifs", Object.assign(x, {reporte: aujourdhui()})); const suivant = attente[idx + 1]; etat.choisi = suivant ? suivant.id : null; rafraichirEcran(); }}, "Reporter")));
+      h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => creerOperationEspeces(x)); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
+      h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) enregistrer("justificatifs", Object.assign(x, {reporte: aujourdhui()})); const suivant = attente[idx + 1]; etat.choisi = suivant ? suivant.id : null; rafraichirEcran(); }}, "Reporter")));
   }
   grille.appendChild(cand);
   bloc.appendChild(grille);
@@ -4440,7 +4474,7 @@ declarerEcran("patrimoine", {titre: "Bilan et résultat", rendre(c, etat){
   const an = +date.slice(0, 4); const debut = an + "-01-01";
   const ref = ajouterJours(debut, -1);
   const b1 = bilan(date), b0 = bilan(ref);
-  const dateSel = h("input", {type: "date", value: date, onchange: e => { etat.date = e.target.value || aujourdhui(); rafraichirEcran(); }});
+  const dateSel = champDate({value: date, onchange: e => { etat.date = e.target.value || aujourdhui(); rafraichirEcran(); }});
   c.appendChild(entete("Bilan et compte de résultat", "Bilan au " + dateFr(date) + " · résultat du 1er janvier au " + dateFr(date), [dateSel,
     h("button", {class: "discret", onclick: () => saisirValorisation()}, "Saisir une valorisation"),
     h("button", {class: "discret", onclick: () => exporterPatrimoine(b1, b0, date)}, "Exporter en Excel")]));
@@ -4510,7 +4544,7 @@ declarerEcran("patrimoine", {titre: "Bilan et résultat", rendre(c, etat){
 async function saisirValorisation(compte){
   const comptes = vivants("comptes").filter(c => !["courant", "carte", "especes"].includes(c.type));
   const sel = selection(comptes.map(c => [c.id, c.nom]), compte?.id || comptes[0]?.id);
-  const date = h("input", {type: "date", value: aujourdhui()});
+  const date = champDate({value: aujourdhui()});
   const valeur = h("input", {type: "text", placeholder: "ex. 612 400"});
   const corps = h("div");
   if (compte && ["courant", "carte", "especes"].includes(compte.type)){ corps.appendChild(h("p", null, "Le solde de « " + compte.nom + " » vient des relevés importés.")); await dialogue({titre: compte.nom, corps}); return; }
@@ -4518,6 +4552,7 @@ async function saisirValorisation(compte){
     h("p", {class: "note"}, "Plus simple : déposez le relevé PDF dans « Importer », la valeur et la date y sont lues."));
   const ok = await dialogue({titre: "Saisir une valorisation", corps, actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
     const v = lireMontant(valeur.value); if (isNaN(v)){ message("Valeur illisible.", true); return false; }
+    if (!dateSaisieOk(date, "Date de la valorisation")) return false;
     enregistrer("valorisations", {compte: sel.value, date: date.value, valeur: v, source: ""}); return true;
   }}]});
   if (ok) rafraichirEcran();
@@ -4605,7 +4640,7 @@ async function editerEcheance(e){
   const lib = h("input", {type: "text", value: x.libelle});
   const mt = h("input", {type: "text", value: x.montant ? nombre(x.montant) : "", placeholder: "négatif = sortie"});
   const rec = selection([["unique", "unique"], ["mensuelle", "mensuelle"], ["trimestrielle", "trimestrielle"], ["semestrielle", "semestrielle"], ["annuelle", "annuelle"]], x.recurrence || "unique");
-  const d1 = h("input", {type: "date", value: x.debut || aujourdhui()}); const d2 = h("input", {type: "date", value: x.fin || ""});
+  const d1 = champDate({value: x.debut || aujourdhui()}); const d2 = champDate({value: x.fin || ""});
   const cat = selectionCategorie(x.categorie || "", x.sousCategorie || "");
   const nat = selectionNature(x.nature || "Courante");
   const budget = budgetActif(+(x.debut || aujourdhui()).slice(0, 4));
@@ -4625,6 +4660,7 @@ async function editerEcheance(e){
       {libelle: "Enregistrer", classe: "primaire", action: () => {
         const m = lireMontant(mt.value); if (isNaN(m) || !lib.value.trim()){ message("Libellé et montant requis.", true); return false; }
         const v = valeurCategorie(cat);
+        if (!dateSaisieOk(d1, "Date") || !dateSaisieOk(d2, "Jusqu'au", true)) return false;
         enregistrer("echeances", Object.assign(x, {libelle: lib.value.trim(), montant: m, recurrence: rec.value, debut: d1.value, fin: d2.value || null, ligneBudget: lb.value || null,
           active: active.checked, aConfirmer: false, nature: nat.value, projet: proj.value.trim() || null, capital: capi.checked}, v.categorie === "À préciser" ? {} : v));
         return true;
@@ -5132,7 +5168,7 @@ async function formulaireMobile(corps, saisie, t){
   const fiche = t ? commercantPourTicket(t, commercantsExtrait()) : null;
   const dernier = await reglage("mobile_dernier", {});
   const montant = h("input", {type: "text", inputmode: "decimal", class: "montant", value: t?.montant ? nombre(t.montant) : ""});
-  const date = h("input", {type: "date", value: t?.date || aujourdhui()});
+  const date = champDate({value: t?.date || aujourdhui()});
   const cartes = ex?.cartes || [];
   const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || dernier.carte || cartes[0]?.carte || "");
   const nomPropose = fiche ? fiche.nom : t ? nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")) : "";
@@ -5436,6 +5472,11 @@ async function autotest(){
       v("impression du budget : revenus prévus d'une échéance mensuelle, non ponctuels", [Math.round(di.revenus.find(r => r.poste === "Pensions")?.prevu || 0), Math.round(di.revenus.find(r => r.poste === "Pensions")?.ponctuel || 0)], [12000, 0]);
       v("impression du budget : totaux cohérents et échéances lisibles", [Math.round(di.budget), Math.round(somme(di.parMois, x => x.total)), echeanceLigne({annuel: 1, profil: [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]}), echeanceLigne({annuel: 1, profil: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], jour: 25}), echeanceLigne({annuel: 1})],
         [Math.round(somme(budgetActif(2027).lignes, l => l.annuel)), Math.round(somme(budgetActif(2027).lignes, l => l.annuel)), "juil.–déc.", "oct. · le 25", ""]);
+    }
+    {
+      const cd = champDate({value: "2027-03-05"}); const lu0 = cd.value; cd.value = ""; const vide = cd.value;
+      v("dates : saisie jj/mm/aaaa, lecture ISO", [lu0, vide, lireDateFr("05/03/2027"), lireDateFr("5.3.27"), lireDateFr("05032027"), lireDateFr("31/02/2027"), lireDateFr("03/13/2027"), lireDateFr("")],
+        ["2027-03-05", "", "2027-03-05", "2027-03-05", "2027-03-05", null, null, ""]);
     }
     v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);
     for (const d of ["2027-01-05", "2027-02-05", "2027-03-05"]) enregistrer("operations", {compte: cj.id, date: d, montant: -1000, libelle: "VIR LOYER EXEMPLE", categorie: "Logement", sousCategorie: "Loyer", nature: "Courante"});

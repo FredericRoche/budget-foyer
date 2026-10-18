@@ -287,3 +287,5 @@ nav.basse{display:none}
   .appli{display:block}
   main{padding:0}
 }
+input.champ-date{width:8.5rem; font-variant-numeric:tabular-nums}
+input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
