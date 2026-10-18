@@ -83,6 +83,13 @@ label{display:block; font-size:.8rem; color:var(--vert-profond); letter-spacing:
 .indicateur .val{font-size:1.75rem; font-weight:600; color:var(--vert-empire); font-variant-numeric:tabular-nums lining-nums; line-height:1.15; margin:.15rem 0}
 .indicateur.alerte .val{color:var(--garnet)}
 .indicateur .det{font-size:.86rem; color:var(--vert-profond)}
+button.indicateur{font:inherit; text-align:left; color:inherit; cursor:pointer; width:100%; border-radius:0}
+button.indicateur:hover{background:var(--ivoire)}
+button.indicateur:focus-visible{outline:2px solid var(--or-bruni); outline-offset:2px}
+.indicateur.choisi{background:var(--ivoire); border-top-width:4px; padding-top:calc(.7rem - 2px)}
+tr.sous-titre td{font-variant:small-caps; letter-spacing:.04em; color:var(--vert-empire); font-weight:600; padding-top:.7rem; border-bottom:1px solid var(--filet-clair)}
+.barre-part{display:inline-block; width:7rem; height:.55rem; background:var(--filet-clair); vertical-align:middle}
+.barre-part i{display:block; height:100%; background:var(--vert-empire)}
 .jauge{height:6px; background:var(--vert-pale); margin-top:.45rem; position:relative}
 .jauge span{position:absolute; left:0; top:0; bottom:0; background:var(--vert-empire)}
 .jauge span.depasse{background:var(--garnet)}

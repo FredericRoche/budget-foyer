@@ -188,6 +188,14 @@ async function autotest(){
     appliquerPlan({commercants: [{nom: "Pisciniste essai", alias: ["PISCINE ESSAI VILLE"], categorie: "Extérieurs", sousCategorie: "Piscine (entretien)", lieu: "Campagne", verifie: true}]});
     const fp = trouverCommercant(cleLibelle("PISCINE ESSAI VILLE"), true);
     v("plan : fiche fournisseur fixée et vérifiée", [fp?.nom, fp?.sousCategorie, fp?.verifie], ["Pisciniste essai", "Piscine (entretien)", true]);
+    {
+      const epx = {depart: "2027-01-10", soldeDepart: 300, comptes: [], jours: [{date: "2027-01-11", flux: 50, solde: 350}], evenements: [
+        {date: "2027-01-11", montant: 100, genre: "capital"}, {date: "2027-02-01", montant: -80, genre: "projet", echeance: {projet: "Toit"}},
+        {date: "2027-02-01", montant: 30, genre: "projet", echeance: {projet: "Toit"}}, {date: "2027-03-01", montant: -20, genre: "courant"}]};
+      const dx = decompositionEpargne(epx), fx = financementsParDestination(epx);
+      v("épargne : décomposition et financements par destination", [dx.cessions, dx.projets, dx.courant, fx.map(g => g.destination + " " + g.sorties + "/" + g.entrees).join(", ")],
+        [100, -50, -20, "Projet Toit 80/30, Compte courant 20/0"]);
+    }
     v("budget : une ligne de crédit sans réalisé n'est pas en dépassement", postesEnDepassement([{budget: -138, realise: 0}, {budget: -3073, realise: 0}, {budget: 100, realise: 200}, {budget: 1000, realise: 1040}]).length, 1);
     const tj = simulerTresorerie({depart: "2027-03-31", jours: 120, perimetre: "tout"});
     v("compte joint réel : marche courante + capital", Math.round(tj.jours[tj.jours.length - 1].solde - s2.jours[s2.jours.length - 1].solde), 20000);
