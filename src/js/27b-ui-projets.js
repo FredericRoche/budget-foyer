@@ -34,7 +34,6 @@ const carteInd = (lib, val, det, neg, clic, actif) => h(clic ? "button" : "div",
 
 /* ---------- Détail de l'épargne : se recalcule à chaque import (valorisations datées) ---------- */
 const GROUPES_EPARGNE = [["Épargne réglementée", ["livret"]], ["Assurance-vie", ["assurance_vie", "prevoyance"]], ["Épargne retraite", ["retraite"]], ["PEA", ["pea"]]];
-function joursEntre(a, b){ return Math.round((dateDe(b) - dateDe(a)) / 86400000); }
 // Comptes mobilisables regroupés par nature : valorisation retenue, précédente, variation et part de chacun.
 function detailComptesEpargne(ep){
   const total = ep.soldeDepart || 0;
@@ -42,7 +41,7 @@ function detailComptesEpargne(ep){
     const v = derniereValorisation(x.compte.id, ep.depart);
     const avant = v ? vivants("valorisations").filter(w => w.compte === x.compte.id && w.date < v.date).sort((a, b) => a.date < b.date ? 1 : -1)[0] : null;
     return {compte: x.compte, solde: x.solde, date: v?.date || null, precedente: avant || null, variation: avant ? x.solde - avant.valeur : null,
-      part: total ? x.solde / total : 0, ancien: !v || joursEntre(v.date, ep.depart) > 120};
+      part: total ? x.solde / total : 0, ancien: !v || ecartJours(v.date, ep.depart) > 120};
   };
   const lignes = ep.comptes.map(ligne);
   const groupes = GROUPES_EPARGNE.map(([nom, types]) => ({nom, lignes: lignes.filter(l => types.includes(l.compte.type)).sort((a, b) => b.solde - a.solde)}));

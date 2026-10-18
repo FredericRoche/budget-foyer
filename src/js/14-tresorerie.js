@@ -29,6 +29,28 @@ function occurrences(e, debut, fin){
   while (d <= fin && (!e.fin || d <= e.fin)){ r.push(d); d = ajouterMois(d, pas); }
   return r;
 }
+/* Jour habituel du mois où une dépense passe par le compte : tiré de ses opérations des 12 derniers mois,
+   par sous-catégorie (3 au moins, dont les trois quarts à 4 jours près du jour retenu) ; sinon null,
+   et la dépense reste étalée sur le mois. Se met à jour à chaque import. */
+const distanceJours = (a, b) => { const d = Math.abs(a - b); return Math.min(d, 31 - d); };
+function jourDominant(jours){
+  if (jours.length < 3) return null;
+  let j = null, meilleur = Infinity;
+  for (const x of jours){ const s = somme(jours, y => distanceJours(x, y)); if (s < meilleur){ meilleur = s; j = x; } }
+  return jours.filter(y => distanceJours(j, y) <= 4).length >= jours.length * 0.75 ? j : null;
+}
+function joursHabituels(compteId, depart){
+  const debut = ajouterJours(depart, -365), par = new Map();
+  for (const o of vivants("operations")){
+    if (o.compte !== compteId || o.montant >= 0 || o.date <= debut || o.date > depart || !o.categorie || o.categorie === "Transfert") continue;
+    const k = cleLigne(o.categorie, o.sousCategorie || "");
+    if (!par.has(k)) par.set(k, []);
+    par.get(k).push(+o.date.slice(8, 10));
+  }
+  const r = new Map();
+  for (const [k, js] of par){ const j = jourDominant(js); if (j) r.set(k, j); }
+  return r;
+}
 function simulerTresorerie(options){
   const o = Object.assign({jours: 365, depart: aujourdhui(), supplements: [], perimetre: "courant"}, options);
   const compte = obtenir("comptes", LIVRE.parametres.compteTresorerie) || comptesDeType("courant")[0];
@@ -58,8 +80,9 @@ function simulerTresorerie(options){
     const date = c.carte === "AMEX" ? prochainJour(o.depart, amexJour) : dernierJourOuvre(o.depart);
     ajouter(date > o.depart ? date : dernierJourOuvre(ajouterMois(o.depart, 1)), total, "Débit différé " + c.nom + " (encours connu)", "carte", true);
   }
-  // 3. Budget courant restant, mois par mois
+  // 3. Budget courant restant, mois par mois ; la part payée par le compte tombe à son jour habituel quand il est connu
   const budgetsParAnnee = {};
+  const habituels = joursHabituels(compte.id, o.depart);
   let mois = debutDeMois(o.depart);
   while (mois <= fin){
     const an = +mois.slice(0, 4), m = +mois.slice(5, 7);
@@ -73,7 +96,12 @@ function simulerTresorerie(options){
         if (lignesLiees.has(l.id) || l.nature === "Exceptionnelle") continue;
         const reste = Math.max(0, budgetDuMois(l, m) - (realise.get(cleLigne(l.categorie, l.sousCategorie)) || 0));
         const p = l.paiement || {compte: 1, cartes: 0, amex: 0};
-        compteMois += reste * (p.compte || 0); cartesMois += reste * (p.cartes || 0); amexMois += reste * (p.amex || 0);
+        const partCompte = reste * (p.compte || 0);
+        const jour = l.jour || habituels.get(cleLigne(l.categorie, l.sousCategorie));
+        const date = jour ? mois.slice(0, 8) + pad2(Math.min(jour, +finMois.slice(8))) : null;
+        if (date && date > o.depart && partCompte) ajouter(date, -partCompte, (l.sousCategorie || l.categorie) + " (budget, vers le " + jour + ")", "budget", partCompte >= 1000, true);
+        else compteMois += partCompte;
+        cartesMois += reste * (p.cartes || 0); amexMois += reste * (p.amex || 0);
       }
       // prélèvements et virements étalés sur les jours restants du mois
       const premierJour = mois === debutDeMois(o.depart) ? ajouterJours(o.depart, 1) : mois;

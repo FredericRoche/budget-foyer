@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Gh2T+xapolNhzbeJFCD3TE8+5KQMyY3KzMNcQGJZP4s=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-RRw3P/KkMME2aSVSCi9G5Cjx8mhcZI8QIFirqx49Dio=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -292,7 +292,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-18.2009";
+const VERSION_APP = "2026-10-18.2013";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2859,6 +2859,28 @@ function occurrences(e, debut, fin){
   while (d <= fin && (!e.fin || d <= e.fin)){ r.push(d); d = ajouterMois(d, pas); }
   return r;
 }
+/* Jour habituel du mois où une dépense passe par le compte : tiré de ses opérations des 12 derniers mois,
+   par sous-catégorie (3 au moins, dont les trois quarts à 4 jours près du jour retenu) ; sinon null,
+   et la dépense reste étalée sur le mois. Se met à jour à chaque import. */
+const distanceJours = (a, b) => { const d = Math.abs(a - b); return Math.min(d, 31 - d); };
+function jourDominant(jours){
+  if (jours.length < 3) return null;
+  let j = null, meilleur = Infinity;
+  for (const x of jours){ const s = somme(jours, y => distanceJours(x, y)); if (s < meilleur){ meilleur = s; j = x; } }
+  return jours.filter(y => distanceJours(j, y) <= 4).length >= jours.length * 0.75 ? j : null;
+}
+function joursHabituels(compteId, depart){
+  const debut = ajouterJours(depart, -365), par = new Map();
+  for (const o of vivants("operations")){
+    if (o.compte !== compteId || o.montant >= 0 || o.date <= debut || o.date > depart || !o.categorie || o.categorie === "Transfert") continue;
+    const k = cleLigne(o.categorie, o.sousCategorie || "");
+    if (!par.has(k)) par.set(k, []);
+    par.get(k).push(+o.date.slice(8, 10));
+  }
+  const r = new Map();
+  for (const [k, js] of par){ const j = jourDominant(js); if (j) r.set(k, j); }
+  return r;
+}
 function simulerTresorerie(options){
   const o = Object.assign({jours: 365, depart: aujourdhui(), supplements: [], perimetre: "courant"}, options);
   const compte = obtenir("comptes", LIVRE.parametres.compteTresorerie) || comptesDeType("courant")[0];
@@ -2888,8 +2910,9 @@ function simulerTresorerie(options){
     const date = c.carte === "AMEX" ? prochainJour(o.depart, amexJour) : dernierJourOuvre(o.depart);
     ajouter(date > o.depart ? date : dernierJourOuvre(ajouterMois(o.depart, 1)), total, "Débit différé " + c.nom + " (encours connu)", "carte", true);
   }
-  // 3. Budget courant restant, mois par mois
+  // 3. Budget courant restant, mois par mois ; la part payée par le compte tombe à son jour habituel quand il est connu
   const budgetsParAnnee = {};
+  const habituels = joursHabituels(compte.id, o.depart);
   let mois = debutDeMois(o.depart);
   while (mois <= fin){
     const an = +mois.slice(0, 4), m = +mois.slice(5, 7);
@@ -2903,7 +2926,12 @@ function simulerTresorerie(options){
         if (lignesLiees.has(l.id) || l.nature === "Exceptionnelle") continue;
         const reste = Math.max(0, budgetDuMois(l, m) - (realise.get(cleLigne(l.categorie, l.sousCategorie)) || 0));
         const p = l.paiement || {compte: 1, cartes: 0, amex: 0};
-        compteMois += reste * (p.compte || 0); cartesMois += reste * (p.cartes || 0); amexMois += reste * (p.amex || 0);
+        const partCompte = reste * (p.compte || 0);
+        const jour = l.jour || habituels.get(cleLigne(l.categorie, l.sousCategorie));
+        const date = jour ? mois.slice(0, 8) + pad2(Math.min(jour, +finMois.slice(8))) : null;
+        if (date && date > o.depart && partCompte) ajouter(date, -partCompte, (l.sousCategorie || l.categorie) + " (budget, vers le " + jour + ")", "budget", partCompte >= 1000, true);
+        else compteMois += partCompte;
+        cartesMois += reste * (p.cartes || 0); amexMois += reste * (p.amex || 0);
       }
       // prélèvements et virements étalés sur les jours restants du mois
       const premierJour = mois === debutDeMois(o.depart) ? ajouterJours(o.depart, 1) : mois;
@@ -4226,11 +4254,15 @@ async function editerLigne(budget, ligne){
   const reps = lieux.map(lx => h("input", {type: "text", value: nombre(Math.round(((l.repartition || {})[lx] ?? (lx === "Autres" && !l.repartition ? 1 : 0)) * 100), 0), style: {width: "4.5rem"}}));
   const pay = ["compte", "cartes", "amex"].map(k => h("input", {type: "text", value: nombre(Math.round((l.paiement?.[k] || 0) * 100), 0), style: {width: "4.5rem"}}));
   const profil = h("input", {type: "text", value: Array.isArray(l.profil) ? l.profil.join(" ") : "", placeholder: "vide = 1/12 par mois ; sinon 12 poids, ex. 0 0 0 0 0 0 0 0 0 1 0 0"});
+  const cpt = obtenir("comptes", LIVRE.parametres.compteTresorerie) || comptesDeType("courant")[0];
+  const habituel = cpt && l.categorie ? joursHabituels(cpt.id, aujourdhui()).get(cleLigne(l.categorie, l.sousCategorie)) : null;
+  const jour = h("input", {type: "text", inputmode: "numeric", value: l.jour ? String(l.jour) : "", style: {width: "5rem"}, placeholder: habituel ? String(habituel) : "—"});
   const ok = await dialogue({titre: ligne ? "Modifier la ligne" : "Nouvelle ligne de budget", large: true, corps: h("div", null,
     h("div", {class: "grille-champs"}, champ("Catégorie", cat), champ("Nature", nat), champ("Montant annuel", annuel)),
     h("label", null, "Répartition par lieu (%)"), h("div", {class: "outils", style: {marginBottom: ".6rem"}}, lieux.map((lx, i) => h("span", null, lx + " ", reps[i]))),
     h("label", null, "Mode de paiement (%), pour la trésorerie"), h("div", {class: "outils", style: {marginBottom: ".6rem"}}, h("span", null, "compte ", pay[0]), h("span", null, "cartes LCL ", pay[1]), h("span", null, "Amex ", pay[2])),
-    champ("Profil mensuel", profil, "Par exemple pour une taxe payée en octobre : 0 0 0 0 0 0 0 0 0 1 0 0.")),
+    champ("Profil mensuel", profil, "Par exemple pour une taxe payée en octobre : 0 0 0 0 0 0 0 0 0 1 0 0."),
+    champ("Jour de prélèvement sur le compte", jour, habituel ? "Vide = jour habituel tiré des opérations (le " + habituel + ")." : "Vide = étalé sur le mois (pas de jour habituel dans les opérations).")),
     actions: [ligne ? {libelle: "Supprimer la ligne", classe: "danger", action: () => { budget.lignes = budget.lignes.filter(x => x !== ligne); enregistrer("budgets", budget); return true; }} : null,
       {libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
         const v = valeurCategorie(cat); if (v.categorie === "À préciser"){ message("Choisissez une catégorie.", true); return false; }
@@ -4239,8 +4271,10 @@ async function editerLigne(budget, ligne){
         const p = ["compte", "cartes", "amex"].map((k, i) => lireMontant(pay[i].value) || 0); const tp = somme(p);
         const prof = profil.value.trim() ? profil.value.trim().split(/[\s;]+/).map(Number) : null;
         if (prof && (prof.length !== 12 || prof.some(isNaN))){ message("Le profil doit compter 12 nombres.", true); return false; }
+        const jr = jour.value.trim() ? Number(jour.value.trim()) : null;
+        if (jr !== null && !(Number.isInteger(jr) && jr >= 1 && jr <= 31)){ message("Le jour doit être un nombre de 1 à 31.", true); return false; }
         Object.assign(l, v, {nature: nat.value, annuel: a, repartition: tr ? Object.fromEntries(Object.entries(r).map(([k, x]) => [k, x * 100 / tr])) : null,
-          paiement: tp ? {compte: p[0] / tp, cartes: p[1] / tp, amex: p[2] / tp} : {compte: 1, cartes: 0, amex: 0}, profil: prof});
+          paiement: tp ? {compte: p[0] / tp, cartes: p[1] / tp, amex: p[2] / tp} : {compte: 1, cartes: 0, amex: 0}, profil: prof, jour: jr});
         if (!ligne) budget.lignes.push(l);
         enregistrer("budgets", budget); return true;
       }}].filter(Boolean)});
@@ -4688,7 +4722,6 @@ const carteInd = (lib, val, det, neg, clic, actif) => h(clic ? "button" : "div",
 
 /* ---------- Détail de l'épargne : se recalcule à chaque import (valorisations datées) ---------- */
 const GROUPES_EPARGNE = [["Épargne réglementée", ["livret"]], ["Assurance-vie", ["assurance_vie", "prevoyance"]], ["Épargne retraite", ["retraite"]], ["PEA", ["pea"]]];
-function joursEntre(a, b){ return Math.round((dateDe(b) - dateDe(a)) / 86400000); }
 // Comptes mobilisables regroupés par nature : valorisation retenue, précédente, variation et part de chacun.
 function detailComptesEpargne(ep){
   const total = ep.soldeDepart || 0;
@@ -4696,7 +4729,7 @@ function detailComptesEpargne(ep){
     const v = derniereValorisation(x.compte.id, ep.depart);
     const avant = v ? vivants("valorisations").filter(w => w.compte === x.compte.id && w.date < v.date).sort((a, b) => a.date < b.date ? 1 : -1)[0] : null;
     return {compte: x.compte, solde: x.solde, date: v?.date || null, precedente: avant || null, variation: avant ? x.solde - avant.valeur : null,
-      part: total ? x.solde / total : 0, ancien: !v || joursEntre(v.date, ep.depart) > 120};
+      part: total ? x.solde / total : 0, ancien: !v || ecartJours(v.date, ep.depart) > 120};
   };
   const lignes = ep.comptes.map(ligne);
   const groupes = GROUPES_EPARGNE.map(([nom, types]) => ({nom, lignes: lignes.filter(l => types.includes(l.compte.type)).sort((a, b) => b.solde - a.solde)}));
@@ -5251,6 +5284,12 @@ async function autotest(){
     v("budget : une ligne de crédit sans réalisé n'est pas en dépassement", postesEnDepassement([{budget: -138, realise: 0}, {budget: -3073, realise: 0}, {budget: 100, realise: 200}, {budget: 1000, realise: 1040}]).length, 1);
     const tj = simulerTresorerie({depart: "2027-03-31", jours: 120, perimetre: "tout"});
     v("compte joint réel : marche courante + capital", Math.round(tj.jours[tj.jours.length - 1].solde - s2.jours[s2.jours.length - 1].solde), 20000);
+    v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);
+    for (const d of ["2027-01-05", "2027-02-05", "2027-03-05"]) enregistrer("operations", {compte: cj.id, date: d, montant: -1000, libelle: "VIR LOYER EXEMPLE", categorie: "Logement", sousCategorie: "Loyer", nature: "Courante"});
+    const bj = budgetActif(2027); bj.lignes.push({id: "l2", nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 12000, paiement: {compte: 1}}); enregistrer("budgets", bj);
+    const sj = simulerTresorerie({depart: "2027-03-31", jours: 60});
+    const fluxJour = d => sj.jours.find(j => j.date === d).flux;
+    v("trésorerie : loyer budgété à son jour habituel", [Math.round(fluxJour("2027-04-05") - fluxJour("2027-04-06")), sj.evenements.some(e => /Loyer \(budget, vers le 5\)/.test(e.libelle))], [-1000, true]);
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
   finally {
     LIVRE = memoire.LIVRE; Object.assign(SESSION, memoire.session); LIVRE_MODIFIE = memoire.modifie; planifierSauvegarde = sauvegardePlanifiee; invaliderIndex();

@@ -199,6 +199,12 @@ async function autotest(){
     v("budget : une ligne de crédit sans réalisé n'est pas en dépassement", postesEnDepassement([{budget: -138, realise: 0}, {budget: -3073, realise: 0}, {budget: 100, realise: 200}, {budget: 1000, realise: 1040}]).length, 1);
     const tj = simulerTresorerie({depart: "2027-03-31", jours: 120, perimetre: "tout"});
     v("compte joint réel : marche courante + capital", Math.round(tj.jours[tj.jours.length - 1].solde - s2.jours[s2.jours.length - 1].solde), 20000);
+    v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);
+    for (const d of ["2027-01-05", "2027-02-05", "2027-03-05"]) enregistrer("operations", {compte: cj.id, date: d, montant: -1000, libelle: "VIR LOYER EXEMPLE", categorie: "Logement", sousCategorie: "Loyer", nature: "Courante"});
+    const bj = budgetActif(2027); bj.lignes.push({id: "l2", nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 12000, paiement: {compte: 1}}); enregistrer("budgets", bj);
+    const sj = simulerTresorerie({depart: "2027-03-31", jours: 60});
+    const fluxJour = d => sj.jours.find(j => j.date === d).flux;
+    v("trésorerie : loyer budgété à son jour habituel", [Math.round(fluxJour("2027-04-05") - fluxJour("2027-04-06")), sj.evenements.some(e => /Loyer \(budget, vers le 5\)/.test(e.libelle))], [-1000, true]);
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
   finally {
     LIVRE = memoire.LIVRE; Object.assign(SESSION, memoire.session); LIVRE_MODIFIE = memoire.modifie; planifierSauvegarde = sauvegardePlanifiee; invaliderIndex();

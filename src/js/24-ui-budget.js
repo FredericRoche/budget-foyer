@@ -62,11 +62,15 @@ async function editerLigne(budget, ligne){
   const reps = lieux.map(lx => h("input", {type: "text", value: nombre(Math.round(((l.repartition || {})[lx] ?? (lx === "Autres" && !l.repartition ? 1 : 0)) * 100), 0), style: {width: "4.5rem"}}));
   const pay = ["compte", "cartes", "amex"].map(k => h("input", {type: "text", value: nombre(Math.round((l.paiement?.[k] || 0) * 100), 0), style: {width: "4.5rem"}}));
   const profil = h("input", {type: "text", value: Array.isArray(l.profil) ? l.profil.join(" ") : "", placeholder: "vide = 1/12 par mois ; sinon 12 poids, ex. 0 0 0 0 0 0 0 0 0 1 0 0"});
+  const cpt = obtenir("comptes", LIVRE.parametres.compteTresorerie) || comptesDeType("courant")[0];
+  const habituel = cpt && l.categorie ? joursHabituels(cpt.id, aujourdhui()).get(cleLigne(l.categorie, l.sousCategorie)) : null;
+  const jour = h("input", {type: "text", inputmode: "numeric", value: l.jour ? String(l.jour) : "", style: {width: "5rem"}, placeholder: habituel ? String(habituel) : "—"});
   const ok = await dialogue({titre: ligne ? "Modifier la ligne" : "Nouvelle ligne de budget", large: true, corps: h("div", null,
     h("div", {class: "grille-champs"}, champ("Catégorie", cat), champ("Nature", nat), champ("Montant annuel", annuel)),
     h("label", null, "Répartition par lieu (%)"), h("div", {class: "outils", style: {marginBottom: ".6rem"}}, lieux.map((lx, i) => h("span", null, lx + " ", reps[i]))),
     h("label", null, "Mode de paiement (%), pour la trésorerie"), h("div", {class: "outils", style: {marginBottom: ".6rem"}}, h("span", null, "compte ", pay[0]), h("span", null, "cartes LCL ", pay[1]), h("span", null, "Amex ", pay[2])),
-    champ("Profil mensuel", profil, "Par exemple pour une taxe payée en octobre : 0 0 0 0 0 0 0 0 0 1 0 0.")),
+    champ("Profil mensuel", profil, "Par exemple pour une taxe payée en octobre : 0 0 0 0 0 0 0 0 0 1 0 0."),
+    champ("Jour de prélèvement sur le compte", jour, habituel ? "Vide = jour habituel tiré des opérations (le " + habituel + ")." : "Vide = étalé sur le mois (pas de jour habituel dans les opérations).")),
     actions: [ligne ? {libelle: "Supprimer la ligne", classe: "danger", action: () => { budget.lignes = budget.lignes.filter(x => x !== ligne); enregistrer("budgets", budget); return true; }} : null,
       {libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
         const v = valeurCategorie(cat); if (v.categorie === "À préciser"){ message("Choisissez une catégorie.", true); return false; }
@@ -75,8 +79,10 @@ async function editerLigne(budget, ligne){
         const p = ["compte", "cartes", "amex"].map((k, i) => lireMontant(pay[i].value) || 0); const tp = somme(p);
         const prof = profil.value.trim() ? profil.value.trim().split(/[\s;]+/).map(Number) : null;
         if (prof && (prof.length !== 12 || prof.some(isNaN))){ message("Le profil doit compter 12 nombres.", true); return false; }
+        const jr = jour.value.trim() ? Number(jour.value.trim()) : null;
+        if (jr !== null && !(Number.isInteger(jr) && jr >= 1 && jr <= 31)){ message("Le jour doit être un nombre de 1 à 31.", true); return false; }
         Object.assign(l, v, {nature: nat.value, annuel: a, repartition: tr ? Object.fromEntries(Object.entries(r).map(([k, x]) => [k, x * 100 / tr])) : null,
-          paiement: tp ? {compte: p[0] / tp, cartes: p[1] / tp, amex: p[2] / tp} : {compte: 1, cartes: 0, amex: 0}, profil: prof});
+          paiement: tp ? {compte: p[0] / tp, cartes: p[1] / tp, amex: p[2] / tp} : {compte: 1, cartes: 0, amex: 0}, profil: prof, jour: jr});
         if (!ligne) budget.lignes.push(l);
         enregistrer("budgets", budget); return true;
       }}].filter(Boolean)});
