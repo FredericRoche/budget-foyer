@@ -245,7 +245,8 @@ nav.basse{display:none}
   @page{size:A4; margin:14mm 13mm}
   body:has(#impression > *) > *:not(#impression){display:none !important}
   body:has(#impression > *){background:#fff}
-  #impression{display:block; font-size:9.5pt; color:#1d1d1b}
+  #impression{display:block; font-size:9.5pt; color:#1d1d1b; -webkit-print-color-adjust:exact; print-color-adjust:exact}
+  #impression *{-webkit-print-color-adjust:exact; print-color-adjust:exact}
   #impression .imp-tete{border-bottom:2px solid var(--vert-empire); padding-bottom:3mm; margin-bottom:4mm}
   #impression .imp-foyer{font-variant:small-caps; letter-spacing:.08em; color:var(--or-bruni); font-size:9pt}
   #impression h1{font-size:18pt; color:var(--vert-empire); margin:1mm 0; font-weight:600}

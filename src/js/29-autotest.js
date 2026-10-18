@@ -202,7 +202,7 @@ async function autotest(){
     {
       enregistrer("echeances", {libelle: "Pension essai", montant: 1000, recurrence: "mensuelle", debut: "2027-01-10", compte: cj.id, categorie: "Revenus", sousCategorie: "Pensions"});
       const di = donneesImpressionBudget(budgetActif(2027), 2027, 1, 12, "");
-      v("impression du budget : revenus prévus d'une échéance mensuelle", Math.round(di.revenus.find(r => r.poste === "Pensions")?.prevu || 0), 12000);
+      v("impression du budget : revenus prévus d'une échéance mensuelle, non ponctuels", [Math.round(di.revenus.find(r => r.poste === "Pensions")?.prevu || 0), Math.round(di.revenus.find(r => r.poste === "Pensions")?.ponctuel || 0)], [12000, 0]);
       v("impression du budget : totaux cohérents et échéances lisibles", [Math.round(di.budget), Math.round(somme(di.parMois, x => x.total)), echeanceLigne({annuel: 1, profil: [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]}), echeanceLigne({annuel: 1, profil: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], jour: 25}), echeanceLigne({annuel: 1})],
         [Math.round(somme(budgetActif(2027).lignes, l => l.annuel)), Math.round(somme(budgetActif(2027).lignes, l => l.annuel)), "juil.–déc.", "oct. · le 25", ""]);
     }
