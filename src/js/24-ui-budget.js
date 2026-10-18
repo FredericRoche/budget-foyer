@@ -1,4 +1,6 @@
 /* ================= Budget et réalisé ================= */
+// Dépassement : réalisé au-delà de 10 % et de 50 € d'une ligne de dépense ; une ligne de crédit (budget négatif : points, remboursements) n'est jamais en dépassement.
+function postesEnDepassement(lignes){ return lignes.filter(l => l.budget > 0 && l.realise > l.budget * 1.1 && l.realise - l.budget > 50); }
 declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
   const m = moisCourant(etat); const an = +m.slice(0, 4), mo = +m.slice(5, 7);
   const budgets = vivants("budgets").filter(b => b.annee === an);
@@ -21,7 +23,7 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
   const lignes = tableauBudget(budget, an, d1, d2, lieu);
   const lb = lignes.filter(l => l.ligne);
   const tb = somme(lb, l => l.budget), tr = somme(lignes, l => l.realise);
-  const depasse = lignes.filter(l => l.realise > l.budget * 1.1 && l.realise - l.budget > 50);
+  const depasse = postesEnDepassement(lignes);
   c.appendChild(h("div", {class: "indicateurs"},
     h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Budget"), h("div", {class: "val"}, euros(tb, 0)), h("div", {class: "det"}, "budget annuel : " + euros(somme(lb, l => l.annuel), 0))),
     h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Réalisé"), h("div", {class: "val"}, euros(tr, 0)), h("div", {class: "det"}, tb ? Math.round(tr / tb * 100) + " % du budget" : "")),

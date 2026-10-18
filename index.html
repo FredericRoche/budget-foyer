@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-gcN9+dccuL/hysmHpOYgfaTaLehcPiJlfWTdeyiH8LE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-A8el5vNVh5/etjKemZcj+tT/ZJe6mICWd0hSatwedz0=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -285,7 +285,7 @@ nav.basse{display:none}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-17.2315";
+const VERSION_APP = "2026-10-18.1954";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4156,6 +4156,8 @@ async function fusionDialogue(){
 
 /* ===== 24-ui-budget.js ===== */
 /* ================= Budget et réalisé ================= */
+// Dépassement : réalisé au-delà de 10 % et de 50 € d'une ligne de dépense ; une ligne de crédit (budget négatif : points, remboursements) n'est jamais en dépassement.
+function postesEnDepassement(lignes){ return lignes.filter(l => l.budget > 0 && l.realise > l.budget * 1.1 && l.realise - l.budget > 50); }
 declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
   const m = moisCourant(etat); const an = +m.slice(0, 4), mo = +m.slice(5, 7);
   const budgets = vivants("budgets").filter(b => b.annee === an);
@@ -4178,7 +4180,7 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
   const lignes = tableauBudget(budget, an, d1, d2, lieu);
   const lb = lignes.filter(l => l.ligne);
   const tb = somme(lb, l => l.budget), tr = somme(lignes, l => l.realise);
-  const depasse = lignes.filter(l => l.realise > l.budget * 1.1 && l.realise - l.budget > 50);
+  const depasse = postesEnDepassement(lignes);
   c.appendChild(h("div", {class: "indicateurs"},
     h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Budget"), h("div", {class: "val"}, euros(tb, 0)), h("div", {class: "det"}, "budget annuel : " + euros(somme(lb, l => l.annuel), 0))),
     h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Réalisé"), h("div", {class: "val"}, euros(tr, 0)), h("div", {class: "det"}, tb ? Math.round(tr / tb * 100) + " % du budget" : "")),
@@ -5133,6 +5135,7 @@ async function autotest(){
     appliquerPlan({commercants: [{nom: "Pisciniste essai", alias: ["PISCINE ESSAI VILLE"], categorie: "Extérieurs", sousCategorie: "Piscine (entretien)", lieu: "Campagne", verifie: true}]});
     const fp = trouverCommercant(cleLibelle("PISCINE ESSAI VILLE"), true);
     v("plan : fiche fournisseur fixée et vérifiée", [fp?.nom, fp?.sousCategorie, fp?.verifie], ["Pisciniste essai", "Piscine (entretien)", true]);
+    v("budget : une ligne de crédit sans réalisé n'est pas en dépassement", postesEnDepassement([{budget: -138, realise: 0}, {budget: -3073, realise: 0}, {budget: 100, realise: 200}, {budget: 1000, realise: 1040}]).length, 1);
     const tj = simulerTresorerie({depart: "2027-03-31", jours: 120, perimetre: "tout"});
     v("compte joint réel : marche courante + capital", Math.round(tj.jours[tj.jours.length - 1].solde - s2.jours[s2.jours.length - 1].solde), 20000);
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
