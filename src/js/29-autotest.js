@@ -199,6 +199,13 @@ async function autotest(){
     v("budget : une ligne de crédit sans réalisé n'est pas en dépassement", postesEnDepassement([{budget: -138, realise: 0}, {budget: -3073, realise: 0}, {budget: 100, realise: 200}, {budget: 1000, realise: 1040}]).length, 1);
     const tj = simulerTresorerie({depart: "2027-03-31", jours: 120, perimetre: "tout"});
     v("compte joint réel : marche courante + capital", Math.round(tj.jours[tj.jours.length - 1].solde - s2.jours[s2.jours.length - 1].solde), 20000);
+    {
+      enregistrer("echeances", {libelle: "Pension essai", montant: 1000, recurrence: "mensuelle", debut: "2027-01-10", compte: cj.id, categorie: "Revenus", sousCategorie: "Pensions"});
+      const di = donneesImpressionBudget(budgetActif(2027), 2027, 1, 12, "");
+      v("impression du budget : revenus prévus d'une échéance mensuelle", Math.round(di.revenus.find(r => r.poste === "Pensions")?.prevu || 0), 12000);
+      v("impression du budget : totaux cohérents et échéances lisibles", [Math.round(di.budget), Math.round(somme(di.parMois, x => x.total)), echeanceLigne({annuel: 1, profil: [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]}), echeanceLigne({annuel: 1, profil: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], jour: 25}), echeanceLigne({annuel: 1})],
+        [Math.round(somme(budgetActif(2027).lignes, l => l.annuel)), Math.round(somme(budgetActif(2027).lignes, l => l.annuel)), "juil.–déc.", "oct. · le 25", ""]);
+    }
     v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);
     for (const d of ["2027-01-05", "2027-02-05", "2027-03-05"]) enregistrer("operations", {compte: cj.id, date: d, montant: -1000, libelle: "VIR LOYER EXEMPLE", categorie: "Logement", sousCategorie: "Loyer", nature: "Courante"});
     const bj = budgetActif(2027); bj.lignes.push({id: "l2", nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 12000, paiement: {compte: 1}}); enregistrer("budgets", bj);
