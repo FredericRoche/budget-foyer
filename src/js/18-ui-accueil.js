@@ -54,6 +54,27 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
     autos ? h("p", {class: "note"}, autos + " rapprochement(s) fait(s) d'office, réversibles (« À traiter »).") : null));
   c.appendChild(grille);
 
+  // Revenus et résultat de l'année : mêmes chiffres que la version imprimable du budget
+  if (budget){
+    const d = donneesImpressionBudget(budget, an, 1, 12, "");
+    const recurrents = d.revenusPrevus - d.revenusPonctuels, solde = recurrents - d.annuel;
+    const nature = r => r.ponctuel && Math.abs(r.ponctuel - r.prevu) < 0.5 ? "ponctuel" : "récurrent";
+    const res = (lib, v, cls) => h("tr", {class: cls || ""}, h("td", null, lib), h("td", {class: "num" + (v < 0 ? " neg" : "")}, typeof v === "number" ? eurosSigne(Math.round(v)) : v));
+    const carteRev = h("section", {class: "carte"}, h("h2", null, "Revenus et résultat " + an),
+      h("div", {class: "deux-colonnes"},
+        tableau([{titre: "Revenu"}, {titre: "Nature"}, {titre: "Prévu " + an, num: true}, {titre: "Encaissé", num: true}], d.revenus, {classe: "serre", vide: "Aucun revenu prévu.", ligne: r => h("tr", null,
+          h("td", null, r.poste || r.categorie, r.aConfirmer ? h("span", {class: "petit discret"}, " (à confirmer)") : null, r.calcule ? h("span", {class: "petit discret"}, " (estimé)") : null),
+          h("td", {class: "discret"}, nature(r)), h("td", {class: "num"}, euros(r.prevu, 0)), h("td", {class: "num"}, r.realise ? euros(r.realise, 0) : "—"))}),
+        h("div", {class: "tableau"}, h("table", {class: "serre"}, h("tbody", null,
+          res("Revenus récurrents", recurrents), res("Charges budgétées", -d.annuel),
+          res(solde < 0 ? "Déficit courant, financé par l'épargne" : "Excédent courant", solde, "total"),
+          res("soit par mois", solde / 12),
+          d.revenusPonctuels ? res("Revenus ponctuels", d.revenusPonctuels) : null,
+          d.revenusPonctuels ? res("Solde de l'année", solde + d.revenusPonctuels, "total") : null)))),
+      h("p", {class: "note"}, "Encaissé à ce jour : " + euros(d.revenusRealises, 0) + " de revenus pour " + euros(d.realise, 0) + " de charges. Produits de l'épargne estimés aux taux des comptes (Réglages). Détail et impression : écran Budget, « Version imprimable »."));
+    c.appendChild(carteRev);
+  }
+
   const deux = h("div", {class: "deux"});
   const ecarts = lignes.filter(l => l.budget > 0 || l.realise > 0).map(l => Object.assign({}, l, {ecart: l.budget - l.realise})).sort((x, y) => Math.abs(y.ecart) - Math.abs(x.ecart)).slice(0, 6);
   deux.appendChild(h("section", {class: "carte"}, h("h2", null, "Plus forts écarts du mois"),

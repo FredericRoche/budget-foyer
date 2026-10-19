@@ -289,3 +289,5 @@ nav.basse{display:none}
 }
 input.champ-date{width:8.5rem; font-variant-numeric:tabular-nums}
 input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
+.deux-colonnes{display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:1.2rem; align-items:start}
+@media (max-width: 760px){ .deux-colonnes{grid-template-columns:1fr} }
