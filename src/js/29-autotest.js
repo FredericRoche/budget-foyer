@@ -225,6 +225,11 @@ async function autotest(){
       v("trésorerie : intérêts des livrets virés le 15 janvier", tvj.evenements.filter(e => /des livrets/.test(e.libelle)).map(e => e.date + " " + Math.round(e.montant)).join(), "2028-01-15 3600");
       enregistrer("comptes", Object.assign(lv, {actif: false}));
     }
+    {
+      const p0 = window.print; window.print = () => {};
+      try { imprimerSynthese(budgetActif(2027), 2027); const zs = document.getElementById("impression"); v("synthèse annuelle : construite, sans sous-catégorie", [!!zs.querySelector("h1"), /Courses/.test(zs.innerText)], [true, false]); vider(zs); }
+      finally { window.print = p0; }
+    }
     v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);
     for (const d of ["2027-01-05", "2027-02-05", "2027-03-05"]) enregistrer("operations", {compte: cj.id, date: d, montant: -1000, libelle: "VIR LOYER EXEMPLE", categorie: "Logement", sousCategorie: "Loyer", nature: "Courante"});
     const bj = budgetActif(2027); bj.lignes.push({id: "l2", nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 12000, paiement: {compte: 1}}); enregistrer("budgets", bj);
