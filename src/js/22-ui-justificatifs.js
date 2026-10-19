@@ -53,20 +53,23 @@ function ecranRapprochement(j, etat, attente){
     const cat = selectionCategorie(x.categorie || fiche?.categorie || "", x.sousCategorie || fiche?.sousCategorie || "");
     const lieu = selectionLieu(x.lieu || fiche?.lieu || "");
     const carte = selection([["", "—"], ...vivants("comptes").filter(c => c.type === "carte" && c.carte !== "LCL-NV").map(c => [c.carte, c.nom]),
-      ...comptesDeType("courant").map(c => ["CPT:" + c.id, c.nom + " (virement, prélèvement, chèque)"]), ["ESPECES", "Espèces"]], x.carte || "");
+      ...comptesDeType("courant").flatMap(c => [["CPT:" + c.id, "Virement ou prélèvement · " + c.nom], ["CHQ:" + c.id, "Chèque · " + c.nom]]), ["ESPECES", "Espèces"]], x.carte || "");
+    const cheque = h("input", {type: "text", inputmode: "numeric", value: x.cheque || "", placeholder: "n° du chèque", style: {width: "9rem"}});
+    const ligneCheque = h("div", {class: "champ-ocr", hidden: !String(x.carte || "").startsWith("CHQ:")}, h("label", null, "N° de chèque"), cheque, h("span", {class: "confiance"}, "pour le rapprochement"));
+    carte.addEventListener("change", () => { ligneCheque.hidden = !carte.value.startsWith("CHQ:"); });
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", cm, fiche ? "fichier des fournisseurs" : "nouveau"), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""));
-    champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte});
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""), ligneCheque);
+    champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte, cheque});
   });
   const enregistrerSaisie = () => {
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
-        lieu: f.lieu.value, carte: f.carte.value}, valeurCategorie(f.cat));
+        lieu: f.lieu.value, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
       if (f.x.commercantNom && f.x.commercantNom !== ancienNom){
         let fiche = vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom)) || (f.x.commercant ? obtenir("commercants", f.x.commercant) : null);

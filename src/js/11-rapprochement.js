@@ -15,7 +15,7 @@ function fenetre(j){
 function compteCompatible(j, compte){
   if (!j.carte) return true;
   if (j.carte === "ESPECES") return compte.type === "especes";
-  if (j.carte.startsWith("CPT:")) return compte.id === j.carte.slice(4);
+  if (j.carte.startsWith("CPT:") || j.carte.startsWith("CHQ:")) return compte.id === j.carte.slice(4);
   if (j.carte === "AMEX") return compte.carte === "AMEX";
   if (/^X\d+/.test(j.carte)) return compte.carte === j.carte || compte.carte === "LCL-NV";
   return true;
@@ -43,6 +43,7 @@ function candidats(js){
     const dj = ecartJours(j.date, op.date);
     if (dj < -avant || dj > apres) continue;
     const compte = obtenir("comptes", op.compte); if (!compte || !compteCompatible(j, compte)) continue;
+    if (j.cheque && !String(op.libelle + " " + (op.detail || "")).replace(/\D/g, " ").split(" ").some(n => n && (n === j.cheque || n.endsWith(j.cheque)))) continue;
     const dejaTypes = (op.justificatifs || []).map(id => obtenir("justificatifs", id)).filter(x => x && !js.includes(x)).map(x => x.type);
     if (js.some(x => dejaTypes.includes(x.type))) continue;
     const cOp = op.commercant ? obtenir("commercants", op.commercant) : null;

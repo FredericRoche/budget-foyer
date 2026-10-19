@@ -238,6 +238,10 @@ async function autotest(){
     {
       const rc = appliquerPlan({categories: {"Travaux essai": ["Études", "Gros œuvre"]}});
       v("plan : sous-catégories créées", [rc.categories, (LIVRE.parametres.categories["Travaux essai"] || []).join("|")], [2, "Études|Gros œuvre"]);
+      enregistrer("operations", {compte: cj.id, date: "2027-03-20", montant: -555, libelle: "Chèque n° 1234567", categorie: "", nature: "Courante"});
+      enregistrer("operations", {compte: cj.id, date: "2027-03-21", montant: -555, libelle: "Chèque n° 7654321", categorie: "", nature: "Courante"});
+      const jc = {type: "facture", montant: 555, date: "2027-03-15", carte: "CHQ:" + cj.id, cheque: "7654321"};
+      v("chèque : le numéro désigne l'opération", candidats([jc]).map(x => x.op.libelle), ["Chèque n° 7654321"]);
       v("justificatif payé par virement : compte compatible", [compteCompatible({carte: "CPT:" + cj.id}, cj), compteCompatible({carte: "CPT:autre"}, cj)], [true, false]);
     }
     v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);

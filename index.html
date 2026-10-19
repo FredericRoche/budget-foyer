@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-u5/pU0yV3nPW4hO33m6a4esIb9OXspcFg3JsDca9OYw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-8eO995O9YqmqzdR7mASiyCcXr/1MyiiUJo86Rdfmq2o=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -342,7 +342,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1334";
+const VERSION_APP = "2026-10-19.1336";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2444,7 +2444,7 @@ function fenetre(j){
 function compteCompatible(j, compte){
   if (!j.carte) return true;
   if (j.carte === "ESPECES") return compte.type === "especes";
-  if (j.carte.startsWith("CPT:")) return compte.id === j.carte.slice(4);
+  if (j.carte.startsWith("CPT:") || j.carte.startsWith("CHQ:")) return compte.id === j.carte.slice(4);
   if (j.carte === "AMEX") return compte.carte === "AMEX";
   if (/^X\d+/.test(j.carte)) return compte.carte === j.carte || compte.carte === "LCL-NV";
   return true;
@@ -2472,6 +2472,7 @@ function candidats(js){
     const dj = ecartJours(j.date, op.date);
     if (dj < -avant || dj > apres) continue;
     const compte = obtenir("comptes", op.compte); if (!compte || !compteCompatible(j, compte)) continue;
+    if (j.cheque && !String(op.libelle + " " + (op.detail || "")).replace(/\D/g, " ").split(" ").some(n => n && (n === j.cheque || n.endsWith(j.cheque)))) continue;
     const dejaTypes = (op.justificatifs || []).map(id => obtenir("justificatifs", id)).filter(x => x && !js.includes(x)).map(x => x.type);
     if (js.some(x => dejaTypes.includes(x.type))) continue;
     const cOp = op.commercant ? obtenir("commercants", op.commercant) : null;
@@ -4238,20 +4239,23 @@ function ecranRapprochement(j, etat, attente){
     const cat = selectionCategorie(x.categorie || fiche?.categorie || "", x.sousCategorie || fiche?.sousCategorie || "");
     const lieu = selectionLieu(x.lieu || fiche?.lieu || "");
     const carte = selection([["", "—"], ...vivants("comptes").filter(c => c.type === "carte" && c.carte !== "LCL-NV").map(c => [c.carte, c.nom]),
-      ...comptesDeType("courant").map(c => ["CPT:" + c.id, c.nom + " (virement, prélèvement, chèque)"]), ["ESPECES", "Espèces"]], x.carte || "");
+      ...comptesDeType("courant").flatMap(c => [["CPT:" + c.id, "Virement ou prélèvement · " + c.nom], ["CHQ:" + c.id, "Chèque · " + c.nom]]), ["ESPECES", "Espèces"]], x.carte || "");
+    const cheque = h("input", {type: "text", inputmode: "numeric", value: x.cheque || "", placeholder: "n° du chèque", style: {width: "9rem"}});
+    const ligneCheque = h("div", {class: "champ-ocr", hidden: !String(x.carte || "").startsWith("CHQ:")}, h("label", null, "N° de chèque"), cheque, h("span", {class: "confiance"}, "pour le rapprochement"));
+    carte.addEventListener("change", () => { ligneCheque.hidden = !carte.value.startsWith("CHQ:"); });
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", cm, fiche ? "fichier des fournisseurs" : "nouveau"), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""));
-    champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte});
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""), ligneCheque);
+    champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte, cheque});
   });
   const enregistrerSaisie = () => {
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
-        lieu: f.lieu.value, carte: f.carte.value}, valeurCategorie(f.cat));
+        lieu: f.lieu.value, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
       if (f.x.commercantNom && f.x.commercantNom !== ancienNom){
         let fiche = vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom)) || (f.x.commercant ? obtenir("commercants", f.x.commercant) : null);
@@ -5691,6 +5695,10 @@ async function autotest(){
     {
       const rc = appliquerPlan({categories: {"Travaux essai": ["Études", "Gros œuvre"]}});
       v("plan : sous-catégories créées", [rc.categories, (LIVRE.parametres.categories["Travaux essai"] || []).join("|")], [2, "Études|Gros œuvre"]);
+      enregistrer("operations", {compte: cj.id, date: "2027-03-20", montant: -555, libelle: "Chèque n° 1234567", categorie: "", nature: "Courante"});
+      enregistrer("operations", {compte: cj.id, date: "2027-03-21", montant: -555, libelle: "Chèque n° 7654321", categorie: "", nature: "Courante"});
+      const jc = {type: "facture", montant: 555, date: "2027-03-15", carte: "CHQ:" + cj.id, cheque: "7654321"};
+      v("chèque : le numéro désigne l'opération", candidats([jc]).map(x => x.op.libelle), ["Chèque n° 7654321"]);
       v("justificatif payé par virement : compte compatible", [compteCompatible({carte: "CPT:" + cj.id}, cj), compteCompatible({carte: "CPT:autre"}, cj)], [true, false]);
     }
     v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);
