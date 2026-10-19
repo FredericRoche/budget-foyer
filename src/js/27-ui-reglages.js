@@ -144,6 +144,18 @@ function reglagesTelephones(c){
       h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Changer la clé de l'extrait ? Les téléphones devront être réappairés.", "Changer", true)){ LIVRE.cles.extrait = versB64(crypto.getRandomValues(new Uint8Array(32))); marquerModifie(); await publierExtraitCommercants().catch(() => {}); rafraichirEcran(); } }}, "Changer la clé de l'extrait"))));
 }
 
+/* Bascule vers OneDrive en ligne : le livre courant est mis en attente d'envoi, puis écrit dans
+   « Applications › Budget foyer » au retour de la connexion Microsoft (dossier vide = premier envoi). */
+async function passerEnLigne(){
+  const id = LIVRE.parametres.graphClient || await reglage("graph_client", "");
+  if (!/^[0-9a-f-]{36}$/i.test(id || "")){ message("Saisissez d'abord l'identifiant de l'application Microsoft (Réglages › Téléphones).", true); return; }
+  if (!(await confirmer("Passer à OneDrive en ligne ? Microsoft va demander votre accord pour le dossier « Applications › Budget foyer » ; le livre y sera ensuite écrit. L'ancien dossier reste en place, intact.", "Se connecter"))) return;
+  try {
+    await ecrireCache(await chiffrerLivre(LIVRE, SESSION.cle, SESSION.enveloppe), false);
+    await definirReglage("graph_client", id); await definirReglage("adaptateur", "graph");
+    await adaptateurGraph.initialiser(id); await adaptateurGraph.connecter();
+  } catch (e){ message(e.message, true); }
+}
 function reglagesStockage(c){
   const ad = SESSION.adaptateur;
   const nom = h("input", {type: "text", value: nomAppareil(), placeholder: "ex. PC du bureau"});
@@ -151,7 +163,8 @@ function reglagesStockage(c){
     h("section", {class: "carte"}, h("h2", null, "Stockage"), h("p", null, "Actuel : ", h("strong", null, ad ? ad.libelle : "—"), ad?.nom === "dossier" && ad.racine ? " (« " + ad.racine.name + " »)" : ""),
       h("p", {class: "petit"}, SESSION.erreur ? h("span", {class: "neg"}, SESSION.erreur) : "Dernière synchronisation : " + (SESSION.derniereSynchro ? SESSION.derniereSynchro.toLocaleString("fr-FR") : "—")),
       h("div", {class: "outils"}, h("button", {onclick: () => synchroniser().then(() => message("Synchronisé.")).catch(e => message(e.message, true))}, "Synchroniser maintenant"),
-        adaptateurDossier.disponible() ? h("button", {class: "discret", onclick: async () => { try { await adaptateurDossier.choisir(); await definirReglage("adaptateur", "dossier"); SESSION.adaptateur = adaptateurDossier; SESSION.etiquette = null; await enregistrerMaintenant(); message("Livre écrit dans le dossier choisi."); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Passer au dossier OneDrive de ce PC…") : null),
+        adaptateurDossier.disponible() ? h("button", {class: "discret", onclick: async () => { try { await adaptateurDossier.choisir(); await definirReglage("adaptateur", "dossier"); SESSION.adaptateur = adaptateurDossier; SESSION.etiquette = null; await enregistrerMaintenant(); message("Livre écrit dans le dossier choisi."); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Passer au dossier OneDrive de ce PC…") : null,
+        ad?.nom !== "graph" ? h("button", {class: "discret", onclick: passerEnLigne}, "Passer à OneDrive en ligne…") : null),
       h("p", {class: "note"}, "Changer de stockage écrit le livre courant dans le nouvel emplacement ; s'il y existe déjà un livre de même clé, les deux sont fusionnés.")),
     h("section", {class: "carte"}, h("h2", null, "Cet appareil"), champ("Nom de l'appareil (affiché dans la synchronisation)", nom),
       h("button", {class: "mini primaire", onclick: () => { try { localStorage.setItem("bf_nom_appareil", nom.value.trim()); } catch (e) {} message("Enregistré."); majEtatSynchro(); }}, "Enregistrer"),
