@@ -71,6 +71,10 @@ function simulerTresorerie(options){
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, e.montant, e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
   }
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
+  // Intérêts des livrets de l'année écoulée, virés au compte courant en janvier
+  const interetsLivrets = produitsEpargne(o.depart).livrets;
+  if (interetsLivrets) for (let an = +o.depart.slice(0, 4) + 1; an <= +fin.slice(0, 4); an++)
+    ajouter(an + "-01-" + pad2(JOUR_VIREMENT_LIVRETS), interetsLivrets, "Intérêts " + (an - 1) + " des livrets, virés depuis l'épargne", "echeance", true);
   // 2. Encours connus des cartes rattachées à ce compte
   const amexJour = jourPrelevementAmex(compte.id);
   for (const c of vivants("comptes").filter(c => c.type === "carte" && (c.compteDebit === compte.id || !c.compteDebit))){
@@ -136,6 +140,15 @@ const estVirementDepuisEpargne = (e, compte) => e.categorie === "Transfert" && e
 const RENDEMENT_DEFAUT = {livret: 1.5, assurance_vie: 2, retraite: 2, prevoyance: 2};
 const tauxRendement = c => (typeof c.rendement === "number" ? c.rendement : (RENDEMENT_DEFAUT[c.type] || 0));
 const tauxNouveauxPlacements = () => (typeof LIVRE.parametres.tauxNouveauxPlacements === "number" ? LIVRE.parametres.tauxNouveauxPlacements : 2);
+/* Produits de l'épargne qui alimentent la marche courante :
+   - intérêts des livrets (Livret A, LDDS…) de l'année écoulée, virés au compte courant le 15 janvier ;
+   - rendement des assurances-vie, tenu pour disponible (il reste sur le contrat, mais finance le déficit avant le capital). */
+const JOUR_VIREMENT_LIVRETS = 15;
+function produitsEpargne(date){
+  const mob = vivants("comptes").filter(estMobilisable);
+  const prod = types => somme(mob.filter(c => types.includes(c.type)), c => (soldeCompte(c, date) || 0) * tauxRendement(c) / 100);
+  return {livrets: Math.round(prod(["livret"])), assurancesVie: Math.round(prod(["assurance_vie", "prevoyance"]))};
+}
 function simulerEpargne(options){
   const o = Object.assign({jours: 365, depart: aujourdhui(), rendement: true}, options);
   const fin = ajouterJours(o.depart, o.jours);
@@ -149,6 +162,10 @@ function simulerEpargne(options){
       if (estCapital(e)) ajouter(d, e.montant, e.libelle + (e.projet ? " (projet " + e.projet + ")" : ""), e.projet ? "projet" : "capital", e);
       else if (courant && estVirementDepuisEpargne(e, courant.compte)) ajouter(d, -e.montant, e.libelle + " (vers " + courant.compte.nom + ")", "courant", e);
     }
+  const interetsLivrets = produitsEpargne(o.depart).livrets;
+  if (interetsLivrets && courant) for (let an = +o.depart.slice(0, 4) + 1; an <= +fin.slice(0, 4); an++){
+    const d = an + "-01-" + pad2(JOUR_VIREMENT_LIVRETS); if (d > o.depart && d <= fin) ajouter(d, -interetsLivrets, "Intérêts " + (an - 1) + " des livrets, virés vers " + courant.compte.nom, "courant", null);
+  }
   const appro = approvisionnementsCourant(courant);
   for (const a of appro) ajouter(a.date, -a.montant, "Approvisionnement du compte courant (déficit de la marche courante)", "courant", null);
   // Rendement estimé, crédité en fin de mois (au prorata pour le premier mois) : comptes au départ à leur taux, sommes nouvelles au taux des nouveaux placements

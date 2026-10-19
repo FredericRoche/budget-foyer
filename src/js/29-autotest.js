@@ -220,6 +220,8 @@ async function autotest(){
       const nouv = simulerEpargne({depart: "2027-03-31", jours: 30}); LIVRE.parametres.tauxNouveauxPlacements = tn0;
       v("épargne : rendement d'un mois (120 000 € à 3 %, puis 50 000 € nouveaux à 2 % du 10 au 30)", [Math.round(avecR.jours[avecR.jours.length - 1].solde - sansR.jours[sansR.jours.length - 1].solde),
         Math.round(nouv.jours[nouv.jours.length - 1].solde - avecR.jours[avecR.jours.length - 1].solde)], [Math.round(120000 * 0.03 * 30 / 365), Math.round(50000 * 0.02 * 21 / 365)]);
+      const tvj = simulerTresorerie({depart: "2027-12-20", jours: 40});
+      v("trésorerie : intérêts des livrets virés le 15 janvier", tvj.evenements.filter(e => /des livrets/.test(e.libelle)).map(e => e.date + " " + Math.round(e.montant)).join(), "2028-01-15 3600");
       enregistrer("comptes", Object.assign(lv, {actif: false}));
     }
     v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);

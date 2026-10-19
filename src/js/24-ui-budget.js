@@ -128,6 +128,10 @@ function donneesImpressionBudget(budget, an, d1, d2, lieu){
     if (!e.recurrence || e.recurrence === "unique") x.ponctuel += e.montant * n;
   }
   for (const pa of partsPeriode(debut, fin, q => q.nature === "Revenu" && (!lieu || q.lieu === lieu))) poste(cle(pa.categorie, pa.sousCategorie)).realise += pa.montant;
+  // Produits de l'épargne : intérêts des livrets virés en janvier, rendement des assurances-vie tenu pour disponible
+  const pe = produitsEpargne(aujourdhui());
+  if (pe.livrets && d1 === 1) Object.assign(poste("Produits de l'épargne|Intérêts des livrets de l'année précédente (virés en janvier)"), {prevu: pe.livrets, calcule: true});
+  if (pe.assurancesVie) Object.assign(poste("Produits de l'épargne|Rendement des assurances-vie (disponible, reste sur les contrats)"), {prevu: Math.round(pe.assurancesVie * (d2 - d1 + 1) / 12), calcule: true});
   const revenus = [...rev.values()].filter(x => Math.abs(x.prevu) > 0.5 || Math.abs(x.realise) > 0.5).sort((a, b) => b.prevu - a.prevu || b.realise - a.realise);
   return {natures, parLieu, parMois, revenus, revenusPrevus: somme(revenus, x => x.prevu), revenusPonctuels: somme(revenus, x => x.ponctuel), revenusRealises: somme(revenus, x => x.realise),
     annuel: somme(natures, x => x.annuel), budget: somme(natures, x => x.budget), realise: somme(natures, x => x.realise)};
@@ -166,20 +170,21 @@ function imprimerBudget(budget, an, d1, d2, lieu, periode){
   z.appendChild(h("h2", null, "Revenus"));
   if (d.revenus.length){
     const tr = h("tbody");
-    for (const r of d.revenus) tr.appendChild(h("tr", null, h("td", null, r.poste || r.categorie, r.aConfirmer ? h("span", {class: "discret"}, " (à confirmer)") : null), h("td", {class: "ech"}, r.ponctuel && Math.abs(r.ponctuel - r.prevu) < 0.5 ? "ponctuel" : r.ponctuel ? "dont ponctuel " + e0(r.ponctuel) : "récurrent"),
+    for (const r of d.revenus) tr.appendChild(h("tr", null, h("td", null, r.poste || r.categorie, r.aConfirmer ? h("span", {class: "discret"}, " (à confirmer)") : null, r.calcule ? h("span", {class: "discret"}, " (estimé)") : null), h("td", {class: "ech"}, r.ponctuel && Math.abs(r.ponctuel - r.prevu) < 0.5 ? "ponctuel" : r.ponctuel ? "dont ponctuel " + e0(r.ponctuel) : "récurrent"),
       h("td", {class: "num"}, r.prevu ? e0(r.prevu) : "—"), h("td", {class: "num"}, r.realise ? e0(r.realise) : "—")));
     tr.appendChild(h("tr", {class: "imp-total"}, h("td", null, "Total des revenus"), h("td"), h("td", {class: "num"}, e0(d.revenusPrevus)), h("td", {class: "num"}, d.revenusRealises ? e0(d.revenusRealises) : "—")));
     z.appendChild(h("table", {class: "imp-budget"}, h("thead", null, h("tr", null, h("th", null, "Revenu"), h("th", null, "Nature"), h("th", {class: "num"}, "Prévu"), h("th", {class: "num"}, "Réalisé"))), tr));
   } else z.appendChild(h("p", {class: "imp-note"}, "Aucun revenu prévu en échéance ni encaissé sur la période."));
   z.appendChild(h("h2", null, "Résultat"));
   z.appendChild(h("table", {class: "imp-budget imp-resultat"}, h("tbody", null,
-    h("tr", null, h("td", null, "Revenus récurrents (pensions, salaires)"), h("td", {class: "num"}, e0(recurrents))),
+    h("tr", null, h("td", null, "Revenus récurrents (pensions, produits de l'épargne)"), h("td", {class: "num"}, e0(recurrents))),
     h("tr", null, h("td", null, "Charges budgétées"), h("td", {class: "num"}, "− " + e0(d.budget))),
     h("tr", {class: "imp-total"}, h("td", null, solde < 0 ? "Déficit courant, à financer par l'épargne" : "Excédent courant"), h("td", {class: "num" + (solde < 0 ? " neg" : "")}, eurosSigne(Math.round(solde)))),
     d.revenusPonctuels ? h("tr", null, h("td", null, "Revenus ponctuels (paie de sortie, restitutions…)"), h("td", {class: "num"}, "+ " + e0(d.revenusPonctuels))) : null,
     d.revenusPonctuels ? h("tr", {class: "imp-total"}, h("td", null, "Solde de la période, revenus ponctuels compris"), h("td", {class: "num" + (solde + d.revenusPonctuels < 0 ? " neg" : "")}, eurosSigne(Math.round(solde + d.revenusPonctuels)))) : null)));
   z.appendChild(h("p", {class: "imp-note"}, "Charges : lignes du budget, réalisé à la date d'achat, hors transferts et opérations « Hors budget ». Échéance : mois couverts par la ligne quand elle n'est pas répartie par douzièmes, et jour de prélèvement fixé. "
-    + "Revenus : échéances positives de la période (pensions, paie, restitutions), hors cessions de titres et virements depuis l'épargne, qui relèvent de l'écran Épargne."));
+    + "Revenus : échéances positives de la période (pensions, paie, restitutions), hors cessions de titres et virements depuis l'épargne ; produits de l'épargne estimés aux taux de chaque compte (Réglages) sur les valorisations du jour, "
+    + "intérêts des livrets virés au compte courant le 15 janvier, rendement des assurances-vie laissé sur les contrats mais tenu pour disponible."));
   const annexe = h("section", {class: "imp-annexe"}, h("h2", null, "Budget mois par mois, par catégorie" + (lieu ? " · " + lieu : "")));
   const tm = h("tbody");
   for (const x of d.parMois) tm.appendChild(h("tr", null, h("td", null, x.categorie), x.mois.map(v => h("td", {class: "num"}, Math.abs(v) < 0.5 ? "" : e0(v))), h("td", {class: "num fort"}, e0(x.total))));
