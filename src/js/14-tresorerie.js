@@ -131,10 +131,15 @@ const estVirementDepuisEpargne = (e, compte) => e.categorie === "Transfert" && e
 /* Trésorerie de l'épargne : épargne mobilisable au départ (ses revenus y restent), plus les cessions de
    titres, moins le financement des projets et les approvisionnements du compte courant, prévus en
    échéance ou rendus nécessaires par la marche courante. */
+/* Rendement estimé des placements (% par an, brut) : taux du compte, sinon taux par défaut de son type.
+   Les sommes nouvelles (cessions, moins les financements) rapportent le taux des nouveaux placements. */
+const RENDEMENT_DEFAUT = {livret: 1.5, assurance_vie: 2, retraite: 2, prevoyance: 2};
+const tauxRendement = c => (typeof c.rendement === "number" ? c.rendement : (RENDEMENT_DEFAUT[c.type] || 0));
+const tauxNouveauxPlacements = () => (typeof LIVRE.parametres.tauxNouveauxPlacements === "number" ? LIVRE.parametres.tauxNouveauxPlacements : 2);
 function simulerEpargne(options){
-  const o = Object.assign({jours: 365, depart: aujourdhui()}, options);
+  const o = Object.assign({jours: 365, depart: aujourdhui(), rendement: true}, options);
   const fin = ajouterJours(o.depart, o.jours);
-  const comptes = vivants("comptes").filter(estMobilisable).map(c => ({compte: c, solde: soldeCompte(c, o.depart) || 0}));
+  const comptes = vivants("comptes").filter(estMobilisable).map(c => ({compte: c, solde: soldeCompte(c, o.depart) || 0, taux: tauxRendement(c)}));
   const soldeDepart = somme(comptes, x => x.solde);
   const courant = simulerTresorerie({depart: o.depart, jours: o.jours});
   const flux = new Map(), evenements = [];
@@ -146,9 +151,22 @@ function simulerEpargne(options){
     }
   const appro = approvisionnementsCourant(courant);
   for (const a of appro) ajouter(a.date, -a.montant, "Approvisionnement du compte courant (déficit de la marche courante)", "courant", null);
-  const jours = []; let solde = soldeDepart;
-  for (let d = ajouterJours(o.depart, 1); d <= fin; d = ajouterJours(d, 1)){ const f = flux.get(d) || 0; solde += f; jours.push({date: d, flux: f, solde}); }
-  return {titre: "Épargne disponible", depart: o.depart, soldeDepart, comptes, jours, approvisionnements: appro, evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
+  // Rendement estimé, crédité en fin de mois (au prorata pour le premier mois) : comptes au départ à leur taux, sommes nouvelles au taux des nouveaux placements
+  // (intérêts au jour le jour, crédités en fin de mois)
+  const baseJour = somme(comptes, x => x.solde * x.taux / 100 / 365), tauxNouveau = tauxNouveauxPlacements() / 100 / 365;
+  const jours = []; let solde = soldeDepart, rendement = 0, couru = 0;
+  for (let d = ajouterJours(o.depart, 1); d <= fin; d = ajouterJours(d, 1)){
+    let f = flux.get(d) || 0; solde += f;
+    if (o.rendement){
+      couru += baseJour + (solde - soldeDepart - rendement) * tauxNouveau;
+      if (d === finDeMois(d) || d === fin){
+        const r = Math.round(couru * 100) / 100; couru = 0;
+        if (r){ solde += r; f += r; rendement += r; evenements.push({date: d, montant: r, libelle: "Rendement estimé des placements", genre: "rendement"}); }
+      }
+    }
+    jours.push({date: d, flux: f, solde});
+  }
+  return {titre: "Épargne disponible", depart: o.depart, soldeDepart, comptes, jours, rendement, approvisionnements: appro, evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
 }
 function dernierBudgetAvant(an){
   const annees = anneesBudget().filter(a => a < an);

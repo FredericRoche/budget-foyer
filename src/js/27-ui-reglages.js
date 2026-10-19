@@ -43,11 +43,15 @@ async function editerCompte(x){
   const debit = selection([["", "—"], ...comptesDeType("courant").map(y => [y.id, y.nom])], cpt.compteDebit || "");
   const actif = h("input", {type: "checkbox", checked: cpt.actif !== false, id: "cpt-actif"});
   const mobil = h("input", {type: "checkbox", checked: estMobilisable(Object.assign({}, cpt, {actif: true})), id: "cpt-mobil"});
+  const rend = h("input", {type: "text", inputmode: "decimal", value: typeof cpt.rendement === "number" ? nombre(cpt.rendement, 2) : "", placeholder: "défaut " + nombre(RENDEMENT_DEFAUT[cpt.type] || 0, 2)});
   const ok = await dialogue({titre: x ? "Modifier le compte" : "Nouveau compte", large: true, corps: h("div", null, h("div", {class: "grille-champs"}, champ("Nom", nom), champ("Type", type), champ("Établissement", banque),
-    champ("Titulaire", titulaire), champ("Numéro (fin)", numero), champ("Carte", carte), champ("Carte débitée sur", debit)), h("div", {class: "case"}, actif, h("label", {for: "cpt-actif"}, "Actif")),
+    champ("Titulaire", titulaire), champ("Numéro (fin)", numero), champ("Carte", carte), champ("Carte débitée sur", debit), champ("Rendement annuel estimé (%)", rend)), h("div", {class: "case"}, actif, h("label", {for: "cpt-actif"}, "Actif")),
     h("div", {class: "case"}, mobil, h("label", {for: "cpt-mobil"}, "Épargne mobilisable (comptée dans l'écran Épargne)"))),
     actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
       if (!nom.value.trim()){ message("Nom requis.", true); return false; }
+      const tr = rend.value.trim() ? lireMontant(rend.value) : null;
+      if (tr !== null && (isNaN(tr) || tr < -50 || tr > 50)){ message("Rendement illisible.", true); return false; }
+      if (tr === null) delete cpt.rendement; else cpt.rendement = tr;
       enregistrer("comptes", Object.assign(cpt, {nom: nom.value.trim(), type: type.value, banque: banque.value.trim(), titulaire: titulaire.value.trim(), numero: numero.value.trim(),
         carte: carte.value.trim().toUpperCase(), compteDebit: debit.value, actif: actif.checked}));
       // Mobilisable : retenu seulement s'il diffère du réglage par défaut du type

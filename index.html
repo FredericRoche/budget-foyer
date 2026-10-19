@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-8ePqJQLR9bRD9LFTi11pX6ii/Dxx8YWVJfPHQAhz4YQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-SnMSvLr73Uiek1VyF1tYauGY9BndzHl/lvKK40m6kbY=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -337,7 +337,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-18.2105";
+const VERSION_APP = "2026-10-19.1017";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3006,10 +3006,15 @@ const estVirementDepuisEpargne = (e, compte) => e.categorie === "Transfert" && e
 /* Trésorerie de l'épargne : épargne mobilisable au départ (ses revenus y restent), plus les cessions de
    titres, moins le financement des projets et les approvisionnements du compte courant, prévus en
    échéance ou rendus nécessaires par la marche courante. */
+/* Rendement estimé des placements (% par an, brut) : taux du compte, sinon taux par défaut de son type.
+   Les sommes nouvelles (cessions, moins les financements) rapportent le taux des nouveaux placements. */
+const RENDEMENT_DEFAUT = {livret: 1.5, assurance_vie: 2, retraite: 2, prevoyance: 2};
+const tauxRendement = c => (typeof c.rendement === "number" ? c.rendement : (RENDEMENT_DEFAUT[c.type] || 0));
+const tauxNouveauxPlacements = () => (typeof LIVRE.parametres.tauxNouveauxPlacements === "number" ? LIVRE.parametres.tauxNouveauxPlacements : 2);
 function simulerEpargne(options){
-  const o = Object.assign({jours: 365, depart: aujourdhui()}, options);
+  const o = Object.assign({jours: 365, depart: aujourdhui(), rendement: true}, options);
   const fin = ajouterJours(o.depart, o.jours);
-  const comptes = vivants("comptes").filter(estMobilisable).map(c => ({compte: c, solde: soldeCompte(c, o.depart) || 0}));
+  const comptes = vivants("comptes").filter(estMobilisable).map(c => ({compte: c, solde: soldeCompte(c, o.depart) || 0, taux: tauxRendement(c)}));
   const soldeDepart = somme(comptes, x => x.solde);
   const courant = simulerTresorerie({depart: o.depart, jours: o.jours});
   const flux = new Map(), evenements = [];
@@ -3021,9 +3026,22 @@ function simulerEpargne(options){
     }
   const appro = approvisionnementsCourant(courant);
   for (const a of appro) ajouter(a.date, -a.montant, "Approvisionnement du compte courant (déficit de la marche courante)", "courant", null);
-  const jours = []; let solde = soldeDepart;
-  for (let d = ajouterJours(o.depart, 1); d <= fin; d = ajouterJours(d, 1)){ const f = flux.get(d) || 0; solde += f; jours.push({date: d, flux: f, solde}); }
-  return {titre: "Épargne disponible", depart: o.depart, soldeDepart, comptes, jours, approvisionnements: appro, evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
+  // Rendement estimé, crédité en fin de mois (au prorata pour le premier mois) : comptes au départ à leur taux, sommes nouvelles au taux des nouveaux placements
+  // (intérêts au jour le jour, crédités en fin de mois)
+  const baseJour = somme(comptes, x => x.solde * x.taux / 100 / 365), tauxNouveau = tauxNouveauxPlacements() / 100 / 365;
+  const jours = []; let solde = soldeDepart, rendement = 0, couru = 0;
+  for (let d = ajouterJours(o.depart, 1); d <= fin; d = ajouterJours(d, 1)){
+    let f = flux.get(d) || 0; solde += f;
+    if (o.rendement){
+      couru += baseJour + (solde - soldeDepart - rendement) * tauxNouveau;
+      if (d === finDeMois(d) || d === fin){
+        const r = Math.round(couru * 100) / 100; couru = 0;
+        if (r){ solde += r; f += r; rendement += r; evenements.push({date: d, montant: r, libelle: "Rendement estimé des placements", genre: "rendement"}); }
+      }
+    }
+    jours.push({date: d, flux: f, solde});
+  }
+  return {titre: "Épargne disponible", depart: o.depart, soldeDepart, comptes, jours, rendement, approvisionnements: appro, evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
 }
 function dernierBudgetAvant(an){
   const annees = anneesBudget().filter(a => a < an);
@@ -4714,11 +4732,15 @@ async function editerCompte(x){
   const debit = selection([["", "—"], ...comptesDeType("courant").map(y => [y.id, y.nom])], cpt.compteDebit || "");
   const actif = h("input", {type: "checkbox", checked: cpt.actif !== false, id: "cpt-actif"});
   const mobil = h("input", {type: "checkbox", checked: estMobilisable(Object.assign({}, cpt, {actif: true})), id: "cpt-mobil"});
+  const rend = h("input", {type: "text", inputmode: "decimal", value: typeof cpt.rendement === "number" ? nombre(cpt.rendement, 2) : "", placeholder: "défaut " + nombre(RENDEMENT_DEFAUT[cpt.type] || 0, 2)});
   const ok = await dialogue({titre: x ? "Modifier le compte" : "Nouveau compte", large: true, corps: h("div", null, h("div", {class: "grille-champs"}, champ("Nom", nom), champ("Type", type), champ("Établissement", banque),
-    champ("Titulaire", titulaire), champ("Numéro (fin)", numero), champ("Carte", carte), champ("Carte débitée sur", debit)), h("div", {class: "case"}, actif, h("label", {for: "cpt-actif"}, "Actif")),
+    champ("Titulaire", titulaire), champ("Numéro (fin)", numero), champ("Carte", carte), champ("Carte débitée sur", debit), champ("Rendement annuel estimé (%)", rend)), h("div", {class: "case"}, actif, h("label", {for: "cpt-actif"}, "Actif")),
     h("div", {class: "case"}, mobil, h("label", {for: "cpt-mobil"}, "Épargne mobilisable (comptée dans l'écran Épargne)"))),
     actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
       if (!nom.value.trim()){ message("Nom requis.", true); return false; }
+      const tr = rend.value.trim() ? lireMontant(rend.value) : null;
+      if (tr !== null && (isNaN(tr) || tr < -50 || tr > 50)){ message("Rendement illisible.", true); return false; }
+      if (tr === null) delete cpt.rendement; else cpt.rendement = tr;
       enregistrer("comptes", Object.assign(cpt, {nom: nom.value.trim(), type: type.value, banque: banque.value.trim(), titulaire: titulaire.value.trim(), numero: numero.value.trim(),
         carte: carte.value.trim().toUpperCase(), compteDebit: debit.value, actif: actif.checked}));
       // Mobilisable : retenu seulement s'il diffère du réglage par défaut du type
@@ -4923,7 +4945,7 @@ function detailComptesEpargne(ep){
 function decompositionEpargne(ep){
   const s = f => somme(ep.evenements.filter(f), e => e.montant);
   return {depart: ep.soldeDepart, cessions: s(e => e.genre === "capital" && e.montant > 0), autresCapital: s(e => e.genre === "capital" && e.montant < 0),
-    projets: s(e => e.genre === "projet"), courant: s(e => e.genre === "courant"),
+    projets: s(e => e.genre === "projet"), courant: s(e => e.genre === "courant"), rendement: s(e => e.genre === "rendement"),
     fin: ep.jours.length ? ep.jours[ep.jours.length - 1].solde : ep.soldeDepart};
 }
 // Financements par destination : chaque projet (net des reprises), puis le compte courant.
@@ -4946,7 +4968,7 @@ function vueDetailEpargne(ep, quoi){
     s.appendChild(h("h2", null, "Épargne disponible au " + dateFr(ep.depart) + ", compte par compte"));
     const tb = h("tbody");
     for (const g of groupes){
-      tb.appendChild(h("tr", {class: "sous-titre"}, h("td", {colspan: 7}, g.nom)));
+      tb.appendChild(h("tr", {class: "sous-titre"}, h("td", {colspan: 8}, g.nom)));
       for (const l of g.lignes) tb.appendChild(h("tr", null,
         h("td", null, l.compte.nom, h("div", {class: "petit discret"}, [TYPES_COMPTE[l.compte.type], l.compte.banque, l.compte.titulaire].filter(Boolean).join(" · "))),
         h("td", {class: l.ancien ? "neg" : ""}, l.date ? dateFr(l.date) : "aucune", l.ancien ? h("div", {class: "petit"}, "à actualiser") : null),
@@ -4954,15 +4976,16 @@ function vueDetailEpargne(ep, quoi){
         h("td", {class: "num discret"}, l.precedente ? euros(l.precedente.valeur, 0) : "—"),
         l.variation === null ? h("td", {class: "num discret"}, "") : montantCellule(Math.round(l.variation), null, 0),
         h("td", {class: "num"}, (Math.round(l.part * 1000) / 10).toLocaleString("fr-FR") + " %"),
+        h("td", {class: "num discret"}, tauxRendement(l.compte) ? nombre(tauxRendement(l.compte), 2) + " %" + (typeof l.compte.rendement === "number" ? "" : "*") : "—"),
         h("td", null, h("span", {class: "barre-part"}, h("i", {style: {width: Math.min(100, l.part / partMax * 100) + "%"}})))));
       tb.appendChild(h("tr", {class: "total"}, h("td", {colspan: 2}, "Total " + g.nom.toLowerCase()), h("td", {class: "num"}, euros(g.total, 0)), h("td"), h("td"),
-        h("td", {class: "num"}, (Math.round(g.total / (ep.soldeDepart || 1) * 1000) / 10).toLocaleString("fr-FR") + " %"), h("td")));
+        h("td", {class: "num"}, (Math.round(g.total / (ep.soldeDepart || 1) * 1000) / 10).toLocaleString("fr-FR") + " %"), h("td"), h("td")));
     }
-    tb.appendChild(h("tr", {class: "total"}, h("td", {colspan: 2}, "Épargne disponible"), h("td", {class: "num"}, euros(ep.soldeDepart, 0)), h("td"), h("td"), h("td", {class: "num"}, "100 %"), h("td")));
+    tb.appendChild(h("tr", {class: "total"}, h("td", {colspan: 2}, "Épargne disponible"), h("td", {class: "num"}, euros(ep.soldeDepart, 0)), h("td"), h("td"), h("td", {class: "num"}, "100 %"), h("td"), h("td")));
     s.appendChild(h("div", {class: "tableau"}, h("table", {class: "serre"}, h("thead", null, h("tr", null, h("th", null, "Compte"), h("th", null, "Valorisation du"),
-      h("th", {class: "num"}, "Valeur"), h("th", {class: "num"}, "Précédente"), h("th", {class: "num"}, "Variation"), h("th", {class: "num"}, "Part"), h("th", null, ""))), tb)));
+      h("th", {class: "num"}, "Valeur"), h("th", {class: "num"}, "Précédente"), h("th", {class: "num"}, "Variation"), h("th", {class: "num"}, "Part"), h("th", {class: "num"}, "Rendement"), h("th", null, ""))), tb)));
     s.appendChild(h("p", {class: "note"}, "Valeurs brutes, à la dernière valorisation connue (relevé importé ou saisie dans Bilan) : chaque import de relevé met ce tableau à jour. "
-      + "« À actualiser » au-delà de quatre mois. Les comptes-titres et les comptes marqués non mobilisables (Réglages) n'y figurent pas."));
+      + "« À actualiser » au-delà de quatre mois. Rendement : taux annuel estimé, brut (* taux par défaut du type de compte, à préciser dans Réglages). Les comptes-titres et les comptes marqués non mobilisables (Réglages) n'y figurent pas."));
   } else if (quoi === "cessions"){
     const ev = ep.evenements.filter(e => e.genre === "capital");
     s.appendChild(h("h2", null, "Cessions de titres et autres mouvements de capital (12 mois)"));
@@ -4983,14 +5006,17 @@ function vueDetailEpargne(ep, quoi){
     const d = decompositionEpargne(ep);
     s.appendChild(h("h2", null, "De l'épargne d'aujourd'hui à celle dans 12 mois"));
     const lignes = [["Épargne disponible aujourd'hui", d.depart, true], ["Cessions de titres", d.cessions], ["Autres mouvements de capital", d.autresCapital],
-      ["Projets (nets des reprises)", d.projets], ["Approvisionnements du compte courant", d.courant], ["Épargne dans 12 mois", d.fin, true]].filter(x => x[2] || Math.abs(x[1]) > 0.5);
+      ["Projets (nets des reprises)", d.projets], ["Approvisionnements du compte courant", d.courant], ["Rendement estimé des placements", d.rendement], ["Épargne dans 12 mois", d.fin, true]].filter(x => x[2] || Math.abs(x[1]) > 0.5);
     s.appendChild(h("div", {class: "tableau"}, h("table", {class: "serre"}, h("tbody", null, lignes.map(([lib, v, tot]) => h("tr", {class: tot ? "total" : ""}, h("td", null, lib), tot ? h("td", {class: "num"}, euros(v, 0)) : montantCellule(v, null, 0)))))));
     const mois = [];
     for (const j of ep.jours){ const k = j.date.slice(0, 7); let m = mois[mois.length - 1]; if (!m || m.mois !== k){ m = {mois: k, entrees: 0, sorties: 0, fin: 0}; mois.push(m); } if (j.flux > 0) m.entrees += j.flux; else m.sorties -= j.flux; m.fin = j.solde; }
     s.appendChild(h("h3", null, "Mois par mois"));
     s.appendChild(tableau([{titre: "Mois"}, {titre: "Entrées", num: true}, {titre: "Sorties", num: true}, {titre: "Épargne en fin de mois", num: true}], mois, {classe: "serre", ligne: m => h("tr", null,
       h("td", null, MOIS_LONG[+m.mois.slice(5) - 1] + " " + m.mois.slice(0, 4)), h("td", {class: "num"}, m.entrees ? euros(m.entrees, 0) : ""), h("td", {class: "num"}, m.sorties ? euros(m.sorties, 0) : ""), h("td", {class: "num" + (m.fin < 0 ? " neg" : "")}, euros(m.fin, 0)))}));
-    s.appendChild(h("p", {class: "note"}, "Hors revenus futurs des placements (intérêts, plus-values), qui ne sont pas projetés : l'épargne réelle sera un peu plus élevée."));
+    const tn = h("input", {type: "text", inputmode: "decimal", value: nombre(tauxNouveauxPlacements(), 2), style: {width: "4.5rem"}, onchange: e => {
+      const v = lireMontant(e.target.value); if (isNaN(v) || v < 0 || v > 20){ message("Taux illisible.", true); return; } modifierParametres({tauxNouveauxPlacements: v}); rafraichirEcran(); }});
+    s.appendChild(h("p", {class: "note"}, "Rendement estimé, brut et crédité en fin de mois : chaque compte à son taux (colonne « Rendement » du détail des comptes, modifiable dans Réglages), "
+      + "et les sommes nouvelles (cessions, moins les financements) au taux des nouveaux placements : ", tn, " % par an. Les relevés importés remplacent ensuite l'estimation par la valeur réelle."));
   }
   return s;
 }
@@ -5006,7 +5032,7 @@ declarerEcran("epargne", {titre: "Épargne", rendre(c, etat){
   ind.append(carteInd("Épargne disponible aujourd'hui", euros(ep.soldeDepart, 0), ep.comptes.length + " compte(s) mobilisable(s)", false, bascule("comptes"), etat.detail === "comptes"),
     carteInd("Cessions de titres (12 mois)", euros(somme(ep.evenements.filter(e => e.genre === "capital" && e.montant > 0), e => e.montant), 0), "encaissements prévus", false, bascule("cessions"), etat.detail === "cessions"),
     carteInd("Financements (12 mois)", euros(parGenre("projet") + parGenre("courant"), 0), "projets " + euros(parGenre("projet"), 0) + " · compte courant " + euros(parGenre("courant"), 0), false, bascule("financements"), etat.detail === "financements"),
-    carteInd("Épargne dans 12 mois", euros(fin, 0), min ? "au plus bas " + euros(min.solde, 0) + " le " + dateFr(min.date) : "", fin < 0 || (min && min.solde < 0), bascule("fin"), etat.detail === "fin"));
+    carteInd("Épargne dans 12 mois", euros(fin, 0), (ep.rendement ? "dont rendement estimé " + euros(ep.rendement, 0) + " · " : "") + (min ? "au plus bas " + euros(min.solde, 0) + " le " + dateFr(min.date) : ""), fin < 0 || (min && min.solde < 0), bascule("fin"), etat.detail === "fin"));
   c.appendChild(ind);
   if (etat.detail) c.appendChild(vueDetailEpargne(ep, etat.detail));
   if (min && min.solde < 0) c.appendChild(h("div", {class: "bandeau alerte"}, "L'épargne disponible passe sous zéro le " + dateFr(ep.jours.find(j => j.solde < 0).date)
@@ -5017,7 +5043,7 @@ declarerEcran("epargne", {titre: "Épargne", rendre(c, etat){
     h("div", {class: "legende"}, h("span", null, h("i", {style: {background: COULEURS.vert}}), "épargne disponible"), h("span", null, h("i", {style: {background: COULEURS.garnet, height: "2px"}}), "zéro"),
       h("span", null, h("i", {style: {background: COULEURS.or}}), "mouvements de plus de 10 000 €"))));
   c.appendChild(h("h2", null, "Mouvements prévus (12 mois)"));
-  c.appendChild(tableau([{titre: "Date"}, {titre: "Mouvement"}, {titre: "Vers / depuis"}, {titre: "Montant", num: true}, {titre: "Épargne après", num: true}, {titre: ""}], ep.evenements, {classe: "serre", vide: "Aucun mouvement prévu.", ligne: ev => {
+  c.appendChild(tableau([{titre: "Date"}, {titre: "Mouvement"}, {titre: "Vers / depuis"}, {titre: "Montant", num: true}, {titre: "Épargne après", num: true}, {titre: ""}], ep.evenements.filter(e => e.genre !== "rendement"), {classe: "serre", vide: "Aucun mouvement prévu.", ligne: ev => {
     const jour = ep.jours.find(j => j.date === ev.date);
     return h("tr", {class: ev.echeance?.aConfirmer ? "choisie" : ""}, h("td", null, dateFr(ev.date)), h("td", null, ev.libelle, ev.echeance?.note ? h("div", {class: "petit discret"}, ev.echeance.note) : null),
       h("td", null, {projet: "projet", capital: "cession", courant: "compte courant"}[ev.genre]), montantCellule(ev.montant), h("td", {class: "num" + (jour && jour.solde < 0 ? " neg" : "")}, jour ? euros(jour.solde, 0) : ""),
@@ -5440,7 +5466,7 @@ async function autotest(){
     enregistrer("echeances", {libelle: "Cession de titres", montant: 50000, recurrence: "unique", debut: "2027-04-10", compte: cj.id, categorie: "Patrimoine", sousCategorie: "Cession"});
     const s2 = simulerTresorerie({depart: "2027-03-31", jours: 120});
     vrai("projet et cession : hors de la marche courante", analyseTresorerie(s2).premierBas === undefined && !s2.evenements.some(e => /Grosse|Cession/.test(e.libelle)));
-    const k2 = simulerEpargne({depart: "2027-03-31", jours: 120});
+    const k2 = simulerEpargne({depart: "2027-03-31", jours: 120, rendement: false});
     v("épargne : cession puis paiement du projet", [k2.jours.find(j => j.date === "2027-04-10").solde, k2.jours[k2.jours.length - 1].solde], [50000, 20000]);
     enregistrer("operations", {compte: cj.id, date: "2027-03-02", montant: -950, libelle: "VIR ARCHITECTE EXEMPLE", categorie: "Travaux maison", sousCategorie: "Honoraires", nature: "Exceptionnelle"});
     enregistrer("echeances", Object.assign(grosse, {rattache: [{categorie: "Travaux maison"}]}));
@@ -5477,6 +5503,17 @@ async function autotest(){
       const cd = champDate({value: "2027-03-05"}); const lu0 = cd.value; cd.value = ""; const vide = cd.value;
       v("dates : saisie jj/mm/aaaa, lecture ISO", [lu0, vide, lireDateFr("05/03/2027"), lireDateFr("5.3.27"), lireDateFr("05032027"), lireDateFr("31/02/2027"), lireDateFr("03/13/2027"), lireDateFr("")],
         ["2027-03-05", "", "2027-03-05", "2027-03-05", "2027-03-05", null, null, ""]);
+    }
+    {
+      const lv = enregistrer("comptes", {nom: "Livret essai rendement", type: "livret", actif: true, rendement: 3});
+      enregistrer("valorisations", {compte: lv.id, date: "2027-03-31", valeur: 120000, source: ""});
+      const tn0 = LIVRE.parametres.tauxNouveauxPlacements; LIVRE.parametres.tauxNouveauxPlacements = 0;
+      const sansR = simulerEpargne({depart: "2027-03-31", jours: 30, rendement: false}), avecR = simulerEpargne({depart: "2027-03-31", jours: 30});
+      LIVRE.parametres.tauxNouveauxPlacements = 2;
+      const nouv = simulerEpargne({depart: "2027-03-31", jours: 30}); LIVRE.parametres.tauxNouveauxPlacements = tn0;
+      v("épargne : rendement d'un mois (120 000 € à 3 %, puis 50 000 € nouveaux à 2 % du 10 au 30)", [Math.round(avecR.jours[avecR.jours.length - 1].solde - sansR.jours[sansR.jours.length - 1].solde),
+        Math.round(nouv.jours[nouv.jours.length - 1].solde - avecR.jours[avecR.jours.length - 1].solde)], [Math.round(120000 * 0.03 * 30 / 365), Math.round(50000 * 0.02 * 21 / 365)]);
+      enregistrer("comptes", Object.assign(lv, {actif: false}));
     }
     v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);
     for (const d of ["2027-01-05", "2027-02-05", "2027-03-05"]) enregistrer("operations", {compte: cj.id, date: d, montant: -1000, libelle: "VIR LOYER EXEMPLE", categorie: "Logement", sousCategorie: "Loyer", nature: "Courante"});

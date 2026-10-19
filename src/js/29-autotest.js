@@ -173,7 +173,7 @@ async function autotest(){
     enregistrer("echeances", {libelle: "Cession de titres", montant: 50000, recurrence: "unique", debut: "2027-04-10", compte: cj.id, categorie: "Patrimoine", sousCategorie: "Cession"});
     const s2 = simulerTresorerie({depart: "2027-03-31", jours: 120});
     vrai("projet et cession : hors de la marche courante", analyseTresorerie(s2).premierBas === undefined && !s2.evenements.some(e => /Grosse|Cession/.test(e.libelle)));
-    const k2 = simulerEpargne({depart: "2027-03-31", jours: 120});
+    const k2 = simulerEpargne({depart: "2027-03-31", jours: 120, rendement: false});
     v("épargne : cession puis paiement du projet", [k2.jours.find(j => j.date === "2027-04-10").solde, k2.jours[k2.jours.length - 1].solde], [50000, 20000]);
     enregistrer("operations", {compte: cj.id, date: "2027-03-02", montant: -950, libelle: "VIR ARCHITECTE EXEMPLE", categorie: "Travaux maison", sousCategorie: "Honoraires", nature: "Exceptionnelle"});
     enregistrer("echeances", Object.assign(grosse, {rattache: [{categorie: "Travaux maison"}]}));
@@ -210,6 +210,17 @@ async function autotest(){
       const cd = champDate({value: "2027-03-05"}); const lu0 = cd.value; cd.value = ""; const vide = cd.value;
       v("dates : saisie jj/mm/aaaa, lecture ISO", [lu0, vide, lireDateFr("05/03/2027"), lireDateFr("5.3.27"), lireDateFr("05032027"), lireDateFr("31/02/2027"), lireDateFr("03/13/2027"), lireDateFr("")],
         ["2027-03-05", "", "2027-03-05", "2027-03-05", "2027-03-05", null, null, ""]);
+    }
+    {
+      const lv = enregistrer("comptes", {nom: "Livret essai rendement", type: "livret", actif: true, rendement: 3});
+      enregistrer("valorisations", {compte: lv.id, date: "2027-03-31", valeur: 120000, source: ""});
+      const tn0 = LIVRE.parametres.tauxNouveauxPlacements; LIVRE.parametres.tauxNouveauxPlacements = 0;
+      const sansR = simulerEpargne({depart: "2027-03-31", jours: 30, rendement: false}), avecR = simulerEpargne({depart: "2027-03-31", jours: 30});
+      LIVRE.parametres.tauxNouveauxPlacements = 2;
+      const nouv = simulerEpargne({depart: "2027-03-31", jours: 30}); LIVRE.parametres.tauxNouveauxPlacements = tn0;
+      v("épargne : rendement d'un mois (120 000 € à 3 %, puis 50 000 € nouveaux à 2 % du 10 au 30)", [Math.round(avecR.jours[avecR.jours.length - 1].solde - sansR.jours[sansR.jours.length - 1].solde),
+        Math.round(nouv.jours[nouv.jours.length - 1].solde - avecR.jours[avecR.jours.length - 1].solde)], [Math.round(120000 * 0.03 * 30 / 365), Math.round(50000 * 0.02 * 21 / 365)]);
+      enregistrer("comptes", Object.assign(lv, {actif: false}));
     }
     v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);
     for (const d of ["2027-01-05", "2027-02-05", "2027-03-05"]) enregistrer("operations", {compte: cj.id, date: d, montant: -1000, libelle: "VIR LOYER EXEMPLE", categorie: "Logement", sousCategorie: "Loyer", nature: "Courante"});

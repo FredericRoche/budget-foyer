@@ -53,7 +53,7 @@ function detailComptesEpargne(ep){
 function decompositionEpargne(ep){
   const s = f => somme(ep.evenements.filter(f), e => e.montant);
   return {depart: ep.soldeDepart, cessions: s(e => e.genre === "capital" && e.montant > 0), autresCapital: s(e => e.genre === "capital" && e.montant < 0),
-    projets: s(e => e.genre === "projet"), courant: s(e => e.genre === "courant"),
+    projets: s(e => e.genre === "projet"), courant: s(e => e.genre === "courant"), rendement: s(e => e.genre === "rendement"),
     fin: ep.jours.length ? ep.jours[ep.jours.length - 1].solde : ep.soldeDepart};
 }
 // Financements par destination : chaque projet (net des reprises), puis le compte courant.
@@ -76,7 +76,7 @@ function vueDetailEpargne(ep, quoi){
     s.appendChild(h("h2", null, "Épargne disponible au " + dateFr(ep.depart) + ", compte par compte"));
     const tb = h("tbody");
     for (const g of groupes){
-      tb.appendChild(h("tr", {class: "sous-titre"}, h("td", {colspan: 7}, g.nom)));
+      tb.appendChild(h("tr", {class: "sous-titre"}, h("td", {colspan: 8}, g.nom)));
       for (const l of g.lignes) tb.appendChild(h("tr", null,
         h("td", null, l.compte.nom, h("div", {class: "petit discret"}, [TYPES_COMPTE[l.compte.type], l.compte.banque, l.compte.titulaire].filter(Boolean).join(" · "))),
         h("td", {class: l.ancien ? "neg" : ""}, l.date ? dateFr(l.date) : "aucune", l.ancien ? h("div", {class: "petit"}, "à actualiser") : null),
@@ -84,15 +84,16 @@ function vueDetailEpargne(ep, quoi){
         h("td", {class: "num discret"}, l.precedente ? euros(l.precedente.valeur, 0) : "—"),
         l.variation === null ? h("td", {class: "num discret"}, "") : montantCellule(Math.round(l.variation), null, 0),
         h("td", {class: "num"}, (Math.round(l.part * 1000) / 10).toLocaleString("fr-FR") + " %"),
+        h("td", {class: "num discret"}, tauxRendement(l.compte) ? nombre(tauxRendement(l.compte), 2) + " %" + (typeof l.compte.rendement === "number" ? "" : "*") : "—"),
         h("td", null, h("span", {class: "barre-part"}, h("i", {style: {width: Math.min(100, l.part / partMax * 100) + "%"}})))));
       tb.appendChild(h("tr", {class: "total"}, h("td", {colspan: 2}, "Total " + g.nom.toLowerCase()), h("td", {class: "num"}, euros(g.total, 0)), h("td"), h("td"),
-        h("td", {class: "num"}, (Math.round(g.total / (ep.soldeDepart || 1) * 1000) / 10).toLocaleString("fr-FR") + " %"), h("td")));
+        h("td", {class: "num"}, (Math.round(g.total / (ep.soldeDepart || 1) * 1000) / 10).toLocaleString("fr-FR") + " %"), h("td"), h("td")));
     }
-    tb.appendChild(h("tr", {class: "total"}, h("td", {colspan: 2}, "Épargne disponible"), h("td", {class: "num"}, euros(ep.soldeDepart, 0)), h("td"), h("td"), h("td", {class: "num"}, "100 %"), h("td")));
+    tb.appendChild(h("tr", {class: "total"}, h("td", {colspan: 2}, "Épargne disponible"), h("td", {class: "num"}, euros(ep.soldeDepart, 0)), h("td"), h("td"), h("td", {class: "num"}, "100 %"), h("td"), h("td")));
     s.appendChild(h("div", {class: "tableau"}, h("table", {class: "serre"}, h("thead", null, h("tr", null, h("th", null, "Compte"), h("th", null, "Valorisation du"),
-      h("th", {class: "num"}, "Valeur"), h("th", {class: "num"}, "Précédente"), h("th", {class: "num"}, "Variation"), h("th", {class: "num"}, "Part"), h("th", null, ""))), tb)));
+      h("th", {class: "num"}, "Valeur"), h("th", {class: "num"}, "Précédente"), h("th", {class: "num"}, "Variation"), h("th", {class: "num"}, "Part"), h("th", {class: "num"}, "Rendement"), h("th", null, ""))), tb)));
     s.appendChild(h("p", {class: "note"}, "Valeurs brutes, à la dernière valorisation connue (relevé importé ou saisie dans Bilan) : chaque import de relevé met ce tableau à jour. "
-      + "« À actualiser » au-delà de quatre mois. Les comptes-titres et les comptes marqués non mobilisables (Réglages) n'y figurent pas."));
+      + "« À actualiser » au-delà de quatre mois. Rendement : taux annuel estimé, brut (* taux par défaut du type de compte, à préciser dans Réglages). Les comptes-titres et les comptes marqués non mobilisables (Réglages) n'y figurent pas."));
   } else if (quoi === "cessions"){
     const ev = ep.evenements.filter(e => e.genre === "capital");
     s.appendChild(h("h2", null, "Cessions de titres et autres mouvements de capital (12 mois)"));
@@ -113,14 +114,17 @@ function vueDetailEpargne(ep, quoi){
     const d = decompositionEpargne(ep);
     s.appendChild(h("h2", null, "De l'épargne d'aujourd'hui à celle dans 12 mois"));
     const lignes = [["Épargne disponible aujourd'hui", d.depart, true], ["Cessions de titres", d.cessions], ["Autres mouvements de capital", d.autresCapital],
-      ["Projets (nets des reprises)", d.projets], ["Approvisionnements du compte courant", d.courant], ["Épargne dans 12 mois", d.fin, true]].filter(x => x[2] || Math.abs(x[1]) > 0.5);
+      ["Projets (nets des reprises)", d.projets], ["Approvisionnements du compte courant", d.courant], ["Rendement estimé des placements", d.rendement], ["Épargne dans 12 mois", d.fin, true]].filter(x => x[2] || Math.abs(x[1]) > 0.5);
     s.appendChild(h("div", {class: "tableau"}, h("table", {class: "serre"}, h("tbody", null, lignes.map(([lib, v, tot]) => h("tr", {class: tot ? "total" : ""}, h("td", null, lib), tot ? h("td", {class: "num"}, euros(v, 0)) : montantCellule(v, null, 0)))))));
     const mois = [];
     for (const j of ep.jours){ const k = j.date.slice(0, 7); let m = mois[mois.length - 1]; if (!m || m.mois !== k){ m = {mois: k, entrees: 0, sorties: 0, fin: 0}; mois.push(m); } if (j.flux > 0) m.entrees += j.flux; else m.sorties -= j.flux; m.fin = j.solde; }
     s.appendChild(h("h3", null, "Mois par mois"));
     s.appendChild(tableau([{titre: "Mois"}, {titre: "Entrées", num: true}, {titre: "Sorties", num: true}, {titre: "Épargne en fin de mois", num: true}], mois, {classe: "serre", ligne: m => h("tr", null,
       h("td", null, MOIS_LONG[+m.mois.slice(5) - 1] + " " + m.mois.slice(0, 4)), h("td", {class: "num"}, m.entrees ? euros(m.entrees, 0) : ""), h("td", {class: "num"}, m.sorties ? euros(m.sorties, 0) : ""), h("td", {class: "num" + (m.fin < 0 ? " neg" : "")}, euros(m.fin, 0)))}));
-    s.appendChild(h("p", {class: "note"}, "Hors revenus futurs des placements (intérêts, plus-values), qui ne sont pas projetés : l'épargne réelle sera un peu plus élevée."));
+    const tn = h("input", {type: "text", inputmode: "decimal", value: nombre(tauxNouveauxPlacements(), 2), style: {width: "4.5rem"}, onchange: e => {
+      const v = lireMontant(e.target.value); if (isNaN(v) || v < 0 || v > 20){ message("Taux illisible.", true); return; } modifierParametres({tauxNouveauxPlacements: v}); rafraichirEcran(); }});
+    s.appendChild(h("p", {class: "note"}, "Rendement estimé, brut et crédité en fin de mois : chaque compte à son taux (colonne « Rendement » du détail des comptes, modifiable dans Réglages), "
+      + "et les sommes nouvelles (cessions, moins les financements) au taux des nouveaux placements : ", tn, " % par an. Les relevés importés remplacent ensuite l'estimation par la valeur réelle."));
   }
   return s;
 }
@@ -136,7 +140,7 @@ declarerEcran("epargne", {titre: "Épargne", rendre(c, etat){
   ind.append(carteInd("Épargne disponible aujourd'hui", euros(ep.soldeDepart, 0), ep.comptes.length + " compte(s) mobilisable(s)", false, bascule("comptes"), etat.detail === "comptes"),
     carteInd("Cessions de titres (12 mois)", euros(somme(ep.evenements.filter(e => e.genre === "capital" && e.montant > 0), e => e.montant), 0), "encaissements prévus", false, bascule("cessions"), etat.detail === "cessions"),
     carteInd("Financements (12 mois)", euros(parGenre("projet") + parGenre("courant"), 0), "projets " + euros(parGenre("projet"), 0) + " · compte courant " + euros(parGenre("courant"), 0), false, bascule("financements"), etat.detail === "financements"),
-    carteInd("Épargne dans 12 mois", euros(fin, 0), min ? "au plus bas " + euros(min.solde, 0) + " le " + dateFr(min.date) : "", fin < 0 || (min && min.solde < 0), bascule("fin"), etat.detail === "fin"));
+    carteInd("Épargne dans 12 mois", euros(fin, 0), (ep.rendement ? "dont rendement estimé " + euros(ep.rendement, 0) + " · " : "") + (min ? "au plus bas " + euros(min.solde, 0) + " le " + dateFr(min.date) : ""), fin < 0 || (min && min.solde < 0), bascule("fin"), etat.detail === "fin"));
   c.appendChild(ind);
   if (etat.detail) c.appendChild(vueDetailEpargne(ep, etat.detail));
   if (min && min.solde < 0) c.appendChild(h("div", {class: "bandeau alerte"}, "L'épargne disponible passe sous zéro le " + dateFr(ep.jours.find(j => j.solde < 0).date)
@@ -147,7 +151,7 @@ declarerEcran("epargne", {titre: "Épargne", rendre(c, etat){
     h("div", {class: "legende"}, h("span", null, h("i", {style: {background: COULEURS.vert}}), "épargne disponible"), h("span", null, h("i", {style: {background: COULEURS.garnet, height: "2px"}}), "zéro"),
       h("span", null, h("i", {style: {background: COULEURS.or}}), "mouvements de plus de 10 000 €"))));
   c.appendChild(h("h2", null, "Mouvements prévus (12 mois)"));
-  c.appendChild(tableau([{titre: "Date"}, {titre: "Mouvement"}, {titre: "Vers / depuis"}, {titre: "Montant", num: true}, {titre: "Épargne après", num: true}, {titre: ""}], ep.evenements, {classe: "serre", vide: "Aucun mouvement prévu.", ligne: ev => {
+  c.appendChild(tableau([{titre: "Date"}, {titre: "Mouvement"}, {titre: "Vers / depuis"}, {titre: "Montant", num: true}, {titre: "Épargne après", num: true}, {titre: ""}], ep.evenements.filter(e => e.genre !== "rendement"), {classe: "serre", vide: "Aucun mouvement prévu.", ligne: ev => {
     const jour = ep.jours.find(j => j.date === ev.date);
     return h("tr", {class: ev.echeance?.aConfirmer ? "choisie" : ""}, h("td", null, dateFr(ev.date)), h("td", null, ev.libelle, ev.echeance?.note ? h("div", {class: "petit discret"}, ev.echeance.note) : null),
       h("td", null, {projet: "projet", capital: "cession", courant: "compte courant"}[ev.genre]), montantCellule(ev.montant), h("td", {class: "num" + (jour && jour.solde < 0 ? " neg" : "")}, jour ? euros(jour.solde, 0) : ""),
