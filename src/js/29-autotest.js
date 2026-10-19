@@ -123,6 +123,11 @@ async function autotest(){
     vrai("écriture refusée si le fichier a changé (étiquette)", conflit);
 
     /* --- Lecture de tickets --- */
+    {
+      const f1 = extraireTicket("FACTURE\nN°D99-001\nDate de création : 13/10/2026\nDESIGNATION Quantité Total HT\nTOTAL NET 1070 € .\nTVA non applicable");
+      const f2 = extraireTicket("Facture\nn°\nDate\n12/10/2026\nMontant à régler HT\n3 560 €\nTVA 20%\n712 €\nMontant à régler TTC\n4 272 €\nIBAN\nFR76 0000 0000 0000 0000 0000 000");
+      v("factures : montants entiers en euros", [f1.montant, f1.type, f2.montant, f2.type], [1070, "facture", 4272, "facture"]);
+    }
     const t1 = extraireTicket("BOUCHERIE ST-VICTOR\nSARL VIANDES ST VICTOR\n12 rue Exemple\nGigot 1,2 kg 38,40\nSaucisses x6 10,20\nTOTAL TTC 48,60\nCB 48,60\n12/03/2027 10:48\nSIRET 123 456 789 00012");
     v("ticket : montant, date, heure", [t1.montant, t1.heure], [48.6, "10:48"]);
     v("ticket : raison sociale", t1.raisonSociale, "SARL VIANDES ST VICTOR");

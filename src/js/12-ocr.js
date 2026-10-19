@@ -37,8 +37,14 @@ async function lireTicket(blob, progression){
 }
 
 /* ---------- Extraction (pure, testable) ---------- */
-const RE_MONTANT = /(\d{1,3}(?:[ .]\d{3})*|\d+)[,.](\d{2})(?!\d)/g;
-function montantsDe(ligne){ const r = []; for (const m of ligne.matchAll(RE_MONTANT)) r.push(parseFloat(m[1].replace(/[ .]/g, "") + "." + m[2])); return r; }
+// Montants avec centimes (48,60 ; 1 234,56), ou entiers suivis de « € » comme sur les factures (1070 € ; 4 272 €)
+const RE_MONTANT = /(\d{1,3}(?:[ .\u00a0\u202f]\d{3})*|\d+)[,.](\d{2})(?!\d)/g;
+const RE_MONTANT_ENTIER = /(?<![\d,.])(\d{1,3}(?:[ .\u00a0\u202f]\d{3})+|\d+)\s?(?:€|EUR\b|euros?\b)/gi;
+function montantsDe(ligne){
+  const r = []; for (const m of ligne.matchAll(RE_MONTANT)) r.push(parseFloat(m[1].replace(/[ .\u00a0\u202f]/g, "") + "." + m[2]));
+  if (!r.length) for (const m of ligne.matchAll(RE_MONTANT_ENTIER)) r.push(parseFloat(m[1].replace(/[ .\u00a0\u202f]/g, "")));
+  return r;
+}
 function extraireTicket(texte){
   const lignes = texte.split(/\r?\n/).map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean);
   const N = lignes.map(l => norm(l).toUpperCase());
@@ -84,7 +90,7 @@ function extraireTicket(texte){
   }
   /* Raison sociale et enseigne : premières lignes significatives */
   const ignorer = /BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
-  const tete = lignes.slice(0, 8).filter((l, i) => /[A-Za-z]{3}/.test(l) && !ignorer.test(N[lignes.indexOf(l)]) && l.length <= 40);
+  const tete = lignes.slice(0, 8).filter((l, i) => /[A-Za-z]{3}/.test(l) && !ignorer.test(N[lignes.indexOf(l)]) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[lignes.indexOf(l)]) && !montantsDe(l).length && l.length <= 40);
   const forme = lignes.find(l => /\b(SARL|SAS|SASU|EURL|SA|SNC|SCP|SELARL)\b/i.test(l));
   res.enseigne = tete[0] || "";
   res.raisonSociale = forme ? forme.replace(/\s+(CAPITAL|AU CAPITAL|RCS).*$/i, "").trim() : res.enseigne;
