@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-YmAIzcR0qjRazAyC0wz8lw27YBkBatETd6wBBp1/QvI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-u5/pU0yV3nPW4hO33m6a4esIb9OXspcFg3JsDca9OYw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -342,7 +342,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1328";
+const VERSION_APP = "2026-10-19.1334";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2225,6 +2225,8 @@ function appliquerPlan(contenu){
     }
     r.comptes = (r.comptes || 0) + 1;
   }
+  // Catégories et sous-catégories à créer : {"Catégorie": ["Sous-catégorie", …]}
+  for (const [cat, sous] of Object.entries(contenu.categories || {})){ for (const s of sous) ajouterCategorieSilencieuse(cat, s); r.categories = (r.categories || 0) + sous.length; }
   if (contenu.regles?.length || contenu.commercants?.length) r.regles = appliquerRegles({regles: contenu.regles || [], commercants: contenu.commercants || []});
   // Reclassement ciblé d'opérations déjà enregistrées, désignées par date, montant et, au besoin, libellé
   for (const x of contenu.reclasser || []){
@@ -2442,6 +2444,7 @@ function fenetre(j){
 function compteCompatible(j, compte){
   if (!j.carte) return true;
   if (j.carte === "ESPECES") return compte.type === "especes";
+  if (j.carte.startsWith("CPT:")) return compte.id === j.carte.slice(4);
   if (j.carte === "AMEX") return compte.carte === "AMEX";
   if (/^X\d+/.test(j.carte)) return compte.carte === j.carte || compte.carte === "LCL-NV";
   return true;
@@ -4234,7 +4237,8 @@ function ecranRapprochement(j, etat, attente){
     for (const [n] of Object.entries(fiche?.natures || {}).sort((a, b) => b[1] - a[1]).slice(0, 4)) sugg.appendChild(h("button", {onclick: () => { nat.value = n; }}, n));
     const cat = selectionCategorie(x.categorie || fiche?.categorie || "", x.sousCategorie || fiche?.sousCategorie || "");
     const lieu = selectionLieu(x.lieu || fiche?.lieu || "");
-    const carte = selection([["", "—"], ...vivants("comptes").filter(c => c.type === "carte" && c.carte !== "LCL-NV").map(c => [c.carte, c.nom]), ["ESPECES", "Espèces"]], x.carte || "");
+    const carte = selection([["", "—"], ...vivants("comptes").filter(c => c.type === "carte" && c.carte !== "LCL-NV").map(c => [c.carte, c.nom]),
+      ...comptesDeType("courant").map(c => ["CPT:" + c.id, c.nom + " (virement, prélèvement, chèque)"]), ["ESPECES", "Espèces"]], x.carte || "");
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
@@ -5235,6 +5239,15 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
       h("tr", {class: "cliquable", onclick: () => aller("operations", {choisie: o.id, mois: ""})}, h("td", null, dateFr(o.date)), h("td", null, obtenir("commercants", o.commercant)?.nom || o.libelle), h("td", null, libelleCompte(o.compte)), montantCellule(o.montant))}),
     h("p", {class: "note"}, "Rattachement : champ « Projet » du détail d'une opération, ou d'office pour une dépense « Exceptionnelle » de la catégorie d'une échéance du projet (ou des catégories qui lui sont rattachées).")));
   c.appendChild(g);
+  // Par poste : sous-catégorie des échéances (prévu) et des paiements (payé)
+  const postes = new Map(), poste = k => postes.get(k) || postes.set(k, {poste: k, prevu: 0, paye: 0, n: 0}).get(k);
+  for (const pv of x.prevu) poste(pv.echeance.sousCategorie || "Enveloppe non ventilée").prevu -= pv.montant;
+  for (const o of x.ops){ const q = poste(o.sousCategorie || "Sans poste"); q.paye -= o.montant; q.n++; }
+  const lp = [...postes.values()].sort((a, b) => (b.paye + b.prevu) - (a.paye + a.prevu));
+  c.appendChild(h("section", null, h("h2", null, "Par poste : " + x.nom),
+    tableau([{titre: "Poste"}, {titre: "Payé", num: true}, {titre: "Paiements", num: true}, {titre: "Reste prévu", num: true}, {titre: "Total", num: true}], lp, {classe: "serre", vide: "Aucun poste.", ligne: q =>
+      h("tr", null, h("td", null, q.poste), h("td", {class: "num"}, euros(q.paye, 0)), h("td", {class: "num"}, String(q.n || "")), h("td", {class: "num"}, q.prevu ? euros(q.prevu, 0) : ""), h("td", {class: "num"}, euros(q.paye + q.prevu, 0)))}),
+    h("p", {class: "note"}, "Poste = sous-catégorie des paiements et des échéances. Pour suivre un budget par poste, saisissez une échéance par lot (même projet, sous-catégorie du lot) et réduisez d'autant l'enveloppe non ventilée.")));
 }});
 
 /* ===== 28-mobile.js ===== */
@@ -5674,6 +5687,11 @@ async function autotest(){
       const p0 = window.print; window.print = () => {};
       try { imprimerSynthese(budgetActif(2027), 2027); const zs = document.getElementById("impression"); v("synthèse annuelle : construite, sans sous-catégorie", [!!zs.querySelector("h1"), /Courses/.test(zs.innerText)], [true, false]); vider(zs); }
       finally { window.print = p0; }
+    }
+    {
+      const rc = appliquerPlan({categories: {"Travaux essai": ["Études", "Gros œuvre"]}});
+      v("plan : sous-catégories créées", [rc.categories, (LIVRE.parametres.categories["Travaux essai"] || []).join("|")], [2, "Études|Gros œuvre"]);
+      v("justificatif payé par virement : compte compatible", [compteCompatible({carte: "CPT:" + cj.id}, cj), compteCompatible({carte: "CPT:autre"}, cj)], [true, false]);
     }
     v("jour habituel : groupé, à cheval sur le mois, dispersé", [jourDominant([5, 5, 6, 4, 20]), [30, 31, 1].includes(jourDominant([30, 1, 31, 2])), jourDominant([1, 10, 20])], [5, true, null]);
     for (const d of ["2027-01-05", "2027-02-05", "2027-03-05"]) enregistrer("operations", {compte: cj.id, date: d, montant: -1000, libelle: "VIR LOYER EXEMPLE", categorie: "Logement", sousCategorie: "Loyer", nature: "Courante"});

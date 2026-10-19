@@ -15,6 +15,7 @@ function fenetre(j){
 function compteCompatible(j, compte){
   if (!j.carte) return true;
   if (j.carte === "ESPECES") return compte.type === "especes";
+  if (j.carte.startsWith("CPT:")) return compte.id === j.carte.slice(4);
   if (j.carte === "AMEX") return compte.carte === "AMEX";
   if (/^X\d+/.test(j.carte)) return compte.carte === j.carte || compte.carte === "LCL-NV";
   return true;

@@ -310,6 +310,8 @@ function appliquerPlan(contenu){
     }
     r.comptes = (r.comptes || 0) + 1;
   }
+  // Catégories et sous-catégories à créer : {"Catégorie": ["Sous-catégorie", …]}
+  for (const [cat, sous] of Object.entries(contenu.categories || {})){ for (const s of sous) ajouterCategorieSilencieuse(cat, s); r.categories = (r.categories || 0) + sous.length; }
   if (contenu.regles?.length || contenu.commercants?.length) r.regles = appliquerRegles({regles: contenu.regles || [], commercants: contenu.commercants || []});
   // Reclassement ciblé d'opérations déjà enregistrées, désignées par date, montant et, au besoin, libellé
   for (const x of contenu.reclasser || []){

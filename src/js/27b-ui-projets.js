@@ -196,4 +196,13 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
       h("tr", {class: "cliquable", onclick: () => aller("operations", {choisie: o.id, mois: ""})}, h("td", null, dateFr(o.date)), h("td", null, obtenir("commercants", o.commercant)?.nom || o.libelle), h("td", null, libelleCompte(o.compte)), montantCellule(o.montant))}),
     h("p", {class: "note"}, "Rattachement : champ « Projet » du détail d'une opération, ou d'office pour une dépense « Exceptionnelle » de la catégorie d'une échéance du projet (ou des catégories qui lui sont rattachées).")));
   c.appendChild(g);
+  // Par poste : sous-catégorie des échéances (prévu) et des paiements (payé)
+  const postes = new Map(), poste = k => postes.get(k) || postes.set(k, {poste: k, prevu: 0, paye: 0, n: 0}).get(k);
+  for (const pv of x.prevu) poste(pv.echeance.sousCategorie || "Enveloppe non ventilée").prevu -= pv.montant;
+  for (const o of x.ops){ const q = poste(o.sousCategorie || "Sans poste"); q.paye -= o.montant; q.n++; }
+  const lp = [...postes.values()].sort((a, b) => (b.paye + b.prevu) - (a.paye + a.prevu));
+  c.appendChild(h("section", null, h("h2", null, "Par poste : " + x.nom),
+    tableau([{titre: "Poste"}, {titre: "Payé", num: true}, {titre: "Paiements", num: true}, {titre: "Reste prévu", num: true}, {titre: "Total", num: true}], lp, {classe: "serre", vide: "Aucun poste.", ligne: q =>
+      h("tr", null, h("td", null, q.poste), h("td", {class: "num"}, euros(q.paye, 0)), h("td", {class: "num"}, String(q.n || "")), h("td", {class: "num"}, q.prevu ? euros(q.prevu, 0) : ""), h("td", {class: "num"}, euros(q.paye + q.prevu, 0)))}),
+    h("p", {class: "note"}, "Poste = sous-catégorie des paiements et des échéances. Pour suivre un budget par poste, saisissez une échéance par lot (même projet, sous-catégorie du lot) et réduisez d'autant l'enveloppe non ventilée.")));
 }});

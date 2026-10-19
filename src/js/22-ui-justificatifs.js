@@ -52,7 +52,8 @@ function ecranRapprochement(j, etat, attente){
     for (const [n] of Object.entries(fiche?.natures || {}).sort((a, b) => b[1] - a[1]).slice(0, 4)) sugg.appendChild(h("button", {onclick: () => { nat.value = n; }}, n));
     const cat = selectionCategorie(x.categorie || fiche?.categorie || "", x.sousCategorie || fiche?.sousCategorie || "");
     const lieu = selectionLieu(x.lieu || fiche?.lieu || "");
-    const carte = selection([["", "—"], ...vivants("comptes").filter(c => c.type === "carte" && c.carte !== "LCL-NV").map(c => [c.carte, c.nom]), ["ESPECES", "Espèces"]], x.carte || "");
+    const carte = selection([["", "—"], ...vivants("comptes").filter(c => c.type === "carte" && c.carte !== "LCL-NV").map(c => [c.carte, c.nom]),
+      ...comptesDeType("courant").map(c => ["CPT:" + c.id, c.nom + " (virement, prélèvement, chèque)"]), ["ESPECES", "Espèces"]], x.carte || "");
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
