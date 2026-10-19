@@ -247,6 +247,9 @@ nav.basse{display:none}
   body:has(#impression > *){background:#fff}
   #impression{display:block; font-size:9.5pt; color:#1d1d1b; -webkit-print-color-adjust:exact; print-color-adjust:exact}
   #impression *{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+  /* Imprimante noir et blanc : couleurs ramenées au noir, fonds en gris clair, négatifs en gras */
+  #impression{--vert-empire:#000; --garnet:#000; --or-bruni:#000; --sauge:#000; --ivoire:#ececec}
+  #impression .neg{font-weight:700}
   #impression .imp-tete{border-bottom:2px solid var(--vert-empire); padding-bottom:3mm; margin-bottom:4mm}
   #impression .imp-foyer{font-variant:small-caps; letter-spacing:.08em; color:var(--or-bruni); font-size:9pt}
   #impression h1{font-size:18pt; color:var(--vert-empire); margin:1mm 0; font-weight:600}
@@ -267,7 +270,7 @@ nav.basse{display:none}
   #impression .ech{color:#000; font-size:8pt; white-space:nowrap}
   #impression thead{display:table-header-group}
   #impression tr{break-inside:avoid}
-  #impression .imp-nature td{font-variant:small-caps; letter-spacing:.05em; font-weight:600; color:#fff; background:var(--vert-empire); border:0; padding-top:1.2mm}
+  #impression .imp-nature td{font-variant:small-caps; letter-spacing:.05em; font-weight:700; color:#000; background:#cfcfcf; border-top:1.5pt solid #000; border-bottom:0; padding-top:1.2mm}
   #impression .imp-cat td{font-weight:600; background:var(--ivoire)}
   #impression .imp-sous td:first-child{padding-left:5mm}
   #impression .imp-total td{font-weight:600; border-top:2px solid var(--vert-empire); border-bottom:2px solid var(--vert-empire); background:var(--ivoire)}

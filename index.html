@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-gKb6gpgiF3BIOhemvyaV3+GtpaM1rm4yr7Rls+Frn8M=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-OAGY5prHjVpIEE/zs6/EQ90/67/MdVC1ZOgvp+FXhB8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -262,6 +262,9 @@ nav.basse{display:none}
   body:has(#impression > *){background:#fff}
   #impression{display:block; font-size:9.5pt; color:#1d1d1b; -webkit-print-color-adjust:exact; print-color-adjust:exact}
   #impression *{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+  /* Imprimante noir et blanc : couleurs ramenées au noir, fonds en gris clair, négatifs en gras */
+  #impression{--vert-empire:#000; --garnet:#000; --or-bruni:#000; --sauge:#000; --ivoire:#ececec}
+  #impression .neg{font-weight:700}
   #impression .imp-tete{border-bottom:2px solid var(--vert-empire); padding-bottom:3mm; margin-bottom:4mm}
   #impression .imp-foyer{font-variant:small-caps; letter-spacing:.08em; color:var(--or-bruni); font-size:9pt}
   #impression h1{font-size:18pt; color:var(--vert-empire); margin:1mm 0; font-weight:600}
@@ -282,7 +285,7 @@ nav.basse{display:none}
   #impression .ech{color:#000; font-size:8pt; white-space:nowrap}
   #impression thead{display:table-header-group}
   #impression tr{break-inside:avoid}
-  #impression .imp-nature td{font-variant:small-caps; letter-spacing:.05em; font-weight:600; color:#fff; background:var(--vert-empire); border:0; padding-top:1.2mm}
+  #impression .imp-nature td{font-variant:small-caps; letter-spacing:.05em; font-weight:700; color:#000; background:#cfcfcf; border-top:1.5pt solid #000; border-bottom:0; padding-top:1.2mm}
   #impression .imp-cat td{font-weight:600; background:var(--ivoire)}
   #impression .imp-sous td:first-child{padding-left:5mm}
   #impression .imp-total td{font-weight:600; border-top:2px solid var(--vert-empire); border-bottom:2px solid var(--vert-empire); background:var(--ivoire)}
@@ -339,7 +342,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1110";
+const VERSION_APP = "2026-10-19.1154";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
