@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-P6pfdBwJNnkbTS6Zzu3cF9drWm2M/hYJu/9nHmH/N5w=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-QpVfMJUqrQZD0YvNzhPNL/esiKrfQszqhBYAK9ZA6Fw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -344,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1404";
+const VERSION_APP = "2026-10-19.1422";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2565,6 +2565,24 @@ function rapprocherTout(){
   return auto;
 }
 
+/* En-cours : justificatifs à rapprocher (hors espèces), regroupés par moyen de paiement. */
+function libelleMoyen(carte){
+  if (!carte) return "Non précisé";
+  if (carte === "AMEX") return "Amex";
+  if (carte.startsWith("CPT:")) return "Virements · " + libelleCompte(carte.slice(4));
+  if (carte.startsWith("CHQ:")) return "Chèques · " + libelleCompte(carte.slice(4));
+  const c = vivants("comptes").find(x => x.carte === carte);
+  return c ? c.nom : "Carte " + carte;
+}
+function encoursSaisis(){
+  const m = new Map();
+  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES")){
+    const k = libelleMoyen(j.carte); const g = m.get(k) || m.set(k, {moyen: k, n: 0, montant: 0, depuis: j.date}).get(k);
+    g.n++; g.montant += j.montant || 0; if (j.date && j.date < g.depuis) g.depuis = j.date;
+  }
+  const lignes = [...m.values()].sort((a, b) => b.montant - a.montant);
+  return {lignes, n: somme(lignes, x => x.n), montant: somme(lignes, x => x.montant)};
+}
 /* Justificatif déjà enregistré pour le même achat : même montant, même date, même fournisseur (ou même raison sociale lue). */
 function justificatifDejaLa(x){
   const memeFournisseur = j => (x.commercant && j.commercant === x.commercant) || (x.raisonSociale && norm(j.raisonSociale || "") === norm(x.raisonSociale));
@@ -3670,8 +3688,14 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
     li(BOITE_CACHE.length, "saisie(s) dans la boîte du téléphone", "boite", "Fusionner"), li(a.factures, "écart(s) de facture de cartes", "traiter", "Voir"),
     li(a.echeances, "échéance(s) à confirmer", "tresorerie", "Voir"), li(ana?.premierBas ? 1 : 0, "alerte de trésorerie", "tresorerie", "Voir"));
   if (!listeT.children.length) listeT.appendChild(h("li", null, h("span", {class: "discret"}, "Rien en attente.")));
+  // Dépenses saisies (justificatifs) pas encore au relevé, par moyen de paiement
+  const enc = encoursSaisis();
+  const blocEnc = enc.lignes.length ? h("div", null, h("h3", null, "Dépenses saisies, pas encore au relevé"),
+    tableau([{titre: "Payé avec"}, {titre: "Nombre", num: true}, {titre: "Montant", num: true}, {titre: "Depuis le"}], enc.lignes.concat([{moyen: "Total", n: enc.n, montant: enc.montant, total: true}]), {classe: "serre", ligne: x =>
+      h("tr", {class: (x.total ? "total" : "cliquable"), onclick: x.total ? null : () => aller("justificatifs")}, h("td", null, x.moyen), h("td", {class: "num"}, String(x.n)), h("td", {class: "num"}, euros(x.montant, 0)), h("td", null, x.depuis ? dateFr(x.depuis) : ""))}),
+    h("p", {class: "note"}, "Factures et tickets saisis dont l'opération n'est pas encore dans un relevé importé. Les prélèvements, eux, n'apparaissent qu'au relevé.")) : null;
   grille.append(carteTreso, h("section", {class: "carte"}, h("h2", null, "À traiter"), listeT,
-    autos ? h("p", {class: "note"}, autos + " rapprochement(s) fait(s) d'office, réversibles (« À traiter »).") : null));
+    autos ? h("p", {class: "note"}, autos + " rapprochement(s) fait(s) d'office, réversibles (« À traiter »).") : null, blocEnc));
   c.appendChild(grille);
 
   // Revenus et résultat de l'année : mêmes chiffres que la version imprimable du budget
@@ -5673,6 +5697,11 @@ async function autotest(){
       {
         await creerJustificatif({type: "facture", date: "2027-03-12", montant: 500, raisonSociale: "Entreprise essai", numero: "F100", origine: "pc"});
         v("doublon : le numéro de facture fait foi", [!!justificatifDejaLa({raisonSociale: "Entreprise essai", numero: "F100", montant: 1, date: "2027-01-01"}), !!justificatifDejaLa({raisonSociale: "Entreprise essai", numero: "F101", montant: 500, date: "2027-03-12"})], [true, false]);
+      }
+      {
+        await creerJustificatif({type: "facture", date: "2027-03-14", montant: 200, raisonSociale: "Encours essai", carte: "CPT:" + cj.id, origine: "pc"});
+        const en = encoursSaisis();
+        vrai("en-cours : virements saisis regroupés par compte", en.lignes.some(l => l.moyen === "Virements · " + cj.nom && l.montant >= 200));
       }
       v("factures : montants entiers en euros", [f1.montant, f1.type, f2.montant, f2.type], [1070, "facture", 4272, "facture"]);
     }

@@ -134,6 +134,24 @@ function rapprocherTout(){
   return auto;
 }
 
+/* En-cours : justificatifs à rapprocher (hors espèces), regroupés par moyen de paiement. */
+function libelleMoyen(carte){
+  if (!carte) return "Non précisé";
+  if (carte === "AMEX") return "Amex";
+  if (carte.startsWith("CPT:")) return "Virements · " + libelleCompte(carte.slice(4));
+  if (carte.startsWith("CHQ:")) return "Chèques · " + libelleCompte(carte.slice(4));
+  const c = vivants("comptes").find(x => x.carte === carte);
+  return c ? c.nom : "Carte " + carte;
+}
+function encoursSaisis(){
+  const m = new Map();
+  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES")){
+    const k = libelleMoyen(j.carte); const g = m.get(k) || m.set(k, {moyen: k, n: 0, montant: 0, depuis: j.date}).get(k);
+    g.n++; g.montant += j.montant || 0; if (j.date && j.date < g.depuis) g.depuis = j.date;
+  }
+  const lignes = [...m.values()].sort((a, b) => b.montant - a.montant);
+  return {lignes, n: somme(lignes, x => x.n), montant: somme(lignes, x => x.montant)};
+}
 /* Justificatif déjà enregistré pour le même achat : même montant, même date, même fournisseur (ou même raison sociale lue). */
 function justificatifDejaLa(x){
   const memeFournisseur = j => (x.commercant && j.commercant === x.commercant) || (x.raisonSociale && norm(j.raisonSociale || "") === norm(x.raisonSociale));

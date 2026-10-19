@@ -144,6 +144,11 @@ async function autotest(){
         await creerJustificatif({type: "facture", date: "2027-03-12", montant: 500, raisonSociale: "Entreprise essai", numero: "F100", origine: "pc"});
         v("doublon : le numéro de facture fait foi", [!!justificatifDejaLa({raisonSociale: "Entreprise essai", numero: "F100", montant: 1, date: "2027-01-01"}), !!justificatifDejaLa({raisonSociale: "Entreprise essai", numero: "F101", montant: 500, date: "2027-03-12"})], [true, false]);
       }
+      {
+        await creerJustificatif({type: "facture", date: "2027-03-14", montant: 200, raisonSociale: "Encours essai", carte: "CPT:" + cj.id, origine: "pc"});
+        const en = encoursSaisis();
+        vrai("en-cours : virements saisis regroupés par compte", en.lignes.some(l => l.moyen === "Virements · " + cj.nom && l.montant >= 200));
+      }
       v("factures : montants entiers en euros", [f1.montant, f1.type, f2.montant, f2.type], [1070, "facture", 4272, "facture"]);
     }
     const t1 = extraireTicket("BOUCHERIE ST-VICTOR\nSARL VIANDES ST VICTOR\n12 rue Exemple\nGigot 1,2 kg 38,40\nSaucisses x6 10,20\nTOTAL TTC 48,60\nCB 48,60\n12/03/2027 10:48\nSIRET 123 456 789 00012");
