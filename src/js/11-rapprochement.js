@@ -136,9 +136,11 @@ function rapprocherTout(){
 
 /* Justificatif déjà enregistré pour le même achat : même montant, même date, même fournisseur (ou même raison sociale lue). */
 function justificatifDejaLa(x){
+  const memeFournisseur = j => (x.commercant && j.commercant === x.commercant) || (x.raisonSociale && norm(j.raisonSociale || "") === norm(x.raisonSociale));
+  // Le numéro de facture fait foi : même numéro et même fournisseur = même pièce ; numéros différents = pièces distinctes
+  if (x.numero) return vivants("justificatifs").find(j => j.numero && j.numero === x.numero && memeFournisseur(j)) || null;
   if (!x.montant || !x.date) return null;
-  return vivants("justificatifs").find(j => Math.abs((j.montant || 0) - x.montant) < 0.005 && j.date === x.date
-    && ((x.commercant && j.commercant === x.commercant) || (x.raisonSociale && norm(j.raisonSociale || "") === norm(x.raisonSociale)))) || null;
+  return vivants("justificatifs").find(j => !j.numero && Math.abs((j.montant || 0) - x.montant) < 0.005 && j.date === x.date && memeFournisseur(j)) || null;
 }
 /* ---------- Création d'un justificatif (PC ou boîte) ---------- */
 async function creerJustificatif(donnees, piece){

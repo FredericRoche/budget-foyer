@@ -48,7 +48,7 @@ function montantsDe(ligne){
 function extraireTicket(texte){
   const lignes = texte.split(/\r?\n/).map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean);
   const N = lignes.map(l => norm(l).toUpperCase());
-  const res = {texte, montant: null, date: null, heure: "", raisonSociale: "", enseigne: "", type: "ticket", carte4: "", siret: "", confiance: {}};
+  const res = {texte, montant: null, date: null, heure: "", raisonSociale: "", enseigne: "", type: "ticket", carte4: "", siret: "", numero: "", confiance: {}};
 
   /* Type */
   const facturette = N.some(l => /TICKET CLIENT|A CONSERVER|NO AUTO|N° AUTO|AUTOR|SANS CONTACT|CONTACTLESS|DEBIT|CARTE BANCAIRE|VISA|MASTERCARD|CB EMV|AID A0/.test(l))
@@ -66,6 +66,9 @@ function extraireTicket(texte){
   });
   if (candidat !== null){ res.montant = candidat; res.confiance.montant = "sûr"; }
   else { const tous = lignes.flatMap(montantsDe).filter(v => v < 100000); if (tous.length){ res.montant = Math.max(...tous); res.confiance.montant = "à vérifier"; } }
+
+  /* Numéro de facture : « Facture n° X », « N°D26-011 », ou le n° posé sur la ligne suivante (les dates en sont retirées) */
+  res.numero = numeroFacture(lignes);
 
   /* Date et heure */
   const dates = [];
@@ -98,6 +101,22 @@ function extraireTicket(texte){
   res.confiance.commercant = forme ? "lu" : "à vérifier";
   return res;
 }
+const RE_DATE_LIGNE = /\b\d{1,2} ?[\/.\-] ?\d{1,2} ?[\/.\-] ?(?:\d ?\d ?\d ?\d|\d{2})(?!\d)/g;
+function numeroFacture(lignes){
+  const propre = s => s.replace(RE_DATE_LIGNE, " ").replace(/\b(DATE|DU|LE|FACTURE|N°|NO|NUMERO|DE|:)\b/gi, " ").trim();
+  for (let i = 0; i < lignes.length; i++){
+    const l = norm(lignes[i]).toUpperCase();
+    const m = l.match(/(?:FACTURE|INVOICE)?\s*(?:N°|NO\b|NUMERO|N\s?O\b)\s*:?\s*([A-Z]{0,4}[\s\-]?\d[\w\s\-–\/.]{1,20})/) || (/FACTURE/.test(l) && l.match(/FACTURE\s*:?\s*([A-Z]{0,4}\d[\w\-–\/.]{2,20})/));
+    let brut = m ? propre(m[1]) : "";
+    if (!/\d/.test(brut) && /(?:^|\s)(N°|NO|NUMERO)(\s|$)/.test(l) && i + 1 < lignes.length) brut = propre(norm(lignes[i + 1]).toUpperCase());
+    const cle = cleNumero(brut);
+    if (cle.length >= 3 && /\d/.test(cle)) return cle;
+  }
+  return "";
+}
+// Clé de comparaison : lettres et chiffres seuls (« 26 – 07 – 102 » = « 2607102 »)
+const cleNumero = s => norm(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 20);
+
 /* Fournisseur connu nommé dans le texte de la pièce : tous les mots (4 lettres et plus, deux au moins) de son nom
    y figurent. Les fiches de la famille, des virements internes et des revenus sont écartées. */
 const MOTS_GENERIQUES = new Set(["sarl", "sas", "sasu", "eurl", "cedex", "france", "societe", "chez", "prlv", "sepa", "virement", "carte", "facture", "architecte"]);
