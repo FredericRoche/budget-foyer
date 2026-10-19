@@ -44,7 +44,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
   ind.appendChild(h("div", {class: "indicateur" + (ana?.premierBas ? " alerte" : "")}, h("div", {class: "lib"}, "Trésorerie au plus bas (12 mois)"),
     h("div", {class: "val"}, ana ? euros(ana.min.solde, 0) : "—"), h("div", {class: "det"}, ana ? "le " + dateFr(ana.min.date) + " · seuil " + euros(LIVRE.parametres.seuilBas, 0) : "pas de compte de trésorerie")));
   const vc = variationComparable(bil, bil0); const varNet = vc.variation;
-  ind.appendChild(h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Patrimoine net"),
+  ind.appendChild(h("div", {class: "indicateur"}, h("div", {class: "lib"}, libellePatrimoine(bil)),
     h("div", {class: "val"}, bil.total >= 1e6 ? nombre(bil.total / 1e6) + " M€" : euros(bil.total, 0)),
     h("div", {class: "det"}, h("span", {class: varNet < 0 ? "neg" : "pos"}, eurosSigne(Math.round(varNet))), " depuis le 1er janvier" + (vc.exclus ? " (périmètre comparable)" : ""))));
   c.appendChild(ind);
@@ -107,6 +107,11 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
   c.appendChild(deux);
 }});
 
+// Sans bien immobilier valorisé, le patrimoine affiché n'est que financier : on le dit.
+function libellePatrimoine(bil){
+  const immo = bil.rubriques.some(r => r.lignes.some(l => l.compte.type === "immobilier" && l.valeur));
+  return immo ? "Patrimoine net" : "Patrimoine financier net";
+}
 /* ---------- Synthèse annuelle imprimable : pour des conseils, sans le détail ----------
    Charges par catégorie, revenus regroupés, résultat, épargne et patrimoine ; aucun fournisseur, sous-catégorie ni numéro de compte. */
 function imprimerSynthese(budget, an){
@@ -144,9 +149,9 @@ function imprimerSynthese(budget, an){
   z.appendChild(h("table", {class: "imp-budget imp-resultat"}, h("tbody", null, lignesEp.map(([l, v, tot]) => h("tr", {class: tot ? "imp-total" : ""}, h("td", null, l), h("td", {class: "num"}, tot ? e0(v) : eurosSigne(Math.round(v))))))));
   z.appendChild(h("table", {class: "imp-budget imp-resultat"}, h("tbody", null,
     bil.rubriques.map(rb => { const v = somme(rb.lignes.filter(l => l.valeur !== null), l => l.valeur); return Math.abs(v) > 0.5 ? h("tr", null, h("td", null, rb.titre), h("td", {class: "num"}, e0(v))) : null; }),
-    h("tr", {class: "imp-total"}, h("td", null, "Patrimoine net au " + dateFr(bil.date)), h("td", {class: "num"}, e0(bil.total))))));
+    h("tr", {class: "imp-total"}, h("td", null, libellePatrimoine(bil) + " au " + dateFr(bil.date)), h("td", {class: "num"}, e0(bil.total))))));
   z.appendChild(h("p", {class: "imp-note"}, "Valeurs brutes, sans fiscalité latente. Revenus : pensions et autres revenus prévus ; produits de l'épargne estimés aux taux retenus, comptés à l'exercice. "
-    + "Charges : budget de l'année. Épargne disponible : livrets, assurances-vie, épargne retraite et PEA, à leur dernière valorisation. Patrimoine : dernières valeurs connues de tous les comptes."));
+    + "Charges : budget de l'année. Épargne disponible : livrets, assurances-vie, épargne retraite et PEA, à leur dernière valorisation. Patrimoine : dernières valeurs connues de tous les comptes" + (libellePatrimoine(bil) === "Patrimoine net" ? "." : ", hors biens immobiliers.")));
   const fin = () => { vider(z); window.removeEventListener("afterprint", fin); };
   window.addEventListener("afterprint", fin);
   window.print();

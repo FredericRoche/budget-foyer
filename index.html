@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-c2NeSx5mISCAWSA/6FQVDB0bi8rv4GHhzVwKe5t6j8c=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-8d+mLuJdY6BLDe4tXmNSBtV1BoKIbo2GQdYTPVVjLQw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -339,7 +339,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1050";
+const VERSION_APP = "2026-10-19.1055";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3587,7 +3587,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
   ind.appendChild(h("div", {class: "indicateur" + (ana?.premierBas ? " alerte" : "")}, h("div", {class: "lib"}, "Trésorerie au plus bas (12 mois)"),
     h("div", {class: "val"}, ana ? euros(ana.min.solde, 0) : "—"), h("div", {class: "det"}, ana ? "le " + dateFr(ana.min.date) + " · seuil " + euros(LIVRE.parametres.seuilBas, 0) : "pas de compte de trésorerie")));
   const vc = variationComparable(bil, bil0); const varNet = vc.variation;
-  ind.appendChild(h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Patrimoine net"),
+  ind.appendChild(h("div", {class: "indicateur"}, h("div", {class: "lib"}, libellePatrimoine(bil)),
     h("div", {class: "val"}, bil.total >= 1e6 ? nombre(bil.total / 1e6) + " M€" : euros(bil.total, 0)),
     h("div", {class: "det"}, h("span", {class: varNet < 0 ? "neg" : "pos"}, eurosSigne(Math.round(varNet))), " depuis le 1er janvier" + (vc.exclus ? " (périmètre comparable)" : ""))));
   c.appendChild(ind);
@@ -3650,6 +3650,11 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
   c.appendChild(deux);
 }});
 
+// Sans bien immobilier valorisé, le patrimoine affiché n'est que financier : on le dit.
+function libellePatrimoine(bil){
+  const immo = bil.rubriques.some(r => r.lignes.some(l => l.compte.type === "immobilier" && l.valeur));
+  return immo ? "Patrimoine net" : "Patrimoine financier net";
+}
 /* ---------- Synthèse annuelle imprimable : pour des conseils, sans le détail ----------
    Charges par catégorie, revenus regroupés, résultat, épargne et patrimoine ; aucun fournisseur, sous-catégorie ni numéro de compte. */
 function imprimerSynthese(budget, an){
@@ -3687,9 +3692,9 @@ function imprimerSynthese(budget, an){
   z.appendChild(h("table", {class: "imp-budget imp-resultat"}, h("tbody", null, lignesEp.map(([l, v, tot]) => h("tr", {class: tot ? "imp-total" : ""}, h("td", null, l), h("td", {class: "num"}, tot ? e0(v) : eurosSigne(Math.round(v))))))));
   z.appendChild(h("table", {class: "imp-budget imp-resultat"}, h("tbody", null,
     bil.rubriques.map(rb => { const v = somme(rb.lignes.filter(l => l.valeur !== null), l => l.valeur); return Math.abs(v) > 0.5 ? h("tr", null, h("td", null, rb.titre), h("td", {class: "num"}, e0(v))) : null; }),
-    h("tr", {class: "imp-total"}, h("td", null, "Patrimoine net au " + dateFr(bil.date)), h("td", {class: "num"}, e0(bil.total))))));
+    h("tr", {class: "imp-total"}, h("td", null, libellePatrimoine(bil) + " au " + dateFr(bil.date)), h("td", {class: "num"}, e0(bil.total))))));
   z.appendChild(h("p", {class: "imp-note"}, "Valeurs brutes, sans fiscalité latente. Revenus : pensions et autres revenus prévus ; produits de l'épargne estimés aux taux retenus, comptés à l'exercice. "
-    + "Charges : budget de l'année. Épargne disponible : livrets, assurances-vie, épargne retraite et PEA, à leur dernière valorisation. Patrimoine : dernières valeurs connues de tous les comptes."));
+    + "Charges : budget de l'année. Épargne disponible : livrets, assurances-vie, épargne retraite et PEA, à leur dernière valorisation. Patrimoine : dernières valeurs connues de tous les comptes" + (libellePatrimoine(bil) === "Patrimoine net" ? "." : ", hors biens immobiliers.")));
   const fin = () => { vider(z); window.removeEventListener("afterprint", fin); };
   window.addEventListener("afterprint", fin);
   window.print();
