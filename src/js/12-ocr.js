@@ -70,7 +70,8 @@ function extraireTicket(texte){
   /* Date et heure */
   const dates = [];
   for (const l of lignes){
-    for (const m of l.matchAll(/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/g)){ const d = lireDate(m[0]); if (d) dates.push(d); }
+    // (les PDF découpent parfois la date : « 12 / 10 /202 6 »)
+    for (const m of l.matchAll(/\b(\d{1,2}) ?[\/.\-] ?(\d{1,2}) ?[\/.\-] ?(\d ?\d ?\d ?\d|\d{2})(?!\d)/g)){ const d = lireDate(m[0].replace(/ /g, "")); if (d) dates.push(d); }
     for (const m of norm(l).matchAll(/\b(\d{1,2}) (janv|fevr|mars|avr|mai|juin|juil|aout|sept|oct|nov|dec)[a-z]*\.? (\d{4})\b/g)){
       const mois = ["janv", "fevr", "mars", "avr", "mai", "juin", "juil", "aout", "sept", "oct", "nov", "dec"].indexOf(m[2]) + 1;
       dates.push(`${m[3]}-${pad2(mois)}-${pad2(m[1])}`);
@@ -97,7 +98,22 @@ function extraireTicket(texte){
   res.confiance.commercant = forme ? "lu" : "à vérifier";
   return res;
 }
-/* Commerçant connu pour un ticket : par alias (raison sociale, enseigne) ou SIRET. */
+/* Fournisseur connu nommé dans le texte de la pièce : tous les mots (4 lettres et plus, deux au moins) de son nom
+   y figurent. Les fiches de la famille, des virements internes et des revenus sont écartées. */
+const MOTS_GENERIQUES = new Set(["sarl", "sas", "sasu", "eurl", "cedex", "france", "societe", "chez", "prlv", "sepa", "virement", "carte", "facture", "architecte"]);
+const motsNom = s => [...new Set(norm(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !MOTS_GENERIQUES.has(w)))];
+function commercantDansTexte(texte, fiches){
+  const mots = new Set(motsNom(texte)); let meilleur = null, score = 0;
+  for (const f of fiches){
+    if (["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne"].includes(f.categorie)) continue;
+    for (const nom of [f.nom, ...(f.alias || [])]){
+      const m = motsNom(nom);
+      if (m.length >= 2 && m.every(w => mots.has(w)) && m.length > score){ meilleur = f; score = m.length; }
+    }
+  }
+  return meilleur;
+}
+/* Commerçant connu pour un ticket : par alias (raison sociale, enseigne) ou SIRET, sinon par son nom dans le texte. */
 function commercantPourTicket(t, liste){
   const fiches = liste || vivants("commercants");
   const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
@@ -105,5 +121,5 @@ function commercantPourTicket(t, liste){
     if (t.siret && f.siret === t.siret) return f;
     for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
   }
-  return null;
+  return t.texte ? commercantDansTexte(t.texte, fiches) : null;
 }

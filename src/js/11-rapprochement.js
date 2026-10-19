@@ -138,15 +138,22 @@ function rapprocherTout(){
 async function creerJustificatif(donnees, piece){
   const j = enregistrer("justificatifs", Object.assign({statut: "a_rapprocher", operations: [], cree: new Date().toISOString()}, donnees));
   if (piece) await enregistrerPiece(j.id, piece.octets, piece.mime);
-  // Nom d'usage saisi ≠ raison sociale lue : on retient la correspondance.
-  if (j.commercantNom){
-    let c = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom));
-    if (!c) c = enregistrer("commercants", {nom: j.commercantNom, alias: [], stats: {}, natures: {}, titulaires: {}});
-    else if (norm(c.nom) !== norm(j.commercantNom) && j.commercantCorrige) c.nom = j.commercantNom;
-    if (j.raisonSociale) ajouterAlias(c, j.raisonSociale);
-    if (j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; }
-    enregistrer("commercants", c); invaliderIndex();
-    j.commercant = c.id; enregistrer("justificatifs", j);
+  // Fournisseur : rattaché s'il est déjà enregistré ; sinon le nom reste provisoire, et la fiche n'est créée
+  // qu'à la validation sur le PC (« Enregistrer la saisie »). Une saisie du téléphone ne modifie aucune fiche.
+  if (j.commercantNom || j.raisonSociale){
+    const mobile = j.origine === "mobile";
+    const c = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)))
+      || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    if (c){
+      if (!mobile){
+        if (j.raisonSociale) ajouterAlias(c, j.raisonSociale);
+        if (j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; }
+        enregistrer("commercants", c); invaliderIndex();
+      }
+      Object.assign(j, {commercant: c.id, commercantNom: c.nom, fournisseurProvisoire: false});
+      if (!j.categorie && c.categorie) Object.assign(j, {categorie: c.categorie, sousCategorie: c.sousCategorie || "", lieu: j.lieu || c.lieu || ""});
+    } else j.fournisseurProvisoire = true;
+    enregistrer("justificatifs", j);
   }
   if (j.carte === "ESPECES") creerOperationEspeces(j);
   return j;

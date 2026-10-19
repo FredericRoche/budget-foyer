@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-8eO995O9YqmqzdR7mASiyCcXr/1MyiiUJo86Rdfmq2o=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-NPZFDi7yTUYTNGubSYfj/XG10zYyjx3EfPqV2tJORxk=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -309,6 +309,8 @@ input.champ-date{width:8.5rem; font-variant-numeric:tabular-nums}
 input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
 .deux-colonnes{display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:1.2rem; align-items:start}
 @media (max-width: 760px){ .deux-colonnes{grid-template-columns:1fr} }
+.pile{display:flex; flex-direction:column; gap:.3rem; flex:1}
+.pile > *{width:100%}
 
 </style>
 </head>
@@ -342,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1336";
+const VERSION_APP = "2026-10-19.1355";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2567,15 +2569,22 @@ function rapprocherTout(){
 async function creerJustificatif(donnees, piece){
   const j = enregistrer("justificatifs", Object.assign({statut: "a_rapprocher", operations: [], cree: new Date().toISOString()}, donnees));
   if (piece) await enregistrerPiece(j.id, piece.octets, piece.mime);
-  // Nom d'usage saisi ≠ raison sociale lue : on retient la correspondance.
-  if (j.commercantNom){
-    let c = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom));
-    if (!c) c = enregistrer("commercants", {nom: j.commercantNom, alias: [], stats: {}, natures: {}, titulaires: {}});
-    else if (norm(c.nom) !== norm(j.commercantNom) && j.commercantCorrige) c.nom = j.commercantNom;
-    if (j.raisonSociale) ajouterAlias(c, j.raisonSociale);
-    if (j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; }
-    enregistrer("commercants", c); invaliderIndex();
-    j.commercant = c.id; enregistrer("justificatifs", j);
+  // Fournisseur : rattaché s'il est déjà enregistré ; sinon le nom reste provisoire, et la fiche n'est créée
+  // qu'à la validation sur le PC (« Enregistrer la saisie »). Une saisie du téléphone ne modifie aucune fiche.
+  if (j.commercantNom || j.raisonSociale){
+    const mobile = j.origine === "mobile";
+    const c = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)))
+      || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    if (c){
+      if (!mobile){
+        if (j.raisonSociale) ajouterAlias(c, j.raisonSociale);
+        if (j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; }
+        enregistrer("commercants", c); invaliderIndex();
+      }
+      Object.assign(j, {commercant: c.id, commercantNom: c.nom, fournisseurProvisoire: false});
+      if (!j.categorie && c.categorie) Object.assign(j, {categorie: c.categorie, sousCategorie: c.sousCategorie || "", lieu: j.lieu || c.lieu || ""});
+    } else j.fournisseurProvisoire = true;
+    enregistrer("justificatifs", j);
   }
   if (j.carte === "ESPECES") creerOperationEspeces(j);
   return j;
@@ -2690,7 +2699,8 @@ function extraireTicket(texte){
   /* Date et heure */
   const dates = [];
   for (const l of lignes){
-    for (const m of l.matchAll(/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/g)){ const d = lireDate(m[0]); if (d) dates.push(d); }
+    // (les PDF découpent parfois la date : « 12 / 10 /202 6 »)
+    for (const m of l.matchAll(/\b(\d{1,2}) ?[\/.\-] ?(\d{1,2}) ?[\/.\-] ?(\d ?\d ?\d ?\d|\d{2})(?!\d)/g)){ const d = lireDate(m[0].replace(/ /g, "")); if (d) dates.push(d); }
     for (const m of norm(l).matchAll(/\b(\d{1,2}) (janv|fevr|mars|avr|mai|juin|juil|aout|sept|oct|nov|dec)[a-z]*\.? (\d{4})\b/g)){
       const mois = ["janv", "fevr", "mars", "avr", "mai", "juin", "juil", "aout", "sept", "oct", "nov", "dec"].indexOf(m[2]) + 1;
       dates.push(`${m[3]}-${pad2(mois)}-${pad2(m[1])}`);
@@ -2717,7 +2727,22 @@ function extraireTicket(texte){
   res.confiance.commercant = forme ? "lu" : "à vérifier";
   return res;
 }
-/* Commerçant connu pour un ticket : par alias (raison sociale, enseigne) ou SIRET. */
+/* Fournisseur connu nommé dans le texte de la pièce : tous les mots (4 lettres et plus, deux au moins) de son nom
+   y figurent. Les fiches de la famille, des virements internes et des revenus sont écartées. */
+const MOTS_GENERIQUES = new Set(["sarl", "sas", "sasu", "eurl", "cedex", "france", "societe", "chez", "prlv", "sepa", "virement", "carte", "facture", "architecte"]);
+const motsNom = s => [...new Set(norm(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !MOTS_GENERIQUES.has(w)))];
+function commercantDansTexte(texte, fiches){
+  const mots = new Set(motsNom(texte)); let meilleur = null, score = 0;
+  for (const f of fiches){
+    if (["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne"].includes(f.categorie)) continue;
+    for (const nom of [f.nom, ...(f.alias || [])]){
+      const m = motsNom(nom);
+      if (m.length >= 2 && m.every(w => mots.has(w)) && m.length > score){ meilleur = f; score = m.length; }
+    }
+  }
+  return meilleur;
+}
+/* Commerçant connu pour un ticket : par alias (raison sociale, enseigne) ou SIRET, sinon par son nom dans le texte. */
 function commercantPourTicket(t, liste){
   const fiches = liste || vivants("commercants");
   const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
@@ -2725,7 +2750,7 @@ function commercantPourTicket(t, liste){
     if (t.siret && f.siret === t.siret) return f;
     for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
   }
-  return null;
+  return t.texte ? commercantDansTexte(t.texte, fiches) : null;
 }
 
 /* ===== 13-calculs.js ===== */
@@ -4231,13 +4256,28 @@ function ecranRapprochement(j, etat, attente){
     const type = selection(Object.entries(TYPES_JUSTIF), x.type);
     const montant = h("input", {type: "text", value: nombre(x.montant)});
     const date = champDate({value: x.date});
-    const cm = h("input", {type: "text", value: x.commercantNom || ""});
+    // Fournisseur : liste déroulante des fournisseurs enregistrés (par catégorie), ou « Nouveau fournisseur… »
+    const cm = h("input", {type: "text", value: x.commercantNom || "", autocomplete: "off", placeholder: "nom du nouveau fournisseur"});
+    const fiches = vivants("commercants").filter(f => f.nom).sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
+    const connu = (x.commercant && obtenir("commercants", x.commercant)) || fiches.find(f => norm(f.nom) === norm(x.commercantNom || ""));
+    const selF = h("select", null, h("option", {value: ""}, "— choisir un fournisseur —"),
+      [...new Set(fiches.map(f => f.categorie || "Sans catégorie"))].sort((a, b) => a.localeCompare(b, "fr")).map(g => h("optgroup", {label: g},
+        fiches.filter(f => (f.categorie || "Sans catégorie") === g).map(f => h("option", {value: f.id, selected: connu?.id === f.id}, f.nom)))),
+      h("option", {value: "__nouveau__", selected: !connu && !!x.commercantNom}, "Nouveau fournisseur…"));
+    cm.hidden = !!connu || !x.commercantNom;
+    const listeF = selF;
     const nat = h("input", {type: "text", value: x.natureExacte || "", placeholder: "ce qui a été acheté"});
     const fiche = x.commercant ? obtenir("commercants", x.commercant) : null;
     const sugg = h("div", {class: "suggestions", style: {margin: ".2rem 0 .3rem 8rem"}});
     for (const [n] of Object.entries(fiche?.natures || {}).sort((a, b) => b[1] - a[1]).slice(0, 4)) sugg.appendChild(h("button", {onclick: () => { nat.value = n; }}, n));
     const cat = selectionCategorie(x.categorie || fiche?.categorie || "", x.sousCategorie || fiche?.sousCategorie || "");
     const lieu = selectionLieu(x.lieu || fiche?.lieu || "");
+    selF.addEventListener("change", () => {
+      if (selF.value === "__nouveau__"){ cm.hidden = false; cm.value = ""; cm.focus(); return; }
+      const f = obtenir("commercants", selF.value); cm.hidden = true; cm.value = f ? f.nom : "";
+      if (f?.categorie && cat.value.startsWith("À préciser")){ const v = f.categorie + "|" + (f.sousCategorie || ""); if ([...cat.options].some(o => o.value === v)) cat.value = v; }
+      if (f?.lieu && !lieu.value) lieu.value = f.lieu;
+    });
     const carte = selection([["", "—"], ...vivants("comptes").filter(c => c.type === "carte" && c.carte !== "LCL-NV").map(c => [c.carte, c.nom]),
       ...comptesDeType("courant").flatMap(c => [["CPT:" + c.id, "Virement ou prélèvement · " + c.nom], ["CHQ:" + c.id, "Chèque · " + c.nom]]), ["ESPECES", "Espèces"]], x.carte || "");
     const cheque = h("input", {type: "text", inputmode: "numeric", value: x.cheque || "", placeholder: "n° du chèque", style: {width: "9rem"}});
@@ -4246,7 +4286,7 @@ function ecranRapprochement(j, etat, attente){
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
-      ligneOcr("Fournisseur", cm, fiche ? "fichier des fournisseurs" : "nouveau"), ligneOcr("Nature exacte", nat, ""), sugg,
+      ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
       ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""), ligneCheque);
     champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte, cheque});
   });
@@ -4255,9 +4295,10 @@ function ecranRapprochement(j, etat, attente){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
-        lieu: f.lieu.value, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
+        lieu: f.lieu.value, fournisseurProvisoire: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
-      if (f.x.commercantNom && f.x.commercantNom !== ancienNom){
+      // Le fournisseur est créé (ou rattaché) à la validation, y compris un nom resté provisoire
+      if (f.x.commercantNom && (f.x.commercantNom !== ancienNom || !f.x.commercant)){
         let fiche = vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom)) || (f.x.commercant ? obtenir("commercants", f.x.commercant) : null);
         if (!fiche) fiche = enregistrer("commercants", {nom: f.x.commercantNom, alias: [], stats: {}, natures: {}});
         else if (norm(fiche.nom) !== norm(f.x.commercantNom) && f.x.commercant === fiche.id) { fiche.nom = f.x.commercantNom; enregistrer("commercants", fiche); }
@@ -5583,6 +5624,14 @@ async function autotest(){
     {
       const f1 = extraireTicket("FACTURE\nN°D99-001\nDate de création : 13/10/2026\nDESIGNATION Quantité Total HT\nTOTAL NET 1070 € .\nTVA non applicable");
       const f2 = extraireTicket("Facture\nn°\nDate\n12/10/2026\nMontant à régler HT\n3 560 €\nTVA 20%\n712 €\nMontant à régler TTC\n4 272 €\nIBAN\nFR76 0000 0000 0000 0000 0000 000");
+      const fp = enregistrer("commercants", {nom: "Dupont Architecte Essai", alias: [], stats: {}, natures: {}, categorie: "Travaux essai", sousCategorie: "Études"});
+      const tk = extraireTicket("Jean Dupont, architecte essai\nFacture\nn° Date\n2 6 – 0 7 – 10 2 12 / 10 /202 6\nMontant à régler TTC\n980 €");
+      v("facture : date fragmentée et fournisseur nommé dans le texte", [tk.date, commercantPourTicket(tk)?.id === fp.id], ["2026-10-12", true]);
+      {
+        const nb0 = vivants("commercants").length;
+        const jm = await creerJustificatif({type: "ticket", date: "2027-03-10", montant: 12, commercantNom: "Boulangrie Nouvele", origine: "mobile"});
+        v("téléphone : fournisseur inconnu laissé provisoire, aucune fiche créée", [vivants("commercants").length - nb0, jm.fournisseurProvisoire], [0, true]);
+      }
       v("factures : montants entiers en euros", [f1.montant, f1.type, f2.montant, f2.type], [1070, "facture", 4272, "facture"]);
     }
     const t1 = extraireTicket("BOUCHERIE ST-VICTOR\nSARL VIANDES ST VICTOR\n12 rue Exemple\nGigot 1,2 kg 38,40\nSaucisses x6 10,20\nTOTAL TTC 48,60\nCB 48,60\n12/03/2027 10:48\nSIRET 123 456 789 00012");

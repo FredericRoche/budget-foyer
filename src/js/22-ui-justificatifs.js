@@ -45,13 +45,28 @@ function ecranRapprochement(j, etat, attente){
     const type = selection(Object.entries(TYPES_JUSTIF), x.type);
     const montant = h("input", {type: "text", value: nombre(x.montant)});
     const date = champDate({value: x.date});
-    const cm = h("input", {type: "text", value: x.commercantNom || ""});
+    // Fournisseur : liste déroulante des fournisseurs enregistrés (par catégorie), ou « Nouveau fournisseur… »
+    const cm = h("input", {type: "text", value: x.commercantNom || "", autocomplete: "off", placeholder: "nom du nouveau fournisseur"});
+    const fiches = vivants("commercants").filter(f => f.nom).sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
+    const connu = (x.commercant && obtenir("commercants", x.commercant)) || fiches.find(f => norm(f.nom) === norm(x.commercantNom || ""));
+    const selF = h("select", null, h("option", {value: ""}, "— choisir un fournisseur —"),
+      [...new Set(fiches.map(f => f.categorie || "Sans catégorie"))].sort((a, b) => a.localeCompare(b, "fr")).map(g => h("optgroup", {label: g},
+        fiches.filter(f => (f.categorie || "Sans catégorie") === g).map(f => h("option", {value: f.id, selected: connu?.id === f.id}, f.nom)))),
+      h("option", {value: "__nouveau__", selected: !connu && !!x.commercantNom}, "Nouveau fournisseur…"));
+    cm.hidden = !!connu || !x.commercantNom;
+    const listeF = selF;
     const nat = h("input", {type: "text", value: x.natureExacte || "", placeholder: "ce qui a été acheté"});
     const fiche = x.commercant ? obtenir("commercants", x.commercant) : null;
     const sugg = h("div", {class: "suggestions", style: {margin: ".2rem 0 .3rem 8rem"}});
     for (const [n] of Object.entries(fiche?.natures || {}).sort((a, b) => b[1] - a[1]).slice(0, 4)) sugg.appendChild(h("button", {onclick: () => { nat.value = n; }}, n));
     const cat = selectionCategorie(x.categorie || fiche?.categorie || "", x.sousCategorie || fiche?.sousCategorie || "");
     const lieu = selectionLieu(x.lieu || fiche?.lieu || "");
+    selF.addEventListener("change", () => {
+      if (selF.value === "__nouveau__"){ cm.hidden = false; cm.value = ""; cm.focus(); return; }
+      const f = obtenir("commercants", selF.value); cm.hidden = true; cm.value = f ? f.nom : "";
+      if (f?.categorie && cat.value.startsWith("À préciser")){ const v = f.categorie + "|" + (f.sousCategorie || ""); if ([...cat.options].some(o => o.value === v)) cat.value = v; }
+      if (f?.lieu && !lieu.value) lieu.value = f.lieu;
+    });
     const carte = selection([["", "—"], ...vivants("comptes").filter(c => c.type === "carte" && c.carte !== "LCL-NV").map(c => [c.carte, c.nom]),
       ...comptesDeType("courant").flatMap(c => [["CPT:" + c.id, "Virement ou prélèvement · " + c.nom], ["CHQ:" + c.id, "Chèque · " + c.nom]]), ["ESPECES", "Espèces"]], x.carte || "");
     const cheque = h("input", {type: "text", inputmode: "numeric", value: x.cheque || "", placeholder: "n° du chèque", style: {width: "9rem"}});
@@ -60,7 +75,7 @@ function ecranRapprochement(j, etat, attente){
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
-      ligneOcr("Fournisseur", cm, fiche ? "fichier des fournisseurs" : "nouveau"), ligneOcr("Nature exacte", nat, ""), sugg,
+      ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
       ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""), ligneCheque);
     champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte, cheque});
   });
@@ -69,9 +84,10 @@ function ecranRapprochement(j, etat, attente){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
-        lieu: f.lieu.value, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
+        lieu: f.lieu.value, fournisseurProvisoire: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
-      if (f.x.commercantNom && f.x.commercantNom !== ancienNom){
+      // Le fournisseur est créé (ou rattaché) à la validation, y compris un nom resté provisoire
+      if (f.x.commercantNom && (f.x.commercantNom !== ancienNom || !f.x.commercant)){
         let fiche = vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom)) || (f.x.commercant ? obtenir("commercants", f.x.commercant) : null);
         if (!fiche) fiche = enregistrer("commercants", {nom: f.x.commercantNom, alias: [], stats: {}, natures: {}});
         else if (norm(fiche.nom) !== norm(f.x.commercantNom) && f.x.commercant === fiche.id) { fiche.nom = f.x.commercantNom; enregistrer("commercants", fiche); }
