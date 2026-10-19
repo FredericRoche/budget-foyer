@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-8d+mLuJdY6BLDe4tXmNSBtV1BoKIbo2GQdYTPVVjLQw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-gKb6gpgiF3BIOhemvyaV3+GtpaM1rm4yr7Rls+Frn8M=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -265,21 +265,21 @@ nav.basse{display:none}
   #impression .imp-tete{border-bottom:2px solid var(--vert-empire); padding-bottom:3mm; margin-bottom:4mm}
   #impression .imp-foyer{font-variant:small-caps; letter-spacing:.08em; color:var(--or-bruni); font-size:9pt}
   #impression h1{font-size:18pt; color:var(--vert-empire); margin:1mm 0; font-weight:600}
-  #impression .imp-soustitre{color:var(--sauge); font-size:9pt}
+  #impression .imp-soustitre{color:#000; font-size:9pt}
   #impression td, #impression th{font-size:9.5pt}
   #impression .imp-sous td{font-size:9pt}
-  #impression .imp-lieux-titre{font-size:8pt; text-transform:uppercase; letter-spacing:.06em; color:var(--sauge); margin:3mm 0 1mm}
+  #impression .imp-lieux-titre{font-size:8pt; text-transform:uppercase; letter-spacing:.06em; color:#000; margin:3mm 0 1mm}
   #impression .imp-chiffres{display:grid; grid-template-columns:repeat(4,1fr); gap:3mm; margin-bottom:4mm}
   #impression .imp-chiffres > div{border-top:2px solid var(--vert-empire); background:var(--ivoire); padding:2mm 3mm}
-  #impression .imp-chiffres .lib{font-size:7.5pt; text-transform:uppercase; letter-spacing:.06em; color:var(--sauge)}
+  #impression .imp-chiffres .lib{font-size:7.5pt; text-transform:uppercase; letter-spacing:.06em; color:#000}
   #impression .imp-chiffres .val{font-size:14pt; font-weight:600; color:var(--vert-empire); font-variant-numeric:tabular-nums}
   #impression table{width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums lining-nums}
   #impression .imp-lieux{width:auto; min-width:70mm; margin-bottom:4mm}
   #impression .imp-lieux td{padding:.6mm 3mm .6mm 0}
   #impression th{font-variant:small-caps; letter-spacing:.04em; color:var(--vert-empire); text-align:left; border-top:2px solid var(--vert-empire); border-bottom:1px solid var(--vert-empire); padding:1.2mm 1.5mm}
-  #impression td{padding:.7mm 1.5mm; border-bottom:.3pt solid var(--filet-clair); vertical-align:top}
+  #impression td{padding:.7mm 1.5mm; border-bottom:.5pt solid #8a8a8a; vertical-align:top}
   #impression .num{text-align:right; white-space:nowrap}
-  #impression .ech{color:var(--sauge); font-size:8pt; white-space:nowrap}
+  #impression .ech{color:#000; font-size:8pt; white-space:nowrap}
   #impression thead{display:table-header-group}
   #impression tr{break-inside:avoid}
   #impression .imp-nature td{font-variant:small-caps; letter-spacing:.05em; font-weight:600; color:#fff; background:var(--vert-empire); border:0; padding-top:1.2mm}
@@ -287,9 +287,9 @@ nav.basse{display:none}
   #impression .imp-sous td:first-child{padding-left:5mm}
   #impression .imp-total td{font-weight:600; border-top:2px solid var(--vert-empire); border-bottom:2px solid var(--vert-empire); background:var(--ivoire)}
   #impression .neg{color:var(--garnet)}
-  #impression .discret{color:var(--sauge)}
+  #impression .discret{color:#000}
   #impression .fort{font-weight:600}
-  #impression .imp-note{font-size:8pt; font-style:italic; color:var(--sauge); margin-top:2mm}
+  #impression .imp-note{font-size:8.5pt; font-style:italic; color:#000; margin-top:2mm}
   #impression h2{font-size:12pt; color:var(--vert-empire); margin:5mm 0 1.5mm; font-variant:small-caps; letter-spacing:.05em}
   #impression .imp-chiffres .deficit{border-top-color:var(--garnet)}
   #impression .imp-chiffres .deficit .val{color:var(--garnet)}
@@ -339,7 +339,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1055";
+const VERSION_APP = "2026-10-19.1110";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
