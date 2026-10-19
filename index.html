@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-drmWWq5UBXzvX8DWtHhry8TfwneKk0Q+sGMG/vq/Woo=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-v1R3ZJVvb6UCSRcLfihWV/RqNsVgx3j441LOtJ09SGw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -339,7 +339,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1036";
+const VERSION_APP = "2026-10-19.1039";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4465,8 +4465,8 @@ function donneesImpressionBudget(budget, an, d1, d2, lieu){
   if (fin > aujourdhui()){
     const ep = simulerEpargne({jours: ecartJours(aujourdhui(), fin)});
     const nouveau = Math.round(somme(ep.evenements.filter(e => e.genre === "rendement" && e.date >= debut && e.date <= fin), e => e.nouveau || 0));
-    if (Math.abs(nouveau) > 0.5) Object.assign(poste(nouveau > 0 ? "Produits de l'épargne|Rendement des sommes nouvelles (cessions placées, net des prélèvements)"
-      : "Produits de l'épargne|Rendement perdu sur l'épargne prélevée (projets, déficit), net des cessions"), {prevu: nouveau, calcule: true});
+    if (Math.abs(nouveau) > 0.5) Object.assign(poste(nouveau > 0 ? "Produits de l'épargne|Produits financiers du placement des cessions (net des sommes prélevées)"
+      : "Produits de l'épargne|Produits financiers perdus sur l'épargne prélevée (projets, déficit), net des cessions"), {prevu: nouveau, calcule: true});
   }
   const revenus = [...rev.values()].filter(x => Math.abs(x.prevu) > 0.5 || Math.abs(x.realise) > 0.5).sort((a, b) => b.prevu - a.prevu || b.realise - a.realise);
   return {natures, parLieu, parMois, revenus, revenusPrevus: somme(revenus, x => x.prevu), revenusPonctuels: somme(revenus, x => x.ponctuel), revenusRealises: somme(revenus, x => x.realise),
@@ -4520,7 +4520,7 @@ function imprimerBudget(budget, an, d1, d2, lieu, periode){
     d.revenusPonctuels ? h("tr", {class: "imp-total"}, h("td", null, "Solde de la période, revenus ponctuels compris"), h("td", {class: "num" + (solde + d.revenusPonctuels < 0 ? " neg" : "")}, eurosSigne(Math.round(solde + d.revenusPonctuels)))) : null)));
   z.appendChild(h("p", {class: "imp-note"}, "Charges : lignes du budget, réalisé à la date d'achat, hors transferts et opérations « Hors budget ». Échéance : mois couverts par la ligne quand elle n'est pas répartie par douzièmes, et jour de prélèvement fixé. "
     + "Revenus : échéances positives de la période (pensions, paie, restitutions), hors cessions de titres et virements depuis l'épargne ; produits de l'épargne estimés aux taux de chaque compte (Réglages) sur les valorisations du jour, "
-    + "produits comptés à l'exercice (acquis pendant la période) : intérêts des livrets, virés au compte courant le 15 janvier suivant ; rendement des assurances-vie, laissé sur les contrats mais tenu pour disponible ; rendement des sommes nouvelles (produit des cessions placé au taux des nouveaux placements, net des sommes prélevées sur l'épargne)."));
+    + "produits comptés à l'exercice (acquis pendant la période) : intérêts des livrets, virés au compte courant le 15 janvier suivant ; rendement des assurances-vie, laissé sur les contrats mais tenu pour disponible ; produits financiers du placement des cessions (produit des cessions placé au taux des nouveaux placements, net des sommes prélevées sur l'épargne)."));
   const annexe = h("section", {class: "imp-annexe"}, h("h2", null, "Budget mois par mois, par catégorie" + (lieu ? " · " + lieu : "")));
   const tm = h("tbody");
   for (const x of d.parMois) tm.appendChild(h("tr", null, h("td", null, x.categorie), x.mois.map(v => h("td", {class: "num"}, Math.abs(v) < 0.5 ? "" : e0(v))), h("td", {class: "num fort"}, e0(x.total))));

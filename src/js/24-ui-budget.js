@@ -136,8 +136,8 @@ function donneesImpressionBudget(budget, an, d1, d2, lieu){
   if (fin > aujourdhui()){
     const ep = simulerEpargne({jours: ecartJours(aujourdhui(), fin)});
     const nouveau = Math.round(somme(ep.evenements.filter(e => e.genre === "rendement" && e.date >= debut && e.date <= fin), e => e.nouveau || 0));
-    if (Math.abs(nouveau) > 0.5) Object.assign(poste(nouveau > 0 ? "Produits de l'épargne|Rendement des sommes nouvelles (cessions placées, net des prélèvements)"
-      : "Produits de l'épargne|Rendement perdu sur l'épargne prélevée (projets, déficit), net des cessions"), {prevu: nouveau, calcule: true});
+    if (Math.abs(nouveau) > 0.5) Object.assign(poste(nouveau > 0 ? "Produits de l'épargne|Produits financiers du placement des cessions (net des sommes prélevées)"
+      : "Produits de l'épargne|Produits financiers perdus sur l'épargne prélevée (projets, déficit), net des cessions"), {prevu: nouveau, calcule: true});
   }
   const revenus = [...rev.values()].filter(x => Math.abs(x.prevu) > 0.5 || Math.abs(x.realise) > 0.5).sort((a, b) => b.prevu - a.prevu || b.realise - a.realise);
   return {natures, parLieu, parMois, revenus, revenusPrevus: somme(revenus, x => x.prevu), revenusPonctuels: somme(revenus, x => x.ponctuel), revenusRealises: somme(revenus, x => x.realise),
@@ -191,7 +191,7 @@ function imprimerBudget(budget, an, d1, d2, lieu, periode){
     d.revenusPonctuels ? h("tr", {class: "imp-total"}, h("td", null, "Solde de la période, revenus ponctuels compris"), h("td", {class: "num" + (solde + d.revenusPonctuels < 0 ? " neg" : "")}, eurosSigne(Math.round(solde + d.revenusPonctuels)))) : null)));
   z.appendChild(h("p", {class: "imp-note"}, "Charges : lignes du budget, réalisé à la date d'achat, hors transferts et opérations « Hors budget ». Échéance : mois couverts par la ligne quand elle n'est pas répartie par douzièmes, et jour de prélèvement fixé. "
     + "Revenus : échéances positives de la période (pensions, paie, restitutions), hors cessions de titres et virements depuis l'épargne ; produits de l'épargne estimés aux taux de chaque compte (Réglages) sur les valorisations du jour, "
-    + "produits comptés à l'exercice (acquis pendant la période) : intérêts des livrets, virés au compte courant le 15 janvier suivant ; rendement des assurances-vie, laissé sur les contrats mais tenu pour disponible ; rendement des sommes nouvelles (produit des cessions placé au taux des nouveaux placements, net des sommes prélevées sur l'épargne)."));
+    + "produits comptés à l'exercice (acquis pendant la période) : intérêts des livrets, virés au compte courant le 15 janvier suivant ; rendement des assurances-vie, laissé sur les contrats mais tenu pour disponible ; produits financiers du placement des cessions (produit des cessions placé au taux des nouveaux placements, net des sommes prélevées sur l'épargne)."));
   const annexe = h("section", {class: "imp-annexe"}, h("h2", null, "Budget mois par mois, par catégorie" + (lieu ? " · " + lieu : "")));
   const tm = h("tbody");
   for (const x of d.parMois) tm.appendChild(h("tr", null, h("td", null, x.categorie), x.mois.map(v => h("td", {class: "num"}, Math.abs(v) < 0.5 ? "" : e0(v))), h("td", {class: "num fort"}, e0(x.total))));
