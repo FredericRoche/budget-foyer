@@ -134,6 +134,10 @@ async function autotest(){
         const jm = await creerJustificatif({type: "ticket", date: "2027-03-10", montant: 12, commercantNom: "Boulangrie Nouvele", origine: "mobile"});
         v("téléphone : fournisseur inconnu laissé provisoire, aucune fiche créée", [vivants("commercants").length - nb0, jm.fournisseurProvisoire], [0, true]);
       }
+      {
+        const jd = await creerJustificatif({type: "facture", date: "2027-03-11", montant: 980, raisonSociale: "Jean Dupont, architecte essai", origine: "pc"});
+        v("justificatif : la même pièce est repérée", [!!justificatifDejaLa({montant: 980, date: "2027-03-11", raisonSociale: "Jean Dupont, architecte essai"}), !!justificatifDejaLa({montant: 981, date: "2027-03-11", raisonSociale: "Jean Dupont, architecte essai"})], [true, false]);
+      }
       v("factures : montants entiers en euros", [f1.montant, f1.type, f2.montant, f2.type], [1070, "facture", 4272, "facture"]);
     }
     const t1 = extraireTicket("BOUCHERIE ST-VICTOR\nSARL VIANDES ST VICTOR\n12 rue Exemple\nGigot 1,2 kg 38,40\nSaucisses x6 10,20\nTOTAL TTC 48,60\nCB 48,60\n12/03/2027 10:48\nSIRET 123 456 789 00012");

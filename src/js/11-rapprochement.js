@@ -134,6 +134,12 @@ function rapprocherTout(){
   return auto;
 }
 
+/* Justificatif déjà enregistré pour le même achat : même montant, même date, même fournisseur (ou même raison sociale lue). */
+function justificatifDejaLa(x){
+  if (!x.montant || !x.date) return null;
+  return vivants("justificatifs").find(j => Math.abs((j.montant || 0) - x.montant) < 0.005 && j.date === x.date
+    && ((x.commercant && j.commercant === x.commercant) || (x.raisonSociale && norm(j.raisonSociale || "") === norm(x.raisonSociale)))) || null;
+}
 /* ---------- Création d'un justificatif (PC ou boîte) ---------- */
 async function creerJustificatif(donnees, piece){
   const j = enregistrer("justificatifs", Object.assign({statut: "a_rapprocher", operations: [], cree: new Date().toISOString()}, donnees));

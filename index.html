@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-NPZFDi7yTUYTNGubSYfj/XG10zYyjx3EfPqV2tJORxk=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Zb+o5FBcdxlEHCIIWsLSmGTDsdaz+vQdTfvIk28bQz4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -344,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1355";
+const VERSION_APP = "2026-10-19.1402";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2565,6 +2565,12 @@ function rapprocherTout(){
   return auto;
 }
 
+/* Justificatif déjà enregistré pour le même achat : même montant, même date, même fournisseur (ou même raison sociale lue). */
+function justificatifDejaLa(x){
+  if (!x.montant || !x.date) return null;
+  return vivants("justificatifs").find(j => Math.abs((j.montant || 0) - x.montant) < 0.005 && j.date === x.date
+    && ((x.commercant && j.commercant === x.commercant) || (x.raisonSociale && norm(j.raisonSociale || "") === norm(x.raisonSociale)))) || null;
+}
 /* ---------- Création d'un justificatif (PC ou boîte) ---------- */
 async function creerJustificatif(donnees, piece){
   const j = enregistrer("justificatifs", Object.assign({statut: "a_rapprocher", operations: [], cree: new Date().toISOString()}, donnees));
@@ -4202,6 +4208,10 @@ async function importerJustificatifPc(lu){
   if (lu.genre === "image"){ message("Lecture du ticket « " + lu.nom + " »…"); t = await lireTicket(new Blob([lu.octets], {type: lu.mime})); }
   else { t = Object.assign(extraireTicket(lu.texte), {photo: {mime: "application/pdf", octets: lu.octets}}); if (!/facturette/.test(t.type)) t.type = "facture"; }
   const c = commercantPourTicket(t);
+  // Même pièce déjà enregistrée (même montant, même date, même fournisseur) : on demande avant de l'ajouter
+  const double = justificatifDejaLa({montant: t.montant, date: t.date, commercant: c?.id, raisonSociale: t.raisonSociale});
+  if (double && !(await confirmer("Une pièce identique est déjà enregistrée : " + (double.commercantNom || double.raisonSociale || "fournisseur ?") + ", " + euros(double.montant) + " du " + dateFr(double.date)
+    + ". L'ajouter quand même ?", "Ajouter quand même"))) return;
   const j = await creerJustificatif({type: t.type, date: t.date || aujourdhui(), heure: t.heure, montant: t.montant || 0, raisonSociale: t.raisonSociale, commercantNom: c ? c.nom : nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")),
     commercant: c ? c.id : null, carte4: t.carte4, carte: carteDesChiffres(t.carte4), siret: t.siret, texteOCR: t.texte, origine: "pc", categorie: c?.categorie || "", sousCategorie: c?.sousCategorie || "", lieu: c?.lieu || "", aVerifier: true}, t.photo);
   rapprocherTout();
@@ -5631,6 +5641,10 @@ async function autotest(){
         const nb0 = vivants("commercants").length;
         const jm = await creerJustificatif({type: "ticket", date: "2027-03-10", montant: 12, commercantNom: "Boulangrie Nouvele", origine: "mobile"});
         v("téléphone : fournisseur inconnu laissé provisoire, aucune fiche créée", [vivants("commercants").length - nb0, jm.fournisseurProvisoire], [0, true]);
+      }
+      {
+        const jd = await creerJustificatif({type: "facture", date: "2027-03-11", montant: 980, raisonSociale: "Jean Dupont, architecte essai", origine: "pc"});
+        v("justificatif : la même pièce est repérée", [!!justificatifDejaLa({montant: 980, date: "2027-03-11", raisonSociale: "Jean Dupont, architecte essai"}), !!justificatifDejaLa({montant: 981, date: "2027-03-11", raisonSociale: "Jean Dupont, architecte essai"})], [true, false]);
       }
       v("factures : montants entiers en euros", [f1.montant, f1.type, f2.montant, f2.type], [1070, "facture", 4272, "facture"]);
     }

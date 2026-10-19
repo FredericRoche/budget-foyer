@@ -166,6 +166,10 @@ async function importerJustificatifPc(lu){
   if (lu.genre === "image"){ message("Lecture du ticket « " + lu.nom + " »…"); t = await lireTicket(new Blob([lu.octets], {type: lu.mime})); }
   else { t = Object.assign(extraireTicket(lu.texte), {photo: {mime: "application/pdf", octets: lu.octets}}); if (!/facturette/.test(t.type)) t.type = "facture"; }
   const c = commercantPourTicket(t);
+  // Même pièce déjà enregistrée (même montant, même date, même fournisseur) : on demande avant de l'ajouter
+  const double = justificatifDejaLa({montant: t.montant, date: t.date, commercant: c?.id, raisonSociale: t.raisonSociale});
+  if (double && !(await confirmer("Une pièce identique est déjà enregistrée : " + (double.commercantNom || double.raisonSociale || "fournisseur ?") + ", " + euros(double.montant) + " du " + dateFr(double.date)
+    + ". L'ajouter quand même ?", "Ajouter quand même"))) return;
   const j = await creerJustificatif({type: t.type, date: t.date || aujourdhui(), heure: t.heure, montant: t.montant || 0, raisonSociale: t.raisonSociale, commercantNom: c ? c.nom : nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")),
     commercant: c ? c.id : null, carte4: t.carte4, carte: carteDesChiffres(t.carte4), siret: t.siret, texteOCR: t.texte, origine: "pc", categorie: c?.categorie || "", sousCategorie: c?.sousCategorie || "", lieu: c?.lieu || "", aVerifier: true}, t.photo);
   rapprocherTout();
