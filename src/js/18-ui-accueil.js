@@ -66,11 +66,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
           h("td", null, r.poste || r.categorie, r.aConfirmer ? h("span", {class: "petit discret"}, " (à confirmer)") : null, r.calcule ? h("span", {class: "petit discret"}, " (estimé)") : null),
           h("td", {class: "discret"}, nature(r)), h("td", {class: "num"}, euros(r.prevu, 0)), h("td", {class: "num"}, r.realise ? euros(r.realise, 0) : "—"))}),
         h("div", {class: "tableau"}, h("table", {class: "serre"}, h("tbody", null,
-          res("Revenus récurrents", recurrents), res("Charges budgétées", -d.annuel),
-          res(solde < 0 ? "Déficit courant, financé par l'épargne" : "Excédent courant", solde, "total"),
-          res("soit par mois", solde / 12),
-          d.revenusPonctuels ? res("Revenus ponctuels", d.revenusPonctuels) : null,
-          d.revenusPonctuels ? res("Solde de l'année", solde + d.revenusPonctuels, "total") : null)))),
+          lignesResultat(d, 12).lignes.map(x => res(x.lib, x.v, x.total ? "total" : "")))))),
       h("p", {class: "note"}, "Encaissé à ce jour : " + euros(d.revenusRealises, 0) + " de revenus pour " + euros(d.realise, 0) + " de charges. Produits de l'épargne estimés aux taux des comptes (Réglages). Détail et impression : écran Budget, « Version imprimable »."));
     c.appendChild(carteRev);
   }

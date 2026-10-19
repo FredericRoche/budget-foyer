@@ -143,6 +143,20 @@ function donneesImpressionBudget(budget, an, d1, d2, lieu){
   return {natures, parLieu, parMois, revenus, revenusPrevus: somme(revenus, x => x.prevu), revenusPonctuels: somme(revenus, x => x.ponctuel), revenusRealises: somme(revenus, x => x.realise),
     annuel: somme(natures, x => x.annuel), budget: somme(natures, x => x.budget), realise: somme(natures, x => x.realise)};
 }
+// Résultat en deux temps : courant (récurrents − charges), puis solde de la période avec les revenus ponctuels.
+function lignesResultat(d, nbMois){
+  const recurrents = d.revenusPrevus - d.revenusPonctuels, courant = recurrents - d.budget, soldeFinal = courant + d.revenusPonctuels;
+  const parMois = v => " (" + eurosSigne(Math.round(v / nbMois)) + " par mois)";
+  const l = [
+    {lib: "Revenus récurrents (pensions, produits de l'épargne)", v: recurrents},
+    {lib: "Charges budgétées", v: -d.budget},
+    {lib: (courant < 0 ? "Résultat courant : déficit" : "Résultat courant : excédent") + parMois(courant), v: courant, total: true}];
+  if (d.revenusPonctuels){
+    l.push({lib: "Revenus ponctuels (paie de sortie, restitutions…)", v: d.revenusPonctuels});
+    l.push({lib: soldeFinal < 0 ? "Solde de la période : à financer par l'épargne" : "Solde de la période : excédent, à placer", v: soldeFinal, total: true});
+  } else if (courant < 0) l[2].lib += ", à financer par l'épargne";
+  return {lignes: l, recurrents, courant, soldeFinal};
+}
 function imprimerBudget(budget, an, d1, d2, lieu, periode){
   const d = donneesImpressionBudget(budget, an, d1, d2, lieu);
   const libPeriode = periode === "annee" || (d1 === 1 && d2 === 12) ? "année " + an : periode === "cumul" ? "du 1er janvier au " + dateFr(finDeMois(an + "-" + pad2(d2) + "-01")) : MOIS_LONG[d1 - 1] + " " + an;
@@ -183,12 +197,8 @@ function imprimerBudget(budget, an, d1, d2, lieu, periode){
     z.appendChild(h("table", {class: "imp-budget"}, h("thead", null, h("tr", null, h("th", null, "Revenu"), h("th", null, "Nature"), h("th", {class: "num"}, "Prévu"), h("th", {class: "num"}, "Réalisé"))), tr));
   } else z.appendChild(h("p", {class: "imp-note"}, "Aucun revenu prévu en échéance ni encaissé sur la période."));
   z.appendChild(h("h2", null, "Résultat"));
-  z.appendChild(h("table", {class: "imp-budget imp-resultat"}, h("tbody", null,
-    h("tr", null, h("td", null, "Revenus récurrents (pensions, produits de l'épargne)"), h("td", {class: "num"}, e0(recurrents))),
-    h("tr", null, h("td", null, "Charges budgétées"), h("td", {class: "num"}, "− " + e0(d.budget))),
-    h("tr", {class: "imp-total"}, h("td", null, solde < 0 ? "Déficit courant, à financer par l'épargne" : "Excédent courant"), h("td", {class: "num" + (solde < 0 ? " neg" : "")}, eurosSigne(Math.round(solde)))),
-    d.revenusPonctuels ? h("tr", null, h("td", null, "Revenus ponctuels (paie de sortie, restitutions…)"), h("td", {class: "num"}, "+ " + e0(d.revenusPonctuels))) : null,
-    d.revenusPonctuels ? h("tr", {class: "imp-total"}, h("td", null, "Solde de la période, revenus ponctuels compris"), h("td", {class: "num" + (solde + d.revenusPonctuels < 0 ? " neg" : "")}, eurosSigne(Math.round(solde + d.revenusPonctuels)))) : null)));
+  z.appendChild(h("table", {class: "imp-budget imp-resultat"}, h("tbody", null, lignesResultat(d, nbMois).lignes.map(x =>
+    h("tr", {class: x.total ? "imp-total" : ""}, h("td", null, x.lib), h("td", {class: "num" + (x.v < 0 ? " neg" : "")}, eurosSigne(Math.round(x.v))))))));
   z.appendChild(h("p", {class: "imp-note"}, "Charges : lignes du budget, réalisé à la date d'achat, hors transferts et opérations « Hors budget ». Échéance : mois couverts par la ligne quand elle n'est pas répartie par douzièmes, et jour de prélèvement fixé. "
     + "Revenus : échéances positives de la période (pensions, paie, restitutions), hors cessions de titres et virements depuis l'épargne ; produits de l'épargne estimés aux taux de chaque compte (Réglages) sur les valorisations du jour, "
     + "produits comptés à l'exercice (acquis pendant la période) : intérêts des livrets, virés au compte courant le 15 janvier suivant ; rendement des assurances-vie, laissé sur les contrats mais tenu pour disponible ; produits financiers du placement des cessions (produit des cessions placé au taux des nouveaux placements, net des sommes prélevées sur l'épargne)."));
