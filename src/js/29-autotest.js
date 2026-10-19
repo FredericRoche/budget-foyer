@@ -218,6 +218,7 @@ async function autotest(){
       const sansR = simulerEpargne({depart: "2027-03-31", jours: 30, rendement: false}), avecR = simulerEpargne({depart: "2027-03-31", jours: 30});
       LIVRE.parametres.tauxNouveauxPlacements = 2;
       const nouv = simulerEpargne({depart: "2027-03-31", jours: 30}); LIVRE.parametres.tauxNouveauxPlacements = tn0;
+      v("épargne : part du rendement venant des sommes nouvelles", Math.round(somme(nouv.evenements.filter(e => e.genre === "rendement"), e => e.nouveau)), Math.round(50000 * 0.02 * 21 / 365));
       v("épargne : rendement d'un mois (120 000 € à 3 %, puis 50 000 € nouveaux à 2 % du 10 au 30)", [Math.round(avecR.jours[avecR.jours.length - 1].solde - sansR.jours[sansR.jours.length - 1].solde),
         Math.round(nouv.jours[nouv.jours.length - 1].solde - avecR.jours[avecR.jours.length - 1].solde)], [Math.round(120000 * 0.03 * 30 / 365), Math.round(50000 * 0.02 * 21 / 365)]);
       const tvj = simulerTresorerie({depart: "2027-12-20", jours: 40});

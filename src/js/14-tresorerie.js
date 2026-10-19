@@ -171,14 +171,16 @@ function simulerEpargne(options){
   // Rendement estimé, crédité en fin de mois (au prorata pour le premier mois) : comptes au départ à leur taux, sommes nouvelles au taux des nouveaux placements
   // (intérêts au jour le jour, crédités en fin de mois)
   const baseJour = somme(comptes, x => x.solde * x.taux / 100 / 365), tauxNouveau = tauxNouveauxPlacements() / 100 / 365;
-  const jours = []; let solde = soldeDepart, rendement = 0, couru = 0;
+  const jours = []; let solde = soldeDepart, rendement = 0, couru = 0, couruNouveau = 0;
   for (let d = ajouterJours(o.depart, 1); d <= fin; d = ajouterJours(d, 1)){
     let f = flux.get(d) || 0; solde += f;
     if (o.rendement){
-      couru += baseJour + (solde - soldeDepart - rendement) * tauxNouveau;
+      const n = (solde - soldeDepart - rendement) * tauxNouveau;
+      couru += baseJour + n; couruNouveau += n;
       if (d === finDeMois(d) || d === fin){
-        const r = Math.round(couru * 100) / 100; couru = 0;
-        if (r){ solde += r; f += r; rendement += r; evenements.push({date: d, montant: r, libelle: "Rendement estimé des placements", genre: "rendement"}); }
+        const r = Math.round(couru * 100) / 100, rn = Math.round(couruNouveau * 100) / 100; couru = 0; couruNouveau = 0;
+        // « nouveau » : part due aux sommes nouvelles (cessions placées, moins les financements et prélèvements)
+        if (r){ solde += r; f += r; rendement += r; evenements.push({date: d, montant: r, nouveau: rn, libelle: "Rendement estimé des placements", genre: "rendement"}); }
       }
     }
     jours.push({date: d, flux: f, solde});

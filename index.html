@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-K332j+HEpju2KY7vlhTsEG6WxgMUYbJz24zNU99937g=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-drmWWq5UBXzvX8DWtHhry8TfwneKk0Q+sGMG/vq/Woo=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -339,7 +339,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1031";
+const VERSION_APP = "2026-10-19.1036";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3048,14 +3048,16 @@ function simulerEpargne(options){
   // Rendement estimé, crédité en fin de mois (au prorata pour le premier mois) : comptes au départ à leur taux, sommes nouvelles au taux des nouveaux placements
   // (intérêts au jour le jour, crédités en fin de mois)
   const baseJour = somme(comptes, x => x.solde * x.taux / 100 / 365), tauxNouveau = tauxNouveauxPlacements() / 100 / 365;
-  const jours = []; let solde = soldeDepart, rendement = 0, couru = 0;
+  const jours = []; let solde = soldeDepart, rendement = 0, couru = 0, couruNouveau = 0;
   for (let d = ajouterJours(o.depart, 1); d <= fin; d = ajouterJours(d, 1)){
     let f = flux.get(d) || 0; solde += f;
     if (o.rendement){
-      couru += baseJour + (solde - soldeDepart - rendement) * tauxNouveau;
+      const n = (solde - soldeDepart - rendement) * tauxNouveau;
+      couru += baseJour + n; couruNouveau += n;
       if (d === finDeMois(d) || d === fin){
-        const r = Math.round(couru * 100) / 100; couru = 0;
-        if (r){ solde += r; f += r; rendement += r; evenements.push({date: d, montant: r, libelle: "Rendement estimé des placements", genre: "rendement"}); }
+        const r = Math.round(couru * 100) / 100, rn = Math.round(couruNouveau * 100) / 100; couru = 0; couruNouveau = 0;
+        // « nouveau » : part due aux sommes nouvelles (cessions placées, moins les financements et prélèvements)
+        if (r){ solde += r; f += r; rendement += r; evenements.push({date: d, montant: r, nouveau: rn, libelle: "Rendement estimé des placements", genre: "rendement"}); }
       }
     }
     jours.push({date: d, flux: f, solde});
@@ -4456,9 +4458,16 @@ function donneesImpressionBudget(budget, an, d1, d2, lieu){
   }
   for (const pa of partsPeriode(debut, fin, q => q.nature === "Revenu" && (!lieu || q.lieu === lieu))) poste(cle(pa.categorie, pa.sousCategorie)).realise += pa.montant;
   // Produits de l'épargne : intérêts des livrets virés en janvier, rendement des assurances-vie tenu pour disponible
-  const pe = produitsEpargne(aujourdhui());
-  if (pe.livrets && d1 === 1) Object.assign(poste("Produits de l'épargne|Intérêts des livrets de l'année précédente (virés en janvier)"), {prevu: pe.livrets, calcule: true});
-  if (pe.assurancesVie) Object.assign(poste("Produits de l'épargne|Rendement des assurances-vie (disponible, reste sur les contrats)"), {prevu: Math.round(pe.assurancesVie * (d2 - d1 + 1) / 12), calcule: true});
+  // (à l'exercice : produits acquis pendant la période, quelle que soit la date de leur versement)
+  const pe = produitsEpargne(aujourdhui()), prorata = (d2 - d1 + 1) / 12;
+  if (pe.livrets) Object.assign(poste("Produits de l'épargne|Intérêts des livrets de l'année (virés le 15 janvier suivant)"), {prevu: Math.round(pe.livrets * prorata), calcule: true});
+  if (pe.assurancesVie) Object.assign(poste("Produits de l'épargne|Rendement des assurances-vie (disponible, reste sur les contrats)"), {prevu: Math.round(pe.assurancesVie * prorata), calcule: true});
+  if (fin > aujourdhui()){
+    const ep = simulerEpargne({jours: ecartJours(aujourdhui(), fin)});
+    const nouveau = Math.round(somme(ep.evenements.filter(e => e.genre === "rendement" && e.date >= debut && e.date <= fin), e => e.nouveau || 0));
+    if (Math.abs(nouveau) > 0.5) Object.assign(poste(nouveau > 0 ? "Produits de l'épargne|Rendement des sommes nouvelles (cessions placées, net des prélèvements)"
+      : "Produits de l'épargne|Rendement perdu sur l'épargne prélevée (projets, déficit), net des cessions"), {prevu: nouveau, calcule: true});
+  }
   const revenus = [...rev.values()].filter(x => Math.abs(x.prevu) > 0.5 || Math.abs(x.realise) > 0.5).sort((a, b) => b.prevu - a.prevu || b.realise - a.realise);
   return {natures, parLieu, parMois, revenus, revenusPrevus: somme(revenus, x => x.prevu), revenusPonctuels: somme(revenus, x => x.ponctuel), revenusRealises: somme(revenus, x => x.realise),
     annuel: somme(natures, x => x.annuel), budget: somme(natures, x => x.budget), realise: somme(natures, x => x.realise)};
@@ -4511,7 +4520,7 @@ function imprimerBudget(budget, an, d1, d2, lieu, periode){
     d.revenusPonctuels ? h("tr", {class: "imp-total"}, h("td", null, "Solde de la période, revenus ponctuels compris"), h("td", {class: "num" + (solde + d.revenusPonctuels < 0 ? " neg" : "")}, eurosSigne(Math.round(solde + d.revenusPonctuels)))) : null)));
   z.appendChild(h("p", {class: "imp-note"}, "Charges : lignes du budget, réalisé à la date d'achat, hors transferts et opérations « Hors budget ». Échéance : mois couverts par la ligne quand elle n'est pas répartie par douzièmes, et jour de prélèvement fixé. "
     + "Revenus : échéances positives de la période (pensions, paie, restitutions), hors cessions de titres et virements depuis l'épargne ; produits de l'épargne estimés aux taux de chaque compte (Réglages) sur les valorisations du jour, "
-    + "intérêts des livrets virés au compte courant le 15 janvier, rendement des assurances-vie laissé sur les contrats mais tenu pour disponible."));
+    + "produits comptés à l'exercice (acquis pendant la période) : intérêts des livrets, virés au compte courant le 15 janvier suivant ; rendement des assurances-vie, laissé sur les contrats mais tenu pour disponible ; rendement des sommes nouvelles (produit des cessions placé au taux des nouveaux placements, net des sommes prélevées sur l'épargne)."));
   const annexe = h("section", {class: "imp-annexe"}, h("h2", null, "Budget mois par mois, par catégorie" + (lieu ? " · " + lieu : "")));
   const tm = h("tbody");
   for (const x of d.parMois) tm.appendChild(h("tr", null, h("td", null, x.categorie), x.mois.map(v => h("td", {class: "num"}, Math.abs(v) < 0.5 ? "" : e0(v))), h("td", {class: "num fort"}, e0(x.total))));
@@ -5556,6 +5565,7 @@ async function autotest(){
       const sansR = simulerEpargne({depart: "2027-03-31", jours: 30, rendement: false}), avecR = simulerEpargne({depart: "2027-03-31", jours: 30});
       LIVRE.parametres.tauxNouveauxPlacements = 2;
       const nouv = simulerEpargne({depart: "2027-03-31", jours: 30}); LIVRE.parametres.tauxNouveauxPlacements = tn0;
+      v("épargne : part du rendement venant des sommes nouvelles", Math.round(somme(nouv.evenements.filter(e => e.genre === "rendement"), e => e.nouveau)), Math.round(50000 * 0.02 * 21 / 365));
       v("épargne : rendement d'un mois (120 000 € à 3 %, puis 50 000 € nouveaux à 2 % du 10 au 30)", [Math.round(avecR.jours[avecR.jours.length - 1].solde - sansR.jours[sansR.jours.length - 1].solde),
         Math.round(nouv.jours[nouv.jours.length - 1].solde - avecR.jours[avecR.jours.length - 1].solde)], [Math.round(120000 * 0.03 * 30 / 365), Math.round(50000 * 0.02 * 21 / 365)]);
       const tvj = simulerTresorerie({depart: "2027-12-20", jours: 40});
