@@ -133,7 +133,11 @@ function imprimerSynthese(budget, an){
   // Charges par catégorie
   const cats = new Map();
   for (const n of d.natures) for (const ca of n.categories) cats.set(ca.categorie, (cats.get(ca.categorie) || 0) + ca.annuel);
+  // Les catégories de moins de 1 % des charges sont regroupées : une synthèse ne détaille pas les petits postes
+  const seuil = 0.01 * (d.budget || 0); let petits = 0;
+  for (const [cat, v] of [...cats]) if (Math.abs(v) < seuil || cat === "Divers"){ petits += v; cats.delete(cat); }
   const lc = [...cats].filter(x => Math.abs(x[1]) > 0.5).sort((a, b) => b[1] - a[1]);
+  if (Math.abs(petits) > 0.5) lc.push(["Divers et petites dépenses", petits]);
   z.appendChild(h("h2", null, "Charges par catégorie"));
   z.appendChild(h("table", {class: "imp-budget"}, h("thead", null, h("tr", null, h("th", null, "Catégorie"), h("th", {class: "num"}, "Budget " + an), h("th", {class: "num"}, "Part"))),
     h("tbody", null, lc.map(([cat, v]) => h("tr", null, h("td", null, cat), h("td", {class: "num"}, e0(v)), h("td", {class: "num discret"}, Math.round(v / (d.budget || 1) * 100) + " %"))),

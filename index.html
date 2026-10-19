@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-OAGY5prHjVpIEE/zs6/EQ90/67/MdVC1ZOgvp+FXhB8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3lraYQYuv16JofeYzvGU/0Hk+cKKvmhihX8g58jORWI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -342,7 +342,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.1154";
+const VERSION_APP = "2026-10-19.1309";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3679,7 +3679,11 @@ function imprimerSynthese(budget, an){
   // Charges par catégorie
   const cats = new Map();
   for (const n of d.natures) for (const ca of n.categories) cats.set(ca.categorie, (cats.get(ca.categorie) || 0) + ca.annuel);
+  // Les catégories de moins de 1 % des charges sont regroupées : une synthèse ne détaille pas les petits postes
+  const seuil = 0.01 * (d.budget || 0); let petits = 0;
+  for (const [cat, v] of [...cats]) if (Math.abs(v) < seuil || cat === "Divers"){ petits += v; cats.delete(cat); }
   const lc = [...cats].filter(x => Math.abs(x[1]) > 0.5).sort((a, b) => b[1] - a[1]);
+  if (Math.abs(petits) > 0.5) lc.push(["Divers et petites dépenses", petits]);
   z.appendChild(h("h2", null, "Charges par catégorie"));
   z.appendChild(h("table", {class: "imp-budget"}, h("thead", null, h("tr", null, h("th", null, "Catégorie"), h("th", {class: "num"}, "Budget " + an), h("th", {class: "num"}, "Part"))),
     h("tbody", null, lc.map(([cat, v]) => h("tr", null, h("td", null, cat), h("td", {class: "num"}, e0(v)), h("td", {class: "num discret"}, Math.round(v / (d.budget || 1) * 100) + " %"))),
