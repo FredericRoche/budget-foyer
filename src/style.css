@@ -158,6 +158,10 @@ td.choix:hover{background:var(--ivoire); outline:1px dotted var(--sauge)}
 .candidat{border:1px solid var(--filet-clair); background:#fff; padding:.55rem .7rem; margin-bottom:.5rem; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.2rem .8rem; align-items:center}
 .candidat.meilleur{border:1px solid var(--vert-empire); border-left:4px solid var(--or-bruni)}
 .score{font-variant-numeric:tabular-nums; font-weight:600; color:var(--vert-empire)}
+.liste-fournisseurs{display:flex; flex-direction:column; margin-top:.25rem}
+.liste-fournisseurs button{display:flex; justify-content:space-between; gap:.6rem; text-align:left; min-height:44px; padding:.45rem .7rem; border:1px solid var(--filet-clair); border-top:none; background:#fff; font-size:1rem}
+.liste-fournisseurs button:first-child{border-top:1px solid var(--filet-clair)}
+.liste-fournisseurs small{color:var(--sauge); font-size:.8rem; align-self:center}
 .suggestions{display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.3rem}
 .suggestions button{font-size:.82rem; border:1px dashed var(--sauge); padding:.05rem .45rem; color:var(--vert-profond); background:#fff}
 .texte-brut{font-family:"Courier New",monospace; font-size:.75rem; white-space:pre-wrap; background:#fff; border:1px solid var(--filet-clair); padding:.4rem; max-height:14rem; overflow:auto}

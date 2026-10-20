@@ -142,6 +142,7 @@ async function autotest(){
           supprimer("comptes", ck.id);
         }
         v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
+        v("téléphone : fournisseur retrouvé par un morceau du nom ou de l'alias", rechercherFournisseurs(["savour"], [{nom: "La Savoureine Eurre", alias: []}, {nom: "Autre", alias: ["SAVOUREINE SARL"]}, {nom: "Sans rapport", alias: []}]).map(f => f.nom), ["La Savoureine Eurre", "Autre"]);
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

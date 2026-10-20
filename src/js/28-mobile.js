@@ -115,6 +115,16 @@ function photographier(corps, saisie){
   document.body.appendChild(entree); entree.click();
 }
 
+/* Fournisseurs dont le nom ou un alias contient tous les mots tapés (ordre libre), les noms commençant par le premier mot d'abord. */
+function rechercherFournisseurs(mots, fiches){
+  const r = [];
+  for (const f of fiches){
+    const textes = [f.nom, ...(f.alias || [])].map(x => norm(x || "").toLowerCase());
+    if (!textes.some(x => mots.every(m => x.includes(m)))) continue;
+    r.push({f, debut: textes[0].split(/[^a-z0-9]+/).some(w => w.startsWith(mots[0])) ? 0 : 1});
+  }
+  return r.sort((a, b) => a.debut - b.debut || a.f.nom.localeCompare(b.f.nom, "fr")).slice(0, 8).map(x => x.f);
+}
 function commercantsExtrait(){ return (MOBILE.extrait?.commercants || []).map(c => Object.assign({}, c, {alias: c.alias || []})); }
 async function formulaireMobile(corps, saisie, t){
   vider(corps); scrollTo(0, 0);
@@ -130,8 +140,19 @@ async function formulaireMobile(corps, saisie, t){
     || cartes.find(x => { const d = String(x.carte).replace(/\D/g, ""); return d.length >= 3 && chiffres.endsWith(d); })) : null;
   const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || carteLue?.carte || dernier.carte || cartes[0]?.carte || "");
   const nomPropose = fiche ? fiche.nom : t ? nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")) : "";
-  const cm = h("input", {type: "text", value: nomPropose, list: "liste-commercants", autocomplete: "off"});
-  const liste = h("datalist", {id: "liste-commercants"}, commercantsExtrait().slice(0, 400).map(x => h("option", {value: x.nom})));
+  const cm = h("input", {type: "text", value: nomPropose, autocomplete: "off", autocorrect: "off", spellcheck: "false", placeholder: "tapez une partie du nom"});
+  const liste = h("div", {class: "liste-fournisseurs"});
+  const majListe = () => {
+    vider(liste);
+    const mots = norm(cm.value).toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 2);
+    if (!mots.length) return;
+    const trouves = rechercherFournisseurs(mots, commercantsExtrait());
+    if (trouves.length === 1 && norm(trouves[0].nom).toLowerCase() === norm(cm.value).toLowerCase()) return;
+    for (const f of trouves) liste.appendChild(h("button", {type: "button", onclick: () => { cm.value = f.nom; vider(liste); majSugg(); }},
+      h("span", null, f.nom), f.categorie ? h("small", null, f.sousCategorie || f.categorie) : null));
+    if (!trouves.length) liste.appendChild(h("div", {class: "legende-tel"}, "Aucun fournisseur connu : ce nom sera proposé comme nouveau, à confirmer sur le PC."));
+  };
+  cm.addEventListener("input", majListe);
   const nat = h("input", {type: "text", placeholder: "ce qui a été acheté, pour quoi"});
   const sugg = h("div", {class: "suggestions"});
   const majSugg = () => {
