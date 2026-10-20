@@ -5,7 +5,8 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   const nbValider = aRapprocher.filter(j => j.aValider).length;
   // File de travail : saisies à valider, sinon justificatifs ayant au moins une opération candidate à trancher
   const attente = nbValider ? aRapprocher.filter(j => j.aValider) : aRapprocher.filter(j => !j.reporte && candidats([j]).length);
-  let j = etat.choisi ? obtenir("justificatifs", etat.choisi) : attente[0];
+  // Fiche refermée : on ne la rouvre pas d'office ; les autres restent proposées
+  let j = etat.choisi ? obtenir("justificatifs", etat.choisi) : attente.find(x => x.id !== etat.ferme);
   c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " saisie(s) du téléphone à valider · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
@@ -29,7 +30,8 @@ function ecranRapprochement(j, etat, attente){
       j.statut === "rapproche" ? h("span", {class: "pos"}, " · rapproché") : null, j.aValider ? h("span", {class: "neg"}, " · à valider : vérifiez et corrigez, puis « Valider la saisie »") : null),
     idx >= 0 ? h("div", {class: "outils"}, h("button", {class: "discret", disabled: idx <= 0, onclick: () => { etat.choisi = attente[idx - 1].id; rafraichirEcran(); }}, "‹ Précédent"),
       h("span", {class: "discret"}, (idx + 1) + " sur " + attente.length),
-      h("button", {class: "discret", disabled: idx >= attente.length - 1, onclick: () => { etat.choisi = attente[idx + 1].id; rafraichirEcran(); }}, "Suivant ›")) : null));
+      h("button", {class: "discret", disabled: idx >= attente.length - 1, onclick: () => { etat.choisi = attente[idx + 1].id; rafraichirEcran(); }}, "Suivant ›")) : null,
+    h("button", {class: "discret", title: "Refermer la fiche sans rien enregistrer", onclick: () => { etat.choisi = null; etat.ferme = j.id; rafraichirEcran(); }}, "Fermer ✕")));
   const grille = h("div", {class: "trois rappro"});
   // 1. Pièces
   const pieces = h("section", null, h("h2", null, groupe.length > 1 ? "Tickets" : "Pièce"));
