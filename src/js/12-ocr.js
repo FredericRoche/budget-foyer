@@ -93,7 +93,7 @@ function extraireTicket(texte){
     if (s && !res.siret) res.siret = s[1].replace(/\s/g, "");
   }
   /* Raison sociale et enseigne : premières lignes significatives */
-  const ignorer = /BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
+  const ignorer = /BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
   const tete = lignes.slice(0, 8).filter((l, i) => /[A-Za-z]{3}/.test(l) && !ignorer.test(N[lignes.indexOf(l)]) && !estBanqueTerminal(l) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[lignes.indexOf(l)]) && !montantsDe(l).length && l.length <= 40);
   const forme = lignes.find(l => /\b(SARL|SAS|SASU|EURL|SA|SNC|SCP|SELARL)\b/i.test(l));
   res.enseigne = tete[0] || "";
