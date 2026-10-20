@@ -99,6 +99,12 @@ async function autotest(){
     let refuse = false; try { await ouvrirEnveloppe("mauvais mot de passe", env); } catch (e){ refuse = true; }
     vrai("mauvais mot de passe refusé", refuse);
     vrai("le fichier ne contient pas le texte en clair", !dec.decode(octets).includes("essai"));
+    {
+      // Changement de mot de passe : seule l'enveloppe change, la clé de données (gardée par les appareils « se souvenir ») reste valable
+      const env2 = await creerEnveloppe("nouvelle phrase de passe d'essai", cle);
+      const oct2 = await chiffrerLivre({format: "budget-foyer", essai: 43}, cle, env2);
+      v("mot de passe changé : nouvelle enveloppe lue dans l'en-tête, même clé de données", [JSON.stringify(lireEnTete(oct2).enveloppe) === JSON.stringify(env2), (await dechiffrerLivre(oct2, cle2)).essai], [true, 43]);
+    }
     const paire = await nouvellePaireBoite(), autre = await nouvellePaireBoite();
     const depot = await chiffrerPourBoite({montant: "12,30"}, paire.publique);
     v("boîte : le PC lit la saisie", (await dechiffrerBoite(depot, paire.privee)).montant, "12,30");

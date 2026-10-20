@@ -108,6 +108,7 @@ async function synchroniser(octetsPrets){
         const {livre, changements} = fusionnerLivres(LIVRE, livreDistant);
         LIVRE = completerLivre(livre);
         SESSION.etiquette = distant.etiquette;
+        try { const env = lireEnTete(distant.octets).enveloppe; if (env) SESSION.enveloppe = env; } catch (e) {}
         if (changements) rafraichirEcran();
         // Le local avait-il des enregistrements plus récents que le distant ?
         aEcrire = aEcrire && JSON.stringify(livre) !== JSON.stringify(livreDistant);

@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-nG2eriymFdQvwGKiPLswHfFAdZ1tZEO4P3cUoo/iFj8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-BcyGdfWRZOzFchtjXqLowlZx6swG7NAkY3jpE1So7lw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1500";
+const VERSION_APP = "2026-10-20.1703";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1378,6 +1378,7 @@ async function synchroniser(octetsPrets){
         const {livre, changements} = fusionnerLivres(LIVRE, livreDistant);
         LIVRE = completerLivre(livre);
         SESSION.etiquette = distant.etiquette;
+        try { const env = lireEnTete(distant.octets).enveloppe; if (env) SESSION.enveloppe = env; } catch (e) {}
         if (changements) rafraichirEcran();
         // Le local avait-il des enregistrements plus récents que le distant ?
         aEcrire = aEcrire && JSON.stringify(livre) !== JSON.stringify(livreDistant);
@@ -5245,7 +5246,7 @@ function reglagesSecurite(c){
       h("button", {class: "primaire mini", onclick: async () => {
         if (n1.value !== n2.value){ message("Les deux mots de passe diffèrent.", true); return; }
         if (forceMotDePasse(n1.value).note < 2){ message("Nouveau mot de passe trop court.", true); return; }
-        try { await changerMotDePasse(a.value, n1.value); a.value = n1.value = n2.value = ""; message("Mot de passe changé. Les autres appareils le demanderont à la prochaine ouverture."); } catch (e){ message(e.message, true); }
+        try { await changerMotDePasse(a.value, n1.value); a.value = n1.value = n2.value = ""; message("Mot de passe changé. Les appareils réglés sur « Se souvenir » restent ouverts ; les autres demanderont le nouveau mot de passe."); } catch (e){ message(e.message, true); }
       }}, "Changer"), h("p", {class: "note"}, "Seule l'enveloppe de la clé change : le livre n'est pas rechiffré, et les appareils qui se souviennent restent ouverts.")),
     h("section", {class: "carte"}, h("h2", null, "Verrouillage"), champ("Verrouiller après (minutes d'inactivité)", minutes),
       h("button", {class: "mini primaire", onclick: () => { modifierParametres({verrouMinutes: Math.max(2, +minutes.value || 15)}); message("Enregistré."); }}, "Enregistrer"),
@@ -5840,6 +5841,12 @@ async function autotest(){
     let refuse = false; try { await ouvrirEnveloppe("mauvais mot de passe", env); } catch (e){ refuse = true; }
     vrai("mauvais mot de passe refusé", refuse);
     vrai("le fichier ne contient pas le texte en clair", !dec.decode(octets).includes("essai"));
+    {
+      // Changement de mot de passe : seule l'enveloppe change, la clé de données (gardée par les appareils « se souvenir ») reste valable
+      const env2 = await creerEnveloppe("nouvelle phrase de passe d'essai", cle);
+      const oct2 = await chiffrerLivre({format: "budget-foyer", essai: 43}, cle, env2);
+      v("mot de passe changé : nouvelle enveloppe lue dans l'en-tête, même clé de données", [JSON.stringify(lireEnTete(oct2).enveloppe) === JSON.stringify(env2), (await dechiffrerLivre(oct2, cle2)).essai], [true, 43]);
+    }
     const paire = await nouvellePaireBoite(), autre = await nouvellePaireBoite();
     const depot = await chiffrerPourBoite({montant: "12,30"}, paire.publique);
     v("boîte : le PC lit la saisie", (await dechiffrerBoite(depot, paire.privee)).montant, "12,30");

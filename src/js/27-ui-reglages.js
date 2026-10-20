@@ -179,7 +179,7 @@ function reglagesSecurite(c){
       h("button", {class: "primaire mini", onclick: async () => {
         if (n1.value !== n2.value){ message("Les deux mots de passe diffèrent.", true); return; }
         if (forceMotDePasse(n1.value).note < 2){ message("Nouveau mot de passe trop court.", true); return; }
-        try { await changerMotDePasse(a.value, n1.value); a.value = n1.value = n2.value = ""; message("Mot de passe changé. Les autres appareils le demanderont à la prochaine ouverture."); } catch (e){ message(e.message, true); }
+        try { await changerMotDePasse(a.value, n1.value); a.value = n1.value = n2.value = ""; message("Mot de passe changé. Les appareils réglés sur « Se souvenir » restent ouverts ; les autres demanderont le nouveau mot de passe."); } catch (e){ message(e.message, true); }
       }}, "Changer"), h("p", {class: "note"}, "Seule l'enveloppe de la clé change : le livre n'est pas rechiffré, et les appareils qui se souviennent restent ouverts.")),
     h("section", {class: "carte"}, h("h2", null, "Verrouillage"), champ("Verrouiller après (minutes d'inactivité)", minutes),
       h("button", {class: "mini primaire", onclick: () => { modifierParametres({verrouMinutes: Math.max(2, +minutes.value || 15)}); message("Enregistré."); }}, "Enregistrer"),
