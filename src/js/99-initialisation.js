@@ -6,6 +6,7 @@ async function initialiser(){
   if (/[?&]demo\b/.test(location.search)) return demarrerDemonstration();
   if (await traiterAppairage()) return demarrerSaisieMobile();
   if ((await reglage("mode", "")) === "saisie" && await configMobile()) return demarrerSaisieMobile();
+  if (ecranAccueilIos()) return ecranAppairageColle();
   addEventListener("hashchange", () => { const n = location.hash.slice(1); if (SESSION.etat === "ouvert" && ECRANS[n] && n !== ECRAN_COURANT) aller(n); });
   addEventListener("beforeunload", e => { if (LIVRE_MODIFIE){ enregistrerMaintenant().catch(() => {}); e.preventDefault(); } });
   await afficherVerrou();

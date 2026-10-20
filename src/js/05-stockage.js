@@ -139,7 +139,7 @@ const adaptateurGraph = {
     if (!this.compte) this.compte = this.msal.getAllAccounts()[0] || null;
   },
   connecte(){ return !!this.compte; },
-  async connecter(){ await this.msal.loginRedirect({scopes: PORTEES_GRAPH, prompt: "select_account"}); },
+  async connecter(){ await this.msal.loginRedirect(this.compte ? {scopes: PORTEES_GRAPH, loginHint: this.compte.username} : {scopes: PORTEES_GRAPH, prompt: "select_account"}); },
   async deconnecter(){ if (this.compte) await this.msal.logoutRedirect({account: this.compte}); },
   async jeton(){
     if (!this.compte) throw new Error("Pas de connexion à OneDrive.");

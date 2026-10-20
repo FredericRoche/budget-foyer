@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-0RKP2d7vb61IjZE1iL5dDCMRKk8nQ8xL1fwybpElJkM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-zaYHZGxTIsgut4W4f7xfeaC8fOC/xmJ/auoTSYMbSus=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -344,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1013";
+const VERSION_APP = "2026-10-20.1020";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1175,7 +1175,7 @@ const adaptateurGraph = {
     if (!this.compte) this.compte = this.msal.getAllAccounts()[0] || null;
   },
   connecte(){ return !!this.compte; },
-  async connecter(){ await this.msal.loginRedirect({scopes: PORTEES_GRAPH, prompt: "select_account"}); },
+  async connecter(){ await this.msal.loginRedirect(this.compte ? {scopes: PORTEES_GRAPH, loginHint: this.compte.username} : {scopes: PORTEES_GRAPH, prompt: "select_account"}); },
   async deconnecter(){ if (this.compte) await this.msal.logoutRedirect({account: this.compte}); },
   async jeton(){
     if (!this.compte) throw new Error("Pas de connexion à OneDrive.");
@@ -5381,8 +5381,8 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
 const MOBILE = {config: null, extrait: null, saisie: null, envoiEnCours: false};
 
 async function configMobile(){ if (!MOBILE.config) MOBILE.config = await reglage("mobile_config", null); return MOBILE.config; }
-async function traiterAppairage(){
-  const m = location.hash.match(/#appairage=([A-Za-z0-9_-]+)/);
+async function traiterAppairage(texte){
+  const m = (texte || location.hash).match(/#appairage=([A-Za-z0-9_-]+)/);
   if (!m) return false;
   try {
     const charge = JSON.parse(dec.decode(depuisB64url(m[1])));
@@ -5393,6 +5393,21 @@ async function traiterAppairage(){
     history.replaceState(null, "", location.pathname);
     return true;
   } catch (e){ alert("Lien d'appairage illisible : " + e.message); return false; }
+}
+function lienAppairageMobile(){ return location.origin + location.pathname + "#appairage=" + versB64url(enc.encode(JSON.stringify(MOBILE.config))); }
+const ecranAccueilIos = () => navigator.standalone === true;
+/* Icône de l'écran d'accueil sans appairage : on colle le lien copié depuis Safari. */
+function ecranAppairageColle(){
+  $("verrou").hidden = true; $("appli").hidden = true; $("nav-basse").hidden = true;
+  const z = vider($("saisie")); z.hidden = false;
+  const champ = h("textarea", {rows: 3, placeholder: "Touchez longuement ici, puis « Coller »", style: {width: "100%"}});
+  z.append(h("div", {class: "barre-tel"}, h("span", null, "Budget du foyer"), h("span", null, "Appairage")),
+    h("div", {class: "corps-tel"}, h("p", null, "Collez le lien d'appairage copié dans Safari (bouton « Copier le lien d'appairage »)."), champ,
+      h("button", {class: "primaire gros", onclick: async () => {
+        if (await traiterAppairage(champ.value.trim())) demarrerSaisieMobile();
+        else message("Lien non reconnu : recopiez-le depuis Safari.", true);
+      }}, "Appairer cette icône"),
+      h("p", {class: "legende-tel"}, "Le lien ne contient aucun mot de passe : seulement la clé publique du foyer et celle de la liste des fournisseurs.")));
 }
 async function basculerSaisieMobile(){
   if (!(await configMobile())){ message("Ce téléphone n'est pas appairé : ouvrez le lien (ou le QR code) affiché par le PC, Réglages › Téléphones.", true); return; }
@@ -5451,7 +5466,12 @@ async function accueilMobile(corps){
   const ul = h("ul", {class: "recentes"});
   for (const x of (await historiqueMobile()).slice(0, 12)) ul.appendChild(h("li", null, h("span", null, dateCourte(x.date) + " · " + x.commercant), h("span", {class: "num"}, euros(x.montant) + (x.envoye ? " ✓" : " ⏳"))));
   if (!ul.children.length) ul.appendChild(h("li", null, h("span", {class: "discret"}, "Aucune pour l'instant.")));
-  corps.append(ul, h("p", {class: "legende-tel", style: {marginTop: ".6rem"}}, "✓ déposée dans OneDrive · ⏳ en attente de réseau, partira seule. Ce téléphone ne peut pas relire les comptes."));
+  corps.append(ul, h("p", {class: "legende-tel", style: {marginTop: ".6rem"}}, "✓ déposée dans OneDrive · ⏳ en attente d'envoi, partira seule. Ce téléphone ne peut pas relire les comptes."));
+  if (!DEMO && !ecranAccueilIos() && /iPhone|iPad/.test(navigator.userAgent)) corps.append(h("div", {class: "bandeau calme", style: {marginTop: "1rem"}},
+    h("strong", null, "Installer sur l'écran d'accueil"), h("ol", {style: {paddingLeft: "1.2rem", margin: ".4rem 0"}},
+      h("li", null, "Touchez « Copier le lien d'appairage »."), h("li", null, "Partager › « Sur l'écran d'accueil » › Ajouter."),
+      h("li", null, "Ouvrez l'icône, collez le lien, puis connectez-vous une fois à Microsoft.")),
+    h("button", {class: "mini", onclick: () => navigator.clipboard.writeText(lienAppairageMobile()).then(() => message("Lien copié.")).catch(e => message(e.message, true))}, "Copier le lien d'appairage")));
 }
 function nouvelleSaisieMobile(){ return {id: "s-" + idAleatoire(8), creeLe: Date.now(), auteur: nomAppareil() || "téléphone", tickets: [], categorie: "", sousCategorie: "", lieu: "", carte: ""}; }
 
@@ -5564,7 +5584,6 @@ async function envoyerFile(){
       const paquet = await idbLire("file", k);
       const id = String(k).slice(6);
       const nom = "boite/" + new Date().toISOString().replace(/[:.]/g, "-") + "-" + appareil() + "-" + id + ".chiffre";
-      await adaptateurGraph.assurerDossier("boite");
       await adaptateurGraph.ecrireNouveau(nom, paquet);
       await idbSuppr("file", k);
       const x = hist.find(y => y.id === id); if (x) x.envoye = true;
@@ -5945,6 +5964,7 @@ async function initialiser(){
   if (/[?&]demo\b/.test(location.search)) return demarrerDemonstration();
   if (await traiterAppairage()) return demarrerSaisieMobile();
   if ((await reglage("mode", "")) === "saisie" && await configMobile()) return demarrerSaisieMobile();
+  if (ecranAccueilIos()) return ecranAppairageColle();
   addEventListener("hashchange", () => { const n = location.hash.slice(1); if (SESSION.etat === "ouvert" && ECRANS[n] && n !== ECRAN_COURANT) aller(n); });
   addEventListener("beforeunload", e => { if (LIVRE_MODIFIE){ enregistrerMaintenant().catch(() => {}); e.preventDefault(); } });
   await afficherVerrou();

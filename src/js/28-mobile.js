@@ -6,8 +6,8 @@
 const MOBILE = {config: null, extrait: null, saisie: null, envoiEnCours: false};
 
 async function configMobile(){ if (!MOBILE.config) MOBILE.config = await reglage("mobile_config", null); return MOBILE.config; }
-async function traiterAppairage(){
-  const m = location.hash.match(/#appairage=([A-Za-z0-9_-]+)/);
+async function traiterAppairage(texte){
+  const m = (texte || location.hash).match(/#appairage=([A-Za-z0-9_-]+)/);
   if (!m) return false;
   try {
     const charge = JSON.parse(dec.decode(depuisB64url(m[1])));
@@ -18,6 +18,21 @@ async function traiterAppairage(){
     history.replaceState(null, "", location.pathname);
     return true;
   } catch (e){ alert("Lien d'appairage illisible : " + e.message); return false; }
+}
+function lienAppairageMobile(){ return location.origin + location.pathname + "#appairage=" + versB64url(enc.encode(JSON.stringify(MOBILE.config))); }
+const ecranAccueilIos = () => navigator.standalone === true;
+/* Icône de l'écran d'accueil sans appairage : on colle le lien copié depuis Safari. */
+function ecranAppairageColle(){
+  $("verrou").hidden = true; $("appli").hidden = true; $("nav-basse").hidden = true;
+  const z = vider($("saisie")); z.hidden = false;
+  const champ = h("textarea", {rows: 3, placeholder: "Touchez longuement ici, puis « Coller »", style: {width: "100%"}});
+  z.append(h("div", {class: "barre-tel"}, h("span", null, "Budget du foyer"), h("span", null, "Appairage")),
+    h("div", {class: "corps-tel"}, h("p", null, "Collez le lien d'appairage copié dans Safari (bouton « Copier le lien d'appairage »)."), champ,
+      h("button", {class: "primaire gros", onclick: async () => {
+        if (await traiterAppairage(champ.value.trim())) demarrerSaisieMobile();
+        else message("Lien non reconnu : recopiez-le depuis Safari.", true);
+      }}, "Appairer cette icône"),
+      h("p", {class: "legende-tel"}, "Le lien ne contient aucun mot de passe : seulement la clé publique du foyer et celle de la liste des fournisseurs.")));
 }
 async function basculerSaisieMobile(){
   if (!(await configMobile())){ message("Ce téléphone n'est pas appairé : ouvrez le lien (ou le QR code) affiché par le PC, Réglages › Téléphones.", true); return; }
@@ -76,7 +91,12 @@ async function accueilMobile(corps){
   const ul = h("ul", {class: "recentes"});
   for (const x of (await historiqueMobile()).slice(0, 12)) ul.appendChild(h("li", null, h("span", null, dateCourte(x.date) + " · " + x.commercant), h("span", {class: "num"}, euros(x.montant) + (x.envoye ? " ✓" : " ⏳"))));
   if (!ul.children.length) ul.appendChild(h("li", null, h("span", {class: "discret"}, "Aucune pour l'instant.")));
-  corps.append(ul, h("p", {class: "legende-tel", style: {marginTop: ".6rem"}}, "✓ déposée dans OneDrive · ⏳ en attente de réseau, partira seule. Ce téléphone ne peut pas relire les comptes."));
+  corps.append(ul, h("p", {class: "legende-tel", style: {marginTop: ".6rem"}}, "✓ déposée dans OneDrive · ⏳ en attente d'envoi, partira seule. Ce téléphone ne peut pas relire les comptes."));
+  if (!DEMO && !ecranAccueilIos() && /iPhone|iPad/.test(navigator.userAgent)) corps.append(h("div", {class: "bandeau calme", style: {marginTop: "1rem"}},
+    h("strong", null, "Installer sur l'écran d'accueil"), h("ol", {style: {paddingLeft: "1.2rem", margin: ".4rem 0"}},
+      h("li", null, "Touchez « Copier le lien d'appairage »."), h("li", null, "Partager › « Sur l'écran d'accueil » › Ajouter."),
+      h("li", null, "Ouvrez l'icône, collez le lien, puis connectez-vous une fois à Microsoft.")),
+    h("button", {class: "mini", onclick: () => navigator.clipboard.writeText(lienAppairageMobile()).then(() => message("Lien copié.")).catch(e => message(e.message, true))}, "Copier le lien d'appairage")));
 }
 function nouvelleSaisieMobile(){ return {id: "s-" + idAleatoire(8), creeLe: Date.now(), auteur: nomAppareil() || "téléphone", tickets: [], categorie: "", sousCategorie: "", lieu: "", carte: ""}; }
 
@@ -189,7 +209,6 @@ async function envoyerFile(){
       const paquet = await idbLire("file", k);
       const id = String(k).slice(6);
       const nom = "boite/" + new Date().toISOString().replace(/[:.]/g, "-") + "-" + appareil() + "-" + id + ".chiffre";
-      await adaptateurGraph.assurerDossier("boite");
       await adaptateurGraph.ecrireNouveau(nom, paquet);
       await idbSuppr("file", k);
       const x = hist.find(y => y.id === id); if (x) x.envoye = true;
