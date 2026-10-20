@@ -116,7 +116,7 @@ function ecranRapprochement(j, etat, attente){
       if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s) d'office." : "."));
         // Saisie suivante à valider, sinon justificatif suivant
         const suivant = attente.find(x => x.aValider && !groupe.includes(x)) || attente[idx + 1]; etat.choisi = suivant ? suivant.id : null;
-      } else message("Saisie enregistrée."); rafraichirEcran(); }}, j.aValider ? "Valider la saisie" : "Enregistrer la saisie"),
+      } else { message("Saisie enregistrée."); etat.choisi = null; } rafraichirEcran(); }}, j.aValider ? "Valider la saisie" : "Enregistrer la saisie"),
     h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer ce justificatif ?", "Supprimer", true)){ for (const x of groupe){ delier(x); supprimer("justificatifs", x.id); } etat.choisi = null; rafraichirEcran(); } }}, "Supprimer")));
   if (j.texteOCR) saisie.appendChild(h("details", {style: {marginTop: ".5rem"}}, h("summary", {class: "petit"}, "Texte lu sur la pièce"), h("div", {class: "texte-brut"}, j.texteOCR)));
   grille.appendChild(saisie);
