@@ -1,10 +1,11 @@
 /* ================= Justificatifs : rapprochement et boîte de saisies ================= */
 declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   const tous = vivants("justificatifs").sort((a, b) => a.date < b.date ? 1 : -1);
-  const attente = tous.filter(j => j.statut === "a_rapprocher").sort((a, b) => (b.aValider ? 1 : 0) - (a.aValider ? 1 : 0));
-  const nbValider = attente.filter(j => j.aValider).length;
+  const aRapprocher = tous.filter(j => j.statut === "a_rapprocher");
+  const nbValider = aRapprocher.filter(j => j.aValider).length;
+  const attente = nbValider ? aRapprocher.filter(j => j.aValider) : aRapprocher;
   let j = etat.choisi ? obtenir("justificatifs", etat.choisi) : attente[0];
-  c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " saisie(s) du téléphone à valider · " : "") + attente.length + " à rapprocher · " + tous.length + " au total",
+  c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " saisie(s) du téléphone à valider · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
   if (!j){
@@ -13,7 +14,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Tous les justificatifs"));
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
-      h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
+      h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
       h("td", null, x.origine === "mobile" ? "téléphone" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, x.auto ? "rapproché d'office" : "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
 }});
 
