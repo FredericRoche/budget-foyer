@@ -10,7 +10,7 @@ async function afficherVerrou(avis){
   if (!nomAd) return ecranChoixStockage(vider(boite));
   SESSION.adaptateur = adaptateurNomme(nomAd);
   if (nomAd === "graph"){
-    try { await adaptateurGraph.initialiser(await reglage("graph_client", "")); }
+    try { await adaptateurGraph.initialiser(await reglage("graph_client", CLIENT_GRAPH_DEFAUT)); }
     catch (e){ boite.appendChild(h("div", {class: "bandeau alerte"}, "Connexion Microsoft : " + e.message)); }
   }
   const pret = await SESSION.adaptateur.pret(false).catch(() => false);
@@ -65,21 +65,29 @@ function ecranChoixStockage(boite){
   boite.append(h("div", {class: "titre"}, "Budget du foyer"),
     h("p", null, "Où ce livre de comptes doit-il être rangé ? Il y est toujours chiffré par votre mot de passe."));
   const liste = h("div", {class: "choix-stockage"});
+  liste.appendChild(h("button", {class: "recommande", onclick: async () => {
+    const v = await reglage("graph_client", CLIENT_GRAPH_DEFAUT) || CLIENT_GRAPH_DEFAUT;
+    await definirReglage("graph_client", v); await definirReglage("adaptateur", "graph");
+    try { await adaptateurGraph.initialiser(v); await adaptateurGraph.connecter(); } catch (e){ message(e.message, true); }
+  }}, "OneDrive en ligne — recommandé", h("small", null, "Le livre du foyer, partagé entre les PC et le téléphone. Connexion avec le compte Microsoft du foyer.")));
+  boite.appendChild(liste);
+  const autres = h("div", {class: "choix-stockage"});
+  boite.appendChild(h("details", {style: {marginTop: ".8rem"}}, h("summary", {class: "petit"}, "Autres emplacements (cas particuliers)"),
+    h("p", {class: "note neg"}, "Attention : ces choix ne voient pas le livre du foyer en ligne. Ne les utilisez que sur indication."), autres));
   if (adaptateurDossier.disponible()){
-    liste.appendChild(h("button", {onclick: async () => {
+    autres.appendChild(h("button", {onclick: async () => {
       try { const nom = await adaptateurDossier.choisir(); await definirReglage("adaptateur", "dossier"); message("Dossier « " + nom + " » choisi."); afficherVerrou(); }
       catch (e){ if (e.name !== "AbortError") message(e.message, true); }
     }}, "Dossier OneDrive de ce PC", h("small", null, "Choisissez un dossier de votre OneDrive, par exemple « OneDrive › Budget foyer ». Aucune inscription Azure nécessaire.")));
   }
-  liste.appendChild(h("button", {onclick: () => ecranGraph(vider(boite))}, "OneDrive en ligne (Microsoft)", h("small", null, "Pour les téléphones, ou un PC sans OneDrive installé. Demande l'identifiant de l'application inscrite sur Azure.")));
-  liste.appendChild(h("button", {onclick: async () => { await definirReglage("adaptateur", "local"); afficherVerrou(); }}, "Ce navigateur seulement", h("small", null, "Pour un essai : rien n'est partagé avec les autres appareils.")));
-  boite.appendChild(liste);
+  autres.appendChild(h("button", {onclick: () => ecranGraph(vider(boite))}, "OneDrive en ligne, autre application", h("small", null, "Saisir un autre identifiant d'application Microsoft.")));
+  autres.appendChild(h("button", {onclick: async () => { await definirReglage("adaptateur", "local"); afficherVerrou(); }}, "Ce navigateur seulement", h("small", null, "Pour un essai : rien n'est partagé avec les autres appareils.")));
   boite.appendChild(h("p", {class: "note"}, "Téléphone en saisie seule : utilisez plutôt le lien d'appairage affiché par le PC (Réglages › Téléphones)."));
 }
 
 function ecranGraph(boite){
   const id = h("input", {type: "text", placeholder: "ex. 1a2b3c4d-…", autocomplete: "off", spellcheck: "false"});
-  reglage("graph_client", "").then(v => { id.value = v; });
+  reglage("graph_client", CLIENT_GRAPH_DEFAUT).then(v => { id.value = v; });
   boite.append(h("div", {class: "titre"}, "OneDrive en ligne"),
     h("p", null, "Saisissez l'identifiant d'application (client) obtenu lors de l'inscription sur le portail Azure (voir la procédure fournie). Ce n'est pas un secret."),
     champ("Identifiant d'application (client)", id),

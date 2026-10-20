@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-LfngLTBrYTZXvNRaPOLr4ppccvvSJ0PxJWgUvOq/FKA=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-jNdIKXJymRDN0vE//QKOwaLSwVcopS/II2yA8/U56RI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -218,6 +218,7 @@ svg text{font-family:var(--serif)}
 .verrou input[type=password], .verrou input[type=text]{width:100%; font-size:1.05rem; padding:.5rem}
 .choix-stockage button{display:block; width:100%; text-align:left; margin-bottom:.5rem; padding:.6rem .8rem}
 .choix-stockage button small{display:block; color:var(--sauge)}
+.choix-stockage button.recommande{border:2px solid var(--vert-empire); font-weight:600}
 
 /* ---------- Saisie mobile ---------- */
 .saisie{max-width:30rem; margin:0 auto; min-height:100vh; background:var(--papier)}
@@ -349,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1258";
+const VERSION_APP = "2026-10-20.1304";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1162,6 +1163,8 @@ const adaptateurDossier = {
    Autorisation demandée : Files.ReadWrite.AppFolder, soit le seul dossier
    « Applications/<nom de l'application> » du OneDrive. Comptes personnels (consumers). */
 const PORTEES_GRAPH = ["Files.ReadWrite.AppFolder"];
+// Identifiant de l'application « Budget foyer » inscrite chez Microsoft : public, ce n'est pas un secret.
+const CLIENT_GRAPH_DEFAUT = "7dbf8c43-0fb3-4a77-9128-579ae0c620e6";
 const GRAPH = "https://graph.microsoft.com/v1.0/me/drive/special/approot";
 const adaptateurGraph = {
   nom: "graph", libelle: "OneDrive en ligne", msal: null, compte: null, clientId: "",
@@ -3483,7 +3486,7 @@ async function afficherVerrou(avis){
   if (!nomAd) return ecranChoixStockage(vider(boite));
   SESSION.adaptateur = adaptateurNomme(nomAd);
   if (nomAd === "graph"){
-    try { await adaptateurGraph.initialiser(await reglage("graph_client", "")); }
+    try { await adaptateurGraph.initialiser(await reglage("graph_client", CLIENT_GRAPH_DEFAUT)); }
     catch (e){ boite.appendChild(h("div", {class: "bandeau alerte"}, "Connexion Microsoft : " + e.message)); }
   }
   const pret = await SESSION.adaptateur.pret(false).catch(() => false);
@@ -3538,21 +3541,29 @@ function ecranChoixStockage(boite){
   boite.append(h("div", {class: "titre"}, "Budget du foyer"),
     h("p", null, "Où ce livre de comptes doit-il être rangé ? Il y est toujours chiffré par votre mot de passe."));
   const liste = h("div", {class: "choix-stockage"});
+  liste.appendChild(h("button", {class: "recommande", onclick: async () => {
+    const v = await reglage("graph_client", CLIENT_GRAPH_DEFAUT) || CLIENT_GRAPH_DEFAUT;
+    await definirReglage("graph_client", v); await definirReglage("adaptateur", "graph");
+    try { await adaptateurGraph.initialiser(v); await adaptateurGraph.connecter(); } catch (e){ message(e.message, true); }
+  }}, "OneDrive en ligne — recommandé", h("small", null, "Le livre du foyer, partagé entre les PC et le téléphone. Connexion avec le compte Microsoft du foyer.")));
+  boite.appendChild(liste);
+  const autres = h("div", {class: "choix-stockage"});
+  boite.appendChild(h("details", {style: {marginTop: ".8rem"}}, h("summary", {class: "petit"}, "Autres emplacements (cas particuliers)"),
+    h("p", {class: "note neg"}, "Attention : ces choix ne voient pas le livre du foyer en ligne. Ne les utilisez que sur indication."), autres));
   if (adaptateurDossier.disponible()){
-    liste.appendChild(h("button", {onclick: async () => {
+    autres.appendChild(h("button", {onclick: async () => {
       try { const nom = await adaptateurDossier.choisir(); await definirReglage("adaptateur", "dossier"); message("Dossier « " + nom + " » choisi."); afficherVerrou(); }
       catch (e){ if (e.name !== "AbortError") message(e.message, true); }
     }}, "Dossier OneDrive de ce PC", h("small", null, "Choisissez un dossier de votre OneDrive, par exemple « OneDrive › Budget foyer ». Aucune inscription Azure nécessaire.")));
   }
-  liste.appendChild(h("button", {onclick: () => ecranGraph(vider(boite))}, "OneDrive en ligne (Microsoft)", h("small", null, "Pour les téléphones, ou un PC sans OneDrive installé. Demande l'identifiant de l'application inscrite sur Azure.")));
-  liste.appendChild(h("button", {onclick: async () => { await definirReglage("adaptateur", "local"); afficherVerrou(); }}, "Ce navigateur seulement", h("small", null, "Pour un essai : rien n'est partagé avec les autres appareils.")));
-  boite.appendChild(liste);
+  autres.appendChild(h("button", {onclick: () => ecranGraph(vider(boite))}, "OneDrive en ligne, autre application", h("small", null, "Saisir un autre identifiant d'application Microsoft.")));
+  autres.appendChild(h("button", {onclick: async () => { await definirReglage("adaptateur", "local"); afficherVerrou(); }}, "Ce navigateur seulement", h("small", null, "Pour un essai : rien n'est partagé avec les autres appareils.")));
   boite.appendChild(h("p", {class: "note"}, "Téléphone en saisie seule : utilisez plutôt le lien d'appairage affiché par le PC (Réglages › Téléphones)."));
 }
 
 function ecranGraph(boite){
   const id = h("input", {type: "text", placeholder: "ex. 1a2b3c4d-…", autocomplete: "off", spellcheck: "false"});
-  reglage("graph_client", "").then(v => { id.value = v; });
+  reglage("graph_client", CLIENT_GRAPH_DEFAUT).then(v => { id.value = v; });
   boite.append(h("div", {class: "titre"}, "OneDrive en ligne"),
     h("p", null, "Saisissez l'identifiant d'application (client) obtenu lors de l'inscription sur le portail Azure (voir la procédure fournie). Ce n'est pas un secret."),
     champ("Identifiant d'application (client)", id),
@@ -5146,7 +5157,7 @@ function reglagesTelephones(c){
 /* Bascule vers OneDrive en ligne : le livre courant est mis en attente d'envoi, puis écrit dans
    « Applications › Budget foyer » au retour de la connexion Microsoft (dossier vide = premier envoi). */
 async function passerEnLigne(){
-  const id = LIVRE.parametres.graphClient || await reglage("graph_client", "");
+  const id = LIVRE.parametres.graphClient || await reglage("graph_client", CLIENT_GRAPH_DEFAUT);
   if (!/^[0-9a-f-]{36}$/i.test(id || "")){ message("Saisissez d'abord l'identifiant de l'application Microsoft (Réglages › Téléphones).", true); return; }
   if (!(await confirmer("Passer à OneDrive en ligne ? Microsoft va demander votre accord pour le dossier « Applications › Budget foyer » ; le livre y sera ensuite écrit. L'ancien dossier reste en place, intact.", "Se connecter"))) return;
   try {
@@ -5468,7 +5479,7 @@ async function demarrerSaisieMobile(){
   $("verrou").hidden = true; $("appli").hidden = true; $("nav-basse").hidden = true;
   const z = vider($("saisie")); z.hidden = false;
   const cfg = await configMobile();
-  const clientId = cfg?.client || await reglage("graph_client", "");
+  const clientId = cfg?.client || await reglage("graph_client", CLIENT_GRAPH_DEFAUT);
   z.appendChild(h("div", {class: "barre-tel"}, h("span", null, "Budget du foyer"), h("span", null, cfg?.foyer || "Saisie")));
   const corps = h("div", {class: "corps-tel"}); z.appendChild(corps);
   if (!clientId){ corps.appendChild(h("p", {class: "neg"}, "Identifiant d'application Microsoft absent du lien d'appairage. Renseignez-le sur le PC (Réglages › Téléphones), puis réappairez.")); return; }

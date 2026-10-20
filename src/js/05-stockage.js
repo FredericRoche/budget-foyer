@@ -121,6 +121,8 @@ const adaptateurDossier = {
    Autorisation demandée : Files.ReadWrite.AppFolder, soit le seul dossier
    « Applications/<nom de l'application> » du OneDrive. Comptes personnels (consumers). */
 const PORTEES_GRAPH = ["Files.ReadWrite.AppFolder"];
+// Identifiant de l'application « Budget foyer » inscrite chez Microsoft : public, ce n'est pas un secret.
+const CLIENT_GRAPH_DEFAUT = "7dbf8c43-0fb3-4a77-9128-579ae0c620e6";
 const GRAPH = "https://graph.microsoft.com/v1.0/me/drive/special/approot";
 const adaptateurGraph = {
   nom: "graph", libelle: "OneDrive en ligne", msal: null, compte: null, clientId: "",

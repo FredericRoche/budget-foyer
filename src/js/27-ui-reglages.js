@@ -147,7 +147,7 @@ function reglagesTelephones(c){
 /* Bascule vers OneDrive en ligne : le livre courant est mis en attente d'envoi, puis écrit dans
    « Applications › Budget foyer » au retour de la connexion Microsoft (dossier vide = premier envoi). */
 async function passerEnLigne(){
-  const id = LIVRE.parametres.graphClient || await reglage("graph_client", "");
+  const id = LIVRE.parametres.graphClient || await reglage("graph_client", CLIENT_GRAPH_DEFAUT);
   if (!/^[0-9a-f-]{36}$/i.test(id || "")){ message("Saisissez d'abord l'identifiant de l'application Microsoft (Réglages › Téléphones).", true); return; }
   if (!(await confirmer("Passer à OneDrive en ligne ? Microsoft va demander votre accord pour le dossier « Applications › Budget foyer » ; le livre y sera ensuite écrit. L'ancien dossier reste en place, intact.", "Se connecter"))) return;
   try {

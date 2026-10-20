@@ -43,7 +43,7 @@ async function demarrerSaisieMobile(){
   $("verrou").hidden = true; $("appli").hidden = true; $("nav-basse").hidden = true;
   const z = vider($("saisie")); z.hidden = false;
   const cfg = await configMobile();
-  const clientId = cfg?.client || await reglage("graph_client", "");
+  const clientId = cfg?.client || await reglage("graph_client", CLIENT_GRAPH_DEFAUT);
   z.appendChild(h("div", {class: "barre-tel"}, h("span", null, "Budget du foyer"), h("span", null, cfg?.foyer || "Saisie")));
   const corps = h("div", {class: "corps-tel"}); z.appendChild(corps);
   if (!clientId){ corps.appendChild(h("p", {class: "neg"}, "Identifiant d'application Microsoft absent du lien d'appairage. Renseignez-le sur le PC (Réglages › Téléphones), puis réappairez.")); return; }

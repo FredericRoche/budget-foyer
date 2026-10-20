@@ -203,6 +203,7 @@ svg text{font-family:var(--serif)}
 .verrou input[type=password], .verrou input[type=text]{width:100%; font-size:1.05rem; padding:.5rem}
 .choix-stockage button{display:block; width:100%; text-align:left; margin-bottom:.5rem; padding:.6rem .8rem}
 .choix-stockage button small{display:block; color:var(--sauge)}
+.choix-stockage button.recommande{border:2px solid var(--vert-empire); font-weight:600}
 
 /* ---------- Saisie mobile ---------- */
 .saisie{max-width:30rem; margin:0 auto; min-height:100vh; background:var(--papier)}
