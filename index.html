@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-zaYHZGxTIsgut4W4f7xfeaC8fOC/xmJ/auoTSYMbSus=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-RZTHyYhv3+40qS9qWxXb7Jdubeq4IOP1g+zW35w7Wnc=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -344,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1020";
+const VERSION_APP = "2026-10-20.1040";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1196,7 +1196,8 @@ const adaptateurGraph = {
     if (meta.status === 404) return null;
     if (!meta.ok) throw new Error("OneDrive : lecture impossible (" + meta.status + ").");
     const m = await meta.json();
-    const r = await this.requete(this.url(chemin) + "/content");
+    const direct = m["@microsoft.graph.downloadUrl"];
+    const r = direct ? await fetch(direct) : await this.requete(this.url(chemin) + "/content");
     if (!r.ok) throw new Error("OneDrive : téléchargement impossible (" + r.status + ").");
     return {octets: new Uint8Array(await r.arrayBuffer()), etiquette: m.eTag, id: m.id};
   },
@@ -3470,8 +3471,8 @@ async function afficherVerrou(avis){
   if (!pret && nomAd === "graph"){
     boite.appendChild(h("button", {class: "primaire", onclick: () => adaptateurGraph.connecter().catch(e => message(e.message, true))}, "Se connecter à OneDrive"));
   }
-  let existe = !!cache;
-  if (pret){ try { existe = existe || !!(await SESSION.adaptateur.lire(FICHIER_LIVRE)); } catch (e){ boite.appendChild(h("div", {class: "bandeau alerte"}, e.message)); } }
+  let existe = !!cache, echecLecture = false;
+  if (pret){ try { existe = existe || !!(await SESSION.adaptateur.lire(FICHIER_LIVRE)); } catch (e){ echecLecture = true; boite.appendChild(h("div", {class: "bandeau alerte"}, "Lecture du livre impossible : " + e.message)); } }
 
   if (existe && memorisee){
     const btn = h("button", {class: "primaire", onclick: async () => {
@@ -3494,6 +3495,9 @@ async function afficherVerrou(avis){
       h("div", {class: "case"}, souvenir, h("label", {for: "souvenir"}, "Se souvenir sur cet appareil (ordinateur personnel seulement)")),
       h("div", {class: "outils", style: {marginTop: ".8rem"}}, btn));
     setTimeout(() => mdp.focus(), 50);
+  } else if (echecLecture){
+    // Ne jamais proposer de créer un livre quand la lecture a échoué : il existe peut-être
+    boite.append(h("p", null, "Le livre n'a pas pu être lu. Vérifiez la connexion, puis réessayez."), h("button", {class: "primaire", onclick: () => afficherVerrou()}, "Réessayer"));
   } else if (pret || nomAd === "local"){
     ecranCreation(boite);
   }

@@ -160,7 +160,8 @@ const adaptateurGraph = {
     if (meta.status === 404) return null;
     if (!meta.ok) throw new Error("OneDrive : lecture impossible (" + meta.status + ").");
     const m = await meta.json();
-    const r = await this.requete(this.url(chemin) + "/content");
+    const direct = m["@microsoft.graph.downloadUrl"];
+    const r = direct ? await fetch(direct) : await this.requete(this.url(chemin) + "/content");
     if (!r.ok) throw new Error("OneDrive : téléchargement impossible (" + r.status + ").");
     return {octets: new Uint8Array(await r.arrayBuffer()), etiquette: m.eTag, id: m.id};
   },

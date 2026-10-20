@@ -26,8 +26,8 @@ async function afficherVerrou(avis){
   if (!pret && nomAd === "graph"){
     boite.appendChild(h("button", {class: "primaire", onclick: () => adaptateurGraph.connecter().catch(e => message(e.message, true))}, "Se connecter à OneDrive"));
   }
-  let existe = !!cache;
-  if (pret){ try { existe = existe || !!(await SESSION.adaptateur.lire(FICHIER_LIVRE)); } catch (e){ boite.appendChild(h("div", {class: "bandeau alerte"}, e.message)); } }
+  let existe = !!cache, echecLecture = false;
+  if (pret){ try { existe = existe || !!(await SESSION.adaptateur.lire(FICHIER_LIVRE)); } catch (e){ echecLecture = true; boite.appendChild(h("div", {class: "bandeau alerte"}, "Lecture du livre impossible : " + e.message)); } }
 
   if (existe && memorisee){
     const btn = h("button", {class: "primaire", onclick: async () => {
@@ -50,6 +50,9 @@ async function afficherVerrou(avis){
       h("div", {class: "case"}, souvenir, h("label", {for: "souvenir"}, "Se souvenir sur cet appareil (ordinateur personnel seulement)")),
       h("div", {class: "outils", style: {marginTop: ".8rem"}}, btn));
     setTimeout(() => mdp.focus(), 50);
+  } else if (echecLecture){
+    // Ne jamais proposer de créer un livre quand la lecture a échoué : il existe peut-être
+    boite.append(h("p", null, "Le livre n'a pas pu être lu. Vérifiez la connexion, puis réessayez."), h("button", {class: "primaire", onclick: () => afficherVerrou()}, "Réessayer"));
   } else if (pret || nomAd === "local"){
     ecranCreation(boite);
   }
