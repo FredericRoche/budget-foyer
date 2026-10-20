@@ -65,6 +65,26 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
     h("span", null, h("i", {style: {background: COULEURS.vert}}), "solde projeté"), h("span", null, h("i", {style: {background: COULEURS.garnet, height: "2px"}}), "seuil bas"),
     h("span", null, h("i", {style: {background: "repeating-linear-gradient(90deg,#6F8678 0 4px,transparent 4px 7px)", height: "2px"}}), "seuil haut")));
   else carteTreso.appendChild(h("p", {class: "vide"}, "Indiquez le compte de trésorerie dans les Réglages."));
+  // Encart « Ce mois-ci » : quelques repères de trésorerie du compte suivi, sans doubler l'écran Trésorerie
+  if (sim){
+    const auj = aujourdhui(), fm = finDeMois(auj);
+    const jm = sim.jours.filter(j => j.date <= fm);
+    const finSolde = jm.length ? jm[jm.length - 1].solde : sim.soldeDepart;
+    const bas = jm.reduce((m, j) => j.solde < m.solde ? j : m, {solde: sim.soldeDepart ?? 0, date: auj});
+    const prochain = sim.evenements.find(e => e.montant < 0 && e.date <= ajouterJours(auj, 31));
+    const directs = somme(encoursSaisis().lignes.filter(l => /^(Virements|Chèques)/.test(l.moyen)), l => l.montant);
+    const imp = vivants("imports").sort((a, b) => a.date < b.date ? 1 : -1)[0];
+    const lignesM = [
+      ["Solde connu" + (imp ? " (relevé importé le " + dateCourte(imp.date.slice(0, 10)) + ")" : ""), sim.soldeDepart],
+      [(m => (/^[aeiou]/.test(m) ? "Fin d'" : "Fin de ") + m)(MOIS_LONG[+auj.slice(5, 7) - 1]) + ", prévu", finSolde],
+      ["Point bas du mois (" + dateCourte(bas.date) + ")", bas.solde],
+      prochain ? ["Prochain gros débit : " + prochain.libelle + " (" + dateCourte(prochain.date) + ")", prochain.montant] : null,
+      directs > 0.5 ? ["Virements et chèques émis, pas encore au relevé", -directs] : null].filter(Boolean);
+    carteTreso.append(h("h3", {style: {marginTop: ".8rem"}}, "Ce mois-ci"),
+      h("table", {class: "serre", style: {width: "100%"}}, h("tbody", null, lignesM.map(([lib, v]) => h("tr", null, h("td", null, lib),
+        h("td", {class: "num" + (v != null && v < 0 ? " neg" : "")}, v == null ? "—" : euros(v, 0)))))),
+      h("p", {class: "note"}, "Détail jour par jour, seuils et virements à prévoir : écran Trésorerie."));
+  }
   const li = (n, texte, ecran, bouton) => n ? h("li", null, h("span", null, h("span", {class: "compte-traiter"}, String(n)), " " + texte), h("button", {class: "mini", onclick: () => aller(ecran)}, bouton)) : null;
   const autos = vivants("justificatifs").filter(j => j.auto && !j.vu).length;
   const listeT = h("ul", {class: "liste-traiter"}, li(a.ops, "opération(s) à classer", "traiter", "Classer"), li(a.js, "justificatif(s) à rapprocher", "justificatifs", "Ouvrir"),
