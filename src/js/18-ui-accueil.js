@@ -20,6 +20,10 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
 
   const lignes = budget ? tableauBudget(budget, an, mo, mo, "") : [];
   const tb = somme(lignes.filter(l => l.ligne), l => l.budget), tr = somme(lignes, l => l.realise);
+  // Dépenses du mois saisies (tickets, factures, chèques) dont l'opération n'est pas encore au relevé,
+  // retenues selon la même règle que le réalisé (hors « Hors budget » et revenus)
+  const taEnAttente = somme(vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && j.carte !== "ESPECES" && (j.date || "").slice(0, 7) === an + "-" + pad2(mo)
+    && (n => !NATURES_HORS_RESULTAT.includes(n) && n !== "Revenu")((budget?.lignes || []).find(x => x.categorie === j.categorie && (x.sousCategorie || "") === (j.sousCategorie || ""))?.nature || natureParDefaut(j.categorie))), j => j.montant || 0);
   const cumulB = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.budget) : 0;
   const cumulR = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.realise) : 0;
   const sim = simulerTresorerie(); const ana = ETAT_TRESO_CACHE || analyseTresorerie(sim);
@@ -36,6 +40,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
   } else {
   ind.appendChild(h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Dépensé en " + MOIS_LONG[mo - 1]),
     h("div", {class: "val"}, euros(tr, 0)), h("div", {class: "det"}, budget ? "pour un budget de " + euros(tb, 0) : "aucun budget pour " + an),
+    taEnAttente > 0.5 ? h("div", {class: "det discret"}, "+ " + euros(taEnAttente, 0) + " saisis, pas encore au relevé") : null,
     h("div", {class: "jauge"}, h("span", {class: tr > tb ? "depasse" : "", style: {width: Math.min(100, tb ? tr / tb * 100 : 0) + "%"}}))));
   ind.appendChild(h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Reste à dépenser"),
     h("div", {class: "val" + (tb - tr < 0 ? " neg" : "")}, euros(tb - tr, 0)),
