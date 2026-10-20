@@ -207,6 +207,8 @@ async function fusionnerBoite(elements){
   for (const e of elements){
     if (!e.saisie) continue;
     const s = e.saisie;
+    // Déjà reprise (essai précédent interrompu) : on ne fait que ranger le dépôt
+    if (vivants("justificatifs").some(j => j.saisie === e.nom)){ await SESSION.adaptateur.deplacer(e.chemin, "boite/traitees"); continue; }
     const groupe = (s.tickets || []).length > 1 ? "g-" + idAleatoire(6) : null;
     for (const t of s.tickets || []){
       const piece = t.photo ? {octets: depuisB64(t.photo.b64), mime: t.photo.mime} : null;

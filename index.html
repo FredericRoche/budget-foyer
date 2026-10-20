@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-yIWPa5SJkaTGasy/JPkjsWQURMITRBbDZM56/yuvUKg=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-MTGaBsCYIwNRi2ebFcI9TRWdcuW00SyFgKtINupX4sU=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -344,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1202";
+const VERSION_APP = "2026-10-20.1205";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1229,11 +1229,13 @@ const adaptateurGraph = {
     if (!c.ok) throw new Error("OneDrive : création du dossier impossible (" + c.status + " " + (await c.text().catch(() => "")).slice(0, 160) + ").");
     return (await c.json()).id;
   },
+  // Copie puis retrait de l'original : le dépôt par chemin crée lui-même le dossier cible
+  // (OneDrive refuse la création préalable d'un dossier dans le dossier de l'application).
   async deplacer(chemin, dossierCible){
-    const idCible = await this.assurerDossier(dossierCible);
-    const r = await this.requete(this.url(chemin), {method: "PATCH", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({parentReference: {id: idCible}})});
-    if (!r.ok) throw new Error("OneDrive : déplacement impossible (" + r.status + ").");
+    const src = await this.lire(chemin); if (!src) return;
+    await this.ecrire(dossierCible + "/" + chemin.split("/").pop(), src.octets);
+    const r = await this.requete(this.url(chemin), {method: "DELETE"});
+    if (!r.ok && r.status !== 404) throw new Error("OneDrive : retrait de l'original impossible (" + r.status + ").");
   }
 };
 
@@ -2647,6 +2649,8 @@ async function fusionnerBoite(elements){
   for (const e of elements){
     if (!e.saisie) continue;
     const s = e.saisie;
+    // Déjà reprise (essai précédent interrompu) : on ne fait que ranger le dépôt
+    if (vivants("justificatifs").some(j => j.saisie === e.nom)){ await SESSION.adaptateur.deplacer(e.chemin, "boite/traitees"); continue; }
     const groupe = (s.tickets || []).length > 1 ? "g-" + idAleatoire(6) : null;
     for (const t of s.tickets || []){
       const piece = t.photo ? {octets: depuisB64(t.photo.b64), mime: t.photo.mime} : null;

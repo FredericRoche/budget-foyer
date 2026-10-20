@@ -193,11 +193,13 @@ const adaptateurGraph = {
     if (!c.ok) throw new Error("OneDrive : création du dossier impossible (" + c.status + " " + (await c.text().catch(() => "")).slice(0, 160) + ").");
     return (await c.json()).id;
   },
+  // Copie puis retrait de l'original : le dépôt par chemin crée lui-même le dossier cible
+  // (OneDrive refuse la création préalable d'un dossier dans le dossier de l'application).
   async deplacer(chemin, dossierCible){
-    const idCible = await this.assurerDossier(dossierCible);
-    const r = await this.requete(this.url(chemin), {method: "PATCH", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({parentReference: {id: idCible}})});
-    if (!r.ok) throw new Error("OneDrive : déplacement impossible (" + r.status + ").");
+    const src = await this.lire(chemin); if (!src) return;
+    await this.ecrire(dossierCible + "/" + chemin.split("/").pop(), src.octets);
+    const r = await this.requete(this.url(chemin), {method: "DELETE"});
+    if (!r.ok && r.status !== 404) throw new Error("OneDrive : retrait de l'original impossible (" + r.status + ").");
   }
 };
 
