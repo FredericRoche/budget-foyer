@@ -161,6 +161,7 @@ async function autotest(){
           const d3 = ajouterJours(aujourdhui(), -3);
           v("facturette : date sans année lisible (année du jour)", extraireTicket("CB CREDIT\nj " + d3.slice(8, 10) + "/" + d3.slice(5, 7) + ",\nOA 15:20:17\nMONTANT 49,00 EUR").date, d3);
         }
+        v("libellé : « VIREMENT » retiré en entier", [cleLibelle("VIREMENT HENNER GMC"), cleLibelle("VIR SEPA M HUMBERT ARMAND"), cleLibelle("PRELEVEMENT EUROPEEN ORANGE SA"), cleLibelle("CB BOUCHERIE D'ICI VILLE 16/10")], ["HENNER GMC", "M HUMBERT ARMAND", "ORANGE SA", "BOUCHERIE D'ICI VILLE"]);
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

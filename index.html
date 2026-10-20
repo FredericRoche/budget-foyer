@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Dz2N6T7eiIgLLw6XmPDcoDm3lNopPV83RlCyeCVH36g=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-l4jxCqJAqETPmiFEPAlzifbIMqQbQBnwlmlsDs4hlkw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1854";
+const VERSION_APP = "2026-10-20.1954";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1318,6 +1318,7 @@ async function ouvrirLivre(motDePasse, souvenir){
     try { livre = fusionnerLivres(await dechiffrerLivre(cache.octets, SESSION.cle), livre).livre; LIVRE_MODIFIE = true; } catch (e) {}
   }
   LIVRE = completerLivre(livre);
+  try { const nr = reparerFichesEment(); if (nr) setTimeout(() => message(nr + " fiche(s) fournisseur « Ement… » corrigée(s) (libellés « VIREMENT » mal coupés)."), 1500); } catch (e) {}
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";
   estimerDebitsCartes();   // livres repris avant la correction du 17/10/2026 : achats carte datés comme débités le jour même
@@ -1519,7 +1520,7 @@ setInterval(() => { if (SESSION.etat === "ouvert" && document.visibilityState ==
    Une correction manuelle l'emporte toujours ensuite. */
 
 /* Clé d'un libellé : majuscules sans accents, préfixes bancaires, numéros et dates retirés. */
-const PREFIXES = /^(CB|CARTE|PRLV SEPA|PRLV|VIR SEPA|VIR INST|VIR|VIREMENT( SEPA)?( EMIS| RECU)?|PAIEMENT( PAR CARTE)?|ACHAT CB|SUMUP ?\*|SQ ?\*|PAYPAL ?\*|ZTL ?\*|IZ ?\*|BCK ?\*|SP ?\*|LYF ?\*)\s*/;
+const PREFIXES = /^((?:VIREMENT(?: SEPA)?(?: EMIS| RECU)?|PRELEVEMENT(?: SEPA)?(?: EUROPEEN)?|PAIEMENT(?: PAR CARTE)?|ACHAT CB|PRLV SEPA|PRLV|VIR SEPA|VIR INST|VIR|CARTE|CB)\b|(?:SUMUP|SQ|PAYPAL|ZTL|IZ|BCK|SP|LYF) ?\*)\s*/;
 function cleLibelle(libelle){
   let t = norm(libelle).toUpperCase().replace(/[^A-Z0-9*&' ]/g, " ").replace(/\s+/g, " ").trim();
   for (let i = 0; i < 3; i++) t = t.replace(PREFIXES, "");
@@ -1586,6 +1587,22 @@ function ajouterAlias(commercant, texte){
   enregistrer("commercants", commercant); invaliderIndex();
   return true;
 }
+function reparerFichesEment(){
+  if (LIVRE.parametres.reparationEment) return 0;
+  let n = 0;
+  for (const c of vivants("commercants").filter(x => /^ement( |$)/i.test(x.nom || ""))){
+    const reste = (c.nom || "").replace(/^ement\s*/i, "").trim();
+    const alias = [...new Set((c.alias || []).map(a => a.replace(/^EMENT\s*/, "").trim()).filter(Boolean))];
+    const nom = reste || "Virement";
+    const autre = vivants("commercants").find(x => x.id !== c.id && norm(x.nom || "") === norm(nom));
+    Object.assign(c, {nom, alias}); enregistrer("commercants", c);
+    for (const j of vivants("justificatifs")) if (j.commercant === c.id) enregistrer("justificatifs", Object.assign(j, {commercantNom: nom}));
+    if (autre) fusionnerCommercants(autre, c);
+    n++;
+  }
+  LIVRE.parametres.reparationEment = 1; invaliderIndex(); marquerModifie();
+  return n;
+}
 function fusionnerCommercants(garde, absorbe){
   garde.alias = [...new Set([...(garde.alias || []), ...(absorbe.alias || [])])];
   for (const champ of ["stats", "natures", "titulaires"]){
@@ -1594,6 +1611,7 @@ function fusionnerCommercants(garde, absorbe){
   }
   enregistrer("commercants", garde);
   for (const op of vivants("operations")) if (op.commercant === absorbe.id) enregistrer("operations", Object.assign(op, {commercant: garde.id}));
+  for (const j of vivants("justificatifs")) if (j.commercant === absorbe.id) enregistrer("justificatifs", Object.assign(j, {commercant: garde.id, commercantNom: garde.nom}));
   supprimer("commercants", absorbe.id); invaliderIndex();
 }
 
@@ -5942,6 +5960,7 @@ async function autotest(){
           const d3 = ajouterJours(aujourdhui(), -3);
           v("facturette : date sans année lisible (année du jour)", extraireTicket("CB CREDIT\nj " + d3.slice(8, 10) + "/" + d3.slice(5, 7) + ",\nOA 15:20:17\nMONTANT 49,00 EUR").date, d3);
         }
+        v("libellé : « VIREMENT » retiré en entier", [cleLibelle("VIREMENT HENNER GMC"), cleLibelle("VIR SEPA M HUMBERT ARMAND"), cleLibelle("PRELEVEMENT EUROPEEN ORANGE SA"), cleLibelle("CB BOUCHERIE D'ICI VILLE 16/10")], ["HENNER GMC", "M HUMBERT ARMAND", "ORANGE SA", "BOUCHERIE D'ICI VILLE"]);
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

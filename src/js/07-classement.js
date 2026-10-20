@@ -5,7 +5,7 @@
    Une correction manuelle l'emporte toujours ensuite. */
 
 /* Clé d'un libellé : majuscules sans accents, préfixes bancaires, numéros et dates retirés. */
-const PREFIXES = /^(CB|CARTE|PRLV SEPA|PRLV|VIR SEPA|VIR INST|VIR|VIREMENT( SEPA)?( EMIS| RECU)?|PAIEMENT( PAR CARTE)?|ACHAT CB|SUMUP ?\*|SQ ?\*|PAYPAL ?\*|ZTL ?\*|IZ ?\*|BCK ?\*|SP ?\*|LYF ?\*)\s*/;
+const PREFIXES = /^((?:VIREMENT(?: SEPA)?(?: EMIS| RECU)?|PRELEVEMENT(?: SEPA)?(?: EUROPEEN)?|PAIEMENT(?: PAR CARTE)?|ACHAT CB|PRLV SEPA|PRLV|VIR SEPA|VIR INST|VIR|CARTE|CB)\b|(?:SUMUP|SQ|PAYPAL|ZTL|IZ|BCK|SP|LYF) ?\*)\s*/;
 function cleLibelle(libelle){
   let t = norm(libelle).toUpperCase().replace(/[^A-Z0-9*&' ]/g, " ").replace(/\s+/g, " ").trim();
   for (let i = 0; i < 3; i++) t = t.replace(PREFIXES, "");
@@ -72,6 +72,22 @@ function ajouterAlias(commercant, texte){
   enregistrer("commercants", commercant); invaliderIndex();
   return true;
 }
+function reparerFichesEment(){
+  if (LIVRE.parametres.reparationEment) return 0;
+  let n = 0;
+  for (const c of vivants("commercants").filter(x => /^ement( |$)/i.test(x.nom || ""))){
+    const reste = (c.nom || "").replace(/^ement\s*/i, "").trim();
+    const alias = [...new Set((c.alias || []).map(a => a.replace(/^EMENT\s*/, "").trim()).filter(Boolean))];
+    const nom = reste || "Virement";
+    const autre = vivants("commercants").find(x => x.id !== c.id && norm(x.nom || "") === norm(nom));
+    Object.assign(c, {nom, alias}); enregistrer("commercants", c);
+    for (const j of vivants("justificatifs")) if (j.commercant === c.id) enregistrer("justificatifs", Object.assign(j, {commercantNom: nom}));
+    if (autre) fusionnerCommercants(autre, c);
+    n++;
+  }
+  LIVRE.parametres.reparationEment = 1; invaliderIndex(); marquerModifie();
+  return n;
+}
 function fusionnerCommercants(garde, absorbe){
   garde.alias = [...new Set([...(garde.alias || []), ...(absorbe.alias || [])])];
   for (const champ of ["stats", "natures", "titulaires"]){
@@ -80,6 +96,7 @@ function fusionnerCommercants(garde, absorbe){
   }
   enregistrer("commercants", garde);
   for (const op of vivants("operations")) if (op.commercant === absorbe.id) enregistrer("operations", Object.assign(op, {commercant: garde.id}));
+  for (const j of vivants("justificatifs")) if (j.commercant === absorbe.id) enregistrer("justificatifs", Object.assign(j, {commercant: garde.id, commercantNom: garde.nom}));
   supprimer("commercants", absorbe.id); invaliderIndex();
 }
 

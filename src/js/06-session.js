@@ -48,6 +48,7 @@ async function ouvrirLivre(motDePasse, souvenir){
     try { livre = fusionnerLivres(await dechiffrerLivre(cache.octets, SESSION.cle), livre).livre; LIVRE_MODIFIE = true; } catch (e) {}
   }
   LIVRE = completerLivre(livre);
+  try { const nr = reparerFichesEment(); if (nr) setTimeout(() => message(nr + " fiche(s) fournisseur « Ement… » corrigée(s) (libellés « VIREMENT » mal coupés)."), 1500); } catch (e) {}
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";
   estimerDebitsCartes();   // livres repris avant la correction du 17/10/2026 : achats carte datés comme débités le jour même
