@@ -94,7 +94,7 @@ function extraireTicket(texte){
   }
   /* Raison sociale et enseigne : premières lignes significatives */
   const ignorer = /BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
-  const tete = lignes.slice(0, 8).filter((l, i) => /[A-Za-z]{3}/.test(l) && !ignorer.test(N[lignes.indexOf(l)]) && !estBanqueTerminal(l) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[lignes.indexOf(l)]) && !montantsDe(l).length && l.length <= 40);
+  const tete = lignes.slice(0, 8).filter((l, i) => /[A-Za-z]{3}/.test(l) && !ignorer.test(N[lignes.indexOf(l)]) && !estBanqueTerminal(l) && nomPlausible(l) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[lignes.indexOf(l)]) && !montantsDe(l).length && l.length <= 40);
   const forme = lignes.find(l => /\b(SARL|SAS|SASU|EURL|SA|SNC|SCP|SELARL)\b/i.test(l));
   res.enseigne = tete[0] || "";
   res.raisonSociale = forme ? forme.replace(/\s+(CAPITAL|AU CAPITAL|RCS).*$/i, "").trim() : res.enseigne;

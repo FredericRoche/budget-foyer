@@ -182,7 +182,7 @@ async function creerJustificatif(donnees, piece){
       || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
     if (c){
       if (!mobile){
-        if (j.raisonSociale) ajouterAlias(c, j.raisonSociale);
+        if (j.raisonSociale && nomPlausible(j.raisonSociale)) ajouterAlias(c, j.raisonSociale);
         if (j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; }
         enregistrer("commercants", c); invaliderIndex();
       }

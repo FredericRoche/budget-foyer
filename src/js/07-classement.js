@@ -56,6 +56,11 @@ function assurerCommercant(libelle, nomPropose){
 /* Banques des terminaux de paiement, imprimées en tête des facturettes : jamais un commerçant. */
 const BANQUES_TERMINAUX = /BANQUE POPULAIRE|CREDIT AGRICOLE|CAISSE D.?EPARGNE|SOCIETE GENERALE|\bBNP\b|PARIBAS|CREDIT MUTUEL|\bCIC\b|\bLCL\b|CREDIT LYONNAIS|BANQUE POSTALE|\bHSBC\b|\bBRED\b|CREDIT DU NORD|BOURSORAMA|BANQUE DE SAVOIE|BANQUE RHONE|LYONNAISE DE BANQUE|\bCAISSE REGIONALE\b/;
 const estBanqueTerminal = s => BANQUES_TERMINAUX.test(norm(s || "").toUpperCase());
+/* Lecture plausible d'un nom sur une pièce : au moins un mot de 4 lettres, et surtout des lettres. */
+function nomPlausible(s){
+  const t = norm(s || "").replace(/\s+/g, "");
+  return /[A-Za-z]{4,}/.test(norm(s || "")) && t.length > 0 && (t.match(/[A-Za-z]/g) || []).length / t.length >= 0.6;
+}
 function ajouterAlias(commercant, texte){
   if (estBanqueTerminal(texte)) return false;
   const cle = cleLibelle(texte);

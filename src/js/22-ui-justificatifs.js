@@ -95,7 +95,7 @@ function ecranRapprochement(j, etat, attente){
         let fiche = vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom)) || (f.x.commercant ? obtenir("commercants", f.x.commercant) : null);
         if (!fiche) fiche = enregistrer("commercants", {nom: f.x.commercantNom, alias: [], stats: {}, natures: {}});
         else if (norm(fiche.nom) !== norm(f.x.commercantNom) && f.x.commercant === fiche.id) { fiche.nom = f.x.commercantNom; enregistrer("commercants", fiche); }
-        if (f.x.raisonSociale && ajouterAlias(fiche, f.x.raisonSociale)) message("Mémorisé : « " + f.x.raisonSociale + " » = " + fiche.nom + ".");
+        if (f.x.raisonSociale && nomPlausible(f.x.raisonSociale) && ajouterAlias(fiche, f.x.raisonSociale)) message("Mémorisé : « " + f.x.raisonSociale + " » = " + fiche.nom + ".");
         f.x.commercant = fiche.id; invaliderIndex();
       }
       enregistrer("justificatifs", f.x);
