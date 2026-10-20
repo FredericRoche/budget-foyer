@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-OXebKpK2YThdMAiAcVhkD3zeZ3v/4B1+3B/a8pvHoes=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-RdDf8Fe9S+Fab15DNjjnGqyFOU5WL2fRsoueXffBDZc=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -344,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1211";
+const VERSION_APP = "2026-10-20.1215";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1558,7 +1558,11 @@ function assurerCommercant(libelle, nomPropose){
   }
   return c;
 }
+/* Banques des terminaux de paiement, imprimées en tête des facturettes : jamais un commerçant. */
+const BANQUES_TERMINAUX = /BANQUE POPULAIRE|CREDIT AGRICOLE|CAISSE D.?EPARGNE|SOCIETE GENERALE|\bBNP\b|PARIBAS|CREDIT MUTUEL|\bCIC\b|\bLCL\b|CREDIT LYONNAIS|BANQUE POSTALE|\bHSBC\b|\bBRED\b|CREDIT DU NORD|BOURSORAMA|BANQUE DE SAVOIE|BANQUE RHONE|LYONNAISE DE BANQUE|\bCAISSE REGIONALE\b/;
+const estBanqueTerminal = s => BANQUES_TERMINAUX.test(norm(s || "").toUpperCase());
 function ajouterAlias(commercant, texte){
+  if (estBanqueTerminal(texte)) return false;
   const cle = cleLibelle(texte);
   if (!cle || (commercant.alias || []).includes(cle)) return false;
   // L'alias est retiré d'une autre fiche qui le portait.
@@ -2772,7 +2776,7 @@ function extraireTicket(texte){
   }
   /* Raison sociale et enseigne : premières lignes significatives */
   const ignorer = /BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
-  const tete = lignes.slice(0, 8).filter((l, i) => /[A-Za-z]{3}/.test(l) && !ignorer.test(N[lignes.indexOf(l)]) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[lignes.indexOf(l)]) && !montantsDe(l).length && l.length <= 40);
+  const tete = lignes.slice(0, 8).filter((l, i) => /[A-Za-z]{3}/.test(l) && !ignorer.test(N[lignes.indexOf(l)]) && !estBanqueTerminal(l) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[lignes.indexOf(l)]) && !montantsDe(l).length && l.length <= 40);
   const forme = lignes.find(l => /\b(SARL|SAS|SASU|EURL|SA|SNC|SCP|SELARL)\b/i.test(l));
   res.enseigne = tete[0] || "";
   res.raisonSociale = forme ? forme.replace(/\s+(CAPITAL|AU CAPITAL|RCS).*$/i, "").trim() : res.enseigne;
@@ -5764,6 +5768,7 @@ async function autotest(){
           v("carte : 4 chiffres de la facturette appris puis reconnus", carteDesChiffres("############7998"), "X111");
           supprimer("comptes", ck.id);
         }
+        v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }
       {

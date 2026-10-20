@@ -53,7 +53,11 @@ function assurerCommercant(libelle, nomPropose){
   }
   return c;
 }
+/* Banques des terminaux de paiement, imprimées en tête des facturettes : jamais un commerçant. */
+const BANQUES_TERMINAUX = /BANQUE POPULAIRE|CREDIT AGRICOLE|CAISSE D.?EPARGNE|SOCIETE GENERALE|\bBNP\b|PARIBAS|CREDIT MUTUEL|\bCIC\b|\bLCL\b|CREDIT LYONNAIS|BANQUE POSTALE|\bHSBC\b|\bBRED\b|CREDIT DU NORD|BOURSORAMA|BANQUE DE SAVOIE|BANQUE RHONE|LYONNAISE DE BANQUE|\bCAISSE REGIONALE\b/;
+const estBanqueTerminal = s => BANQUES_TERMINAUX.test(norm(s || "").toUpperCase());
 function ajouterAlias(commercant, texte){
+  if (estBanqueTerminal(texte)) return false;
   const cle = cleLibelle(texte);
   if (!cle || (commercant.alias || []).includes(cle)) return false;
   // L'alias est retiré d'une autre fiche qui le portait.

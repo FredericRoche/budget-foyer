@@ -141,6 +141,7 @@ async function autotest(){
           v("carte : 4 chiffres de la facturette appris puis reconnus", carteDesChiffres("############7998"), "X111");
           supprimer("comptes", ck.id);
         }
+        v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }
       {
