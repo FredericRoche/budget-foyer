@@ -1,9 +1,10 @@
 /* ================= Justificatifs : rapprochement et boîte de saisies ================= */
 declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   const tous = vivants("justificatifs").sort((a, b) => a.date < b.date ? 1 : -1);
-  const attente = tous.filter(j => j.statut === "a_rapprocher");
+  const attente = tous.filter(j => j.statut === "a_rapprocher").sort((a, b) => (b.aValider ? 1 : 0) - (a.aValider ? 1 : 0));
+  const nbValider = attente.filter(j => j.aValider).length;
   let j = etat.choisi ? obtenir("justificatifs", etat.choisi) : attente[0];
-  c.appendChild(entete("Justificatifs", attente.length + " à rapprocher · " + tous.length + " au total",
+  c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " saisie(s) du téléphone à valider · " : "") + attente.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
   if (!j){
@@ -13,7 +14,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, x.auto ? "rapproché d'office" : "rapproché") : h("span", {class: "neg"}, "à rapprocher")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, x.auto ? "rapproché d'office" : "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
 }});
 
 function ecranRapprochement(j, etat, attente){
@@ -22,7 +23,7 @@ function ecranRapprochement(j, etat, attente){
   const bloc = h("div");
   bloc.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".6rem"}},
     h("div", null, h("strong", null, (groupe.length > 1 ? "Achat groupé · " : "") + (j.origine === "mobile" ? "Saisie du téléphone" : "Pièce ajoutée sur le PC") + " du " + dateFr(j.date)),
-      j.statut === "rapproche" ? h("span", {class: "pos"}, " · rapproché") : null),
+      j.statut === "rapproche" ? h("span", {class: "pos"}, " · rapproché") : null, j.aValider ? h("span", {class: "neg"}, " · à valider : vérifiez et corrigez, puis « Valider la saisie »") : null),
     idx >= 0 ? h("div", {class: "outils"}, h("button", {class: "discret", disabled: idx <= 0, onclick: () => { etat.choisi = attente[idx - 1].id; rafraichirEcran(); }}, "‹ Précédent"),
       h("span", {class: "discret"}, (idx + 1) + " sur " + attente.length),
       h("button", {class: "discret", disabled: idx >= attente.length - 1, onclick: () => { etat.choisi = attente[idx + 1].id; rafraichirEcran(); }}, "Suivant ›")) : null));
@@ -85,7 +86,7 @@ function ecranRapprochement(j, etat, attente){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
-        lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
+        lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
       // Le fournisseur est créé (ou rattaché) à la validation, y compris un nom resté provisoire
       if (f.x.commercantNom && (f.x.commercantNom !== ancienNom || !f.x.commercant)){
@@ -96,9 +97,11 @@ function ecranRapprochement(j, etat, attente){
         f.x.commercant = fiche.id; invaliderIndex();
       }
       enregistrer("justificatifs", f.x);
+      if (f.x.carte === "ESPECES" && !(f.x.operations || []).length) creerOperationEspeces(f.x);
     }
   };
-  saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini", onclick: () => { if (enregistrerSaisie() === false) return; message("Saisie enregistrée."); rafraichirEcran(); }}, "Enregistrer la saisie"),
+  saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini" + (j.aValider ? " primaire" : ""), onclick: () => { const v = groupe.some(x => x.aValider); if (enregistrerSaisie() === false) return;
+      if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s) d'office." : ".")); } else message("Saisie enregistrée."); rafraichirEcran(); }}, j.aValider ? "Valider la saisie" : "Enregistrer la saisie"),
     h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer ce justificatif ?", "Supprimer", true)){ for (const x of groupe){ delier(x); supprimer("justificatifs", x.id); } etat.choisi = null; rafraichirEcran(); } }}, "Supprimer")));
   if (j.texteOCR) saisie.appendChild(h("details", {style: {marginTop: ".5rem"}}, h("summary", {class: "petit"}, "Texte lu sur la pièce"), h("div", {class: "texte-brut"}, j.texteOCR)));
   grille.appendChild(saisie);
@@ -127,7 +130,7 @@ function ecranRapprochement(j, etat, attente){
     const [av, ap] = fenetre(j);
     cand.appendChild(h("p", {class: "note"}, "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" ? "facture" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office."));
     cand.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}},
-      h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => creerOperationEspeces(x)); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
+      h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => { if (!(x.operations || []).length) creerOperationEspeces(x); }); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
       h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) enregistrer("justificatifs", Object.assign(x, {reporte: aujourdhui()})); const suivant = attente[idx + 1]; etat.choisi = suivant ? suivant.id : null; rafraichirEcran(); }}, "Reporter")));
   }
   grille.appendChild(cand);
@@ -137,14 +140,14 @@ function ecranRapprochement(j, etat, attente){
 
 /* ---------- Boîte de saisies ---------- */
 declarerEcran("boite", {titre: "Boîte de saisies", rendre(c){
-  c.appendChild(entete("Boîte de saisies", "Dépôts chiffrés du téléphone, lus par ce PC. Une saisie fusionnée part dans « boite/traitees » : conservée, jamais effacée.",
+  c.appendChild(entete("Boîte de saisies", "Dépôts chiffrés du téléphone, lus par ce PC. Reprises, elles arrivent dans Justificatifs « à valider », où tout se corrige ; le dépôt part dans « boite/traitees » : conservé, jamais effacé.",
     [h("button", {class: "discret", onclick: async () => { await actualiserBoite(); message(BOITE_CACHE.length + " saisie(s) en attente."); rafraichirEcran(); }}, "Relire la boîte"),
      BOITE_CACHE.length ? h("button", {class: "primaire", onclick: async (e) => {
        e.target.disabled = true;
-       try { const r = await fusionnerBoite(BOITE_CACHE); BOITE_CACHE = []; message(r.justificatifs + " justificatif(s) fusionné(s), " + r.auto + " rapproché(s) d'office."); }
+       try { const r = await fusionnerBoite(BOITE_CACHE); BOITE_CACHE = []; message(r.justificatifs + " saisie(s) reprise(s), à valider dans Justificatifs."); await actualiserBoite(); aller("justificatifs"); return; }
        catch (err){ message(err.message, true); }
        await actualiserBoite(); rafraichirEcran();
-     }}, "Fusionner dans les comptes") : null]));
+     }}, "Reprendre pour validation") : null]));
   if (SESSION.adaptateur?.nom === "local") c.appendChild(h("div", {class: "bandeau info"}, "Le stockage « ce navigateur seulement » ne reçoit pas les saisies du téléphone : choisissez le dossier OneDrive dans les Réglages."));
   c.appendChild(tableau([{titre: "Déposée le"}, {titre: "Date"}, {titre: "Fournisseur"}, {titre: "Nature exacte"}, {titre: "Montant", num: true}, {titre: "Catégorie"}, {titre: "Payé avec"}, {titre: "Tickets", num: true}], BOITE_CACHE, {
     vide: "La boîte est vide.", ligne: e => {

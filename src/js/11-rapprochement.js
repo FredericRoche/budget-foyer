@@ -108,7 +108,8 @@ function delier(j){
 
 /* Passe automatique, après chaque import ou fusion de la boîte. */
 function rapprocherTout(){
-  const libres = vivants("justificatifs").filter(j => j.statut === "a_rapprocher" || !j.statut);
+  // Une saisie du téléphone n'est rapprochée qu'une fois validée sur le PC
+  const libres = vivants("justificatifs").filter(j => (j.statut === "a_rapprocher" || !j.statut) && !j.aValider);
   let auto = 0;
   // 1. Groupes déclarés au téléphone (« second ticket au même paiement »)
   const groupes = regrouper(libres.filter(j => j.groupe), j => j.groupe);
@@ -181,7 +182,7 @@ async function creerJustificatif(donnees, piece){
     } else j.fournisseurProvisoire = true;
     enregistrer("justificatifs", j);
   }
-  if (j.carte === "ESPECES") creerOperationEspeces(j);
+  if (j.carte === "ESPECES" && !j.aValider) creerOperationEspeces(j);
   return j;
 }
 function compteEspeces(){
@@ -212,7 +213,7 @@ async function fusionnerBoite(elements){
       await creerJustificatif({type: t.type || "ticket", date: t.date || s.date, heure: t.heure || "", montant: Math.abs(lireMontant(t.montant)),
         raisonSociale: t.raisonSociale || "", commercantNom: t.commercant || "", commercantCorrige: !!t.commercantCorrige, natureExacte: t.natureExacte || "",
         categorie: s.categorie || "", sousCategorie: s.sousCategorie || "", lieu: s.lieu || "", carte: s.carte || "", carte4: t.carte4 || "", siret: t.siret || "",
-        texteOCR: t.texte || "", origine: "mobile", auteur: s.auteur || "", saisie: e.nom, groupe}, piece);
+        texteOCR: t.texte || "", origine: "mobile", auteur: s.auteur || "", saisie: e.nom, groupe, aValider: true}, piece);
       n++;
     }
     await SESSION.adaptateur.deplacer(e.chemin, "boite/traitees");
