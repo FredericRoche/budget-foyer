@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-LghqpXOu2cEril57rk86+8sS2HU12bikhJI0umlkM40=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-0RKP2d7vb61IjZE1iL5dDCMRKk8nQ8xL1fwybpElJkM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -344,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1005";
+const VERSION_APP = "2026-10-20.1013";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1210,7 +1210,7 @@ const adaptateurGraph = {
   },
   async ecrireNouveau(chemin, octets){
     const r = await this.requete(this.url(chemin) + "/content?@microsoft.graph.conflictBehavior=fail", {method: "PUT", headers: {"Content-Type": "application/octet-stream"}, body: octets});
-    if (!r.ok) throw new Error("OneDrive : dépôt impossible (" + r.status + ").");
+    if (!r.ok) throw new Error("OneDrive : dépôt impossible (" + r.status + " " + (await r.text().catch(() => "")).slice(0, 160) + ").");
     return (await r.json()).eTag;
   },
   async lister(dossier){
@@ -1225,7 +1225,7 @@ const adaptateurGraph = {
     const parent = dossier.includes("/") ? this.url(dossier.split("/").slice(0, -1).join("/")) : GRAPH;
     const c = await this.requete(parent + "/children", {method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({name: dossier.split("/").pop(), folder: {}, "@microsoft.graph.conflictBehavior": "replace"})});
-    if (!c.ok) throw new Error("OneDrive : création du dossier impossible (" + c.status + ").");
+    if (!c.ok) throw new Error("OneDrive : création du dossier impossible (" + c.status + " " + (await c.text().catch(() => "")).slice(0, 160) + ").");
     return (await c.json()).id;
   },
   async deplacer(chemin, dossierCible){
@@ -5445,7 +5445,8 @@ async function accueilMobile(corps){
   const file = DEMO ? [] : (await idbCles("file")).filter(k => String(k).startsWith("envoi:"));
   corps.append(h("button", {class: "primaire gros", onclick: () => photographier(corps, null)}, "📷 Photographier un ticket"),
     h("button", {class: "gros", onclick: () => formulaireMobile(corps, nouvelleSaisieMobile(), null)}, "Saisir sans ticket"));
-  if (file.length) corps.appendChild(h("div", {class: "bandeau info"}, file.length + " saisie(s) en attente de réseau. ", h("button", {class: "mini", onclick: () => envoyerFile().then(() => accueilMobile(corps))}, "Envoyer maintenant")));
+  if (file.length) corps.appendChild(h("div", {class: "bandeau info"}, file.length + " saisie(s) en attente d'envoi. ", h("button", {class: "mini", onclick: () => envoyerFile().then(() => accueilMobile(corps))}, "Envoyer maintenant"),
+    MOBILE.erreurEnvoi ? h("div", {class: "legende-tel neg", style: {marginTop: ".4rem"}}, "Dernier essai refusé : " + MOBILE.erreurEnvoi) : null));
   corps.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Mes dernières saisies"));
   const ul = h("ul", {class: "recentes"});
   for (const x of (await historiqueMobile()).slice(0, 12)) ul.appendChild(h("li", null, h("span", null, dateCourte(x.date) + " · " + x.commercant), h("span", {class: "num"}, euros(x.montant) + (x.envoye ? " ✓" : " ⏳"))));
@@ -5569,7 +5570,8 @@ async function envoyerFile(){
       const x = hist.find(y => y.id === id); if (x) x.envoye = true;
     }
     await definirReglage("mobile_historique", hist);
-  } catch (e){ console.warn(e); }
+    MOBILE.erreurEnvoi = "";
+  } catch (e){ console.warn(e); MOBILE.erreurEnvoi = (e && e.message) || String(e); }
   finally { MOBILE.envoiEnCours = false; }
 }
 addEventListener("online", () => { if (!$("saisie").hidden) envoyerFile().catch(() => {}); });

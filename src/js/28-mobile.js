@@ -70,7 +70,8 @@ async function accueilMobile(corps){
   const file = DEMO ? [] : (await idbCles("file")).filter(k => String(k).startsWith("envoi:"));
   corps.append(h("button", {class: "primaire gros", onclick: () => photographier(corps, null)}, "📷 Photographier un ticket"),
     h("button", {class: "gros", onclick: () => formulaireMobile(corps, nouvelleSaisieMobile(), null)}, "Saisir sans ticket"));
-  if (file.length) corps.appendChild(h("div", {class: "bandeau info"}, file.length + " saisie(s) en attente de réseau. ", h("button", {class: "mini", onclick: () => envoyerFile().then(() => accueilMobile(corps))}, "Envoyer maintenant")));
+  if (file.length) corps.appendChild(h("div", {class: "bandeau info"}, file.length + " saisie(s) en attente d'envoi. ", h("button", {class: "mini", onclick: () => envoyerFile().then(() => accueilMobile(corps))}, "Envoyer maintenant"),
+    MOBILE.erreurEnvoi ? h("div", {class: "legende-tel neg", style: {marginTop: ".4rem"}}, "Dernier essai refusé : " + MOBILE.erreurEnvoi) : null));
   corps.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Mes dernières saisies"));
   const ul = h("ul", {class: "recentes"});
   for (const x of (await historiqueMobile()).slice(0, 12)) ul.appendChild(h("li", null, h("span", null, dateCourte(x.date) + " · " + x.commercant), h("span", {class: "num"}, euros(x.montant) + (x.envoye ? " ✓" : " ⏳"))));
@@ -194,7 +195,8 @@ async function envoyerFile(){
       const x = hist.find(y => y.id === id); if (x) x.envoye = true;
     }
     await definirReglage("mobile_historique", hist);
-  } catch (e){ console.warn(e); }
+    MOBILE.erreurEnvoi = "";
+  } catch (e){ console.warn(e); MOBILE.erreurEnvoi = (e && e.message) || String(e); }
   finally { MOBILE.envoiEnCours = false; }
 }
 addEventListener("online", () => { if (!$("saisie").hidden) envoyerFile().catch(() => {}); });

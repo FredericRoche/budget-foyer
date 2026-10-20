@@ -2,7 +2,7 @@
    Stratégie « réseau d'abord » pour la page (toujours la version fraîche quand le réseau
    répond), « cache d'abord » pour les bibliothèques versionnées. Aucune donnée du
    livre ne passe par ce cache : seules les ressources de l'application. */
-const VERSION = "2026-10-20.1005";
+const VERSION = "2026-10-20.1013";
 const CACHE = "budget-foyer-" + VERSION;
 const ESSENTIELS = ["./", "index.html", "manifest.webmanifest", "icone-192.png", "icone-512.png", "vendor/msal-browser.min.js", "vendor/qrcode.js"];
 

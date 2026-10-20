@@ -174,7 +174,7 @@ const adaptateurGraph = {
   },
   async ecrireNouveau(chemin, octets){
     const r = await this.requete(this.url(chemin) + "/content?@microsoft.graph.conflictBehavior=fail", {method: "PUT", headers: {"Content-Type": "application/octet-stream"}, body: octets});
-    if (!r.ok) throw new Error("OneDrive : dépôt impossible (" + r.status + ").");
+    if (!r.ok) throw new Error("OneDrive : dépôt impossible (" + r.status + " " + (await r.text().catch(() => "")).slice(0, 160) + ").");
     return (await r.json()).eTag;
   },
   async lister(dossier){
@@ -189,7 +189,7 @@ const adaptateurGraph = {
     const parent = dossier.includes("/") ? this.url(dossier.split("/").slice(0, -1).join("/")) : GRAPH;
     const c = await this.requete(parent + "/children", {method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({name: dossier.split("/").pop(), folder: {}, "@microsoft.graph.conflictBehavior": "replace"})});
-    if (!c.ok) throw new Error("OneDrive : création du dossier impossible (" + c.status + ").");
+    if (!c.ok) throw new Error("OneDrive : création du dossier impossible (" + c.status + " " + (await c.text().catch(() => "")).slice(0, 160) + ").");
     return (await c.json()).id;
   },
   async deplacer(chemin, dossierCible){
