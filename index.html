@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1CQNE+KGEa4tsyyiUWD040JRkZvYe7yK3JVCFKEGVVU=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-nG2eriymFdQvwGKiPLswHfFAdZ1tZEO4P3cUoo/iFj8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1347";
+const VERSION_APP = "2026-10-20.1500";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3036,6 +3036,15 @@ const estCapital = e => !!e.projet || !!e.capital || e.categorie === "Patrimoine
    Valeurs brutes : la fiscalité latente n'est pas déduite. */
 const estMobilisable = c => c.actif !== false && (c.mobilisable ?? ["livret", "assurance_vie", "retraite", "pea"].includes(c.type));
 
+/* Échéance « enveloppe » d'un projet (travaux…) : son montant est un plafond global. Reste à payer =
+   enveloppe − paiements déjà faits sur le projet − autres paiements prévus du projet (jamais négatif). */
+function montantEcheance(e){
+  if (!e.enveloppe || !e.projet || !(e.montant < 0)) return e.montant;
+  const ech = vivants("echeances").filter(x => x.projet === e.projet && x.active !== false);
+  const paye = -somme(operationsDuProjet(e.projet, ech), o => o.montant);
+  const autres = -somme(ech.filter(x => x !== e && x.id !== e.id && !x.enveloppe), x => somme(occurrences(x, ajouterJours(aujourdhui(), 1), "2100-12-31"), () => x.montant));
+  return -Math.max(0, -e.montant - paye - Math.max(0, autres));
+}
 function occurrences(e, debut, fin){
   const r = []; const d0 = e.debut || debut;
   if (e.recurrence === "unique" || !e.recurrence){ if (d0 >= debut && d0 <= fin) r.push(d0); return r; }
@@ -3084,7 +3093,7 @@ function simulerTresorerie(options){
   for (const e of vivants("echeances").filter(x => x.active !== false && (!x.compte || x.compte === compte.id))){
     if (e.ligneBudget) lignesLiees.add(e.ligneBudget);
     if (o.perimetre === "courant" && estCapital(e)) continue;
-    for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, e.montant, e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
+    for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, montantEcheance(e), e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
   }
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
   // Intérêts des livrets de l'année écoulée, virés au compte courant en janvier
@@ -3175,7 +3184,7 @@ function simulerEpargne(options){
   const ajouter = (d, m, libelle, genre, echeance) => { flux.set(d, (flux.get(d) || 0) + m); evenements.push({date: d, montant: m, libelle, genre, echeance}); };
   for (const e of vivants("echeances").filter(x => x.active !== false))
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)){
-      if (estCapital(e)) ajouter(d, e.montant, e.libelle + (e.projet ? " (projet " + e.projet + ")" : ""), e.projet ? "projet" : "capital", e);
+      if (estCapital(e)) ajouter(d, montantEcheance(e), e.libelle + (e.projet ? " (projet " + e.projet + ")" : ""), e.projet ? "projet" : "capital", e);
       else if (courant && estVirementDepuisEpargne(e, courant.compte)) ajouter(d, -e.montant, e.libelle + " (vers " + courant.compte.nom + ")", "courant", e);
     }
   const interetsLivrets = produitsEpargne(o.depart).livrets;
@@ -5034,11 +5043,13 @@ async function editerEcheance(e){
   const proj = h("input", {type: "text", value: x.projet || "", list: "ech-projets", placeholder: "vide : marche courante du foyer"});
   const listeProj = h("datalist", {id: "ech-projets"}, ...projets.map(n => h("option", {value: n})));
   const capi = h("input", {type: "checkbox", checked: !!x.capital || x.categorie === "Patrimoine", id: "ech-capital"});
+  const env = h("input", {type: "checkbox", checked: !!x.enveloppe, id: "ech-enveloppe"});
   const ok = await dialogue({titre: e ? "Modifier l'échéance" : "Nouvelle échéance", large: true, corps: h("div", null, h("div", {class: "grille-champs"},
     champ("Libellé", lib), champ("Montant (négatif = sortie)", mt), champ("Récurrence", rec), champ("Date (ou première date)", d1), champ("Jusqu'au (facultatif)", d2),
     champ("Catégorie", cat), champ("Nature", nat), champ("Remplace en trésorerie la ligne de budget", lb, "Évite de compter deux fois le loyer, par exemple."),
     champ("Projet (hors marche courante)", h("span", null, proj, listeProj), "Travaux, voiture… : suivis à part, avec leur financement.")),
     h("div", {class: "case"}, capi, h("label", {for: "ech-capital"}, "Flux de capital (cession de titres, placement…) : hors marche courante, suivi dans Projets ; un projet l'est toujours")),
+    h("div", {class: "case"}, env, h("label", {for: "ech-enveloppe"}, "Enveloppe du projet : les paiements du projet s'imputent sur ce montant, le reste à payer diminue d'autant")),
     h("div", {class: "case"}, active, h("label", {for: "ech-active"}, "Active"))),
     actions: [e ? {libelle: "Supprimer", classe: "danger", action: () => { supprimer("echeances", e.id); return true; }} : null, {libelle: "Annuler", classe: "discret", valeur: false},
       {libelle: "Enregistrer", classe: "primaire", action: () => {
@@ -5046,7 +5057,7 @@ async function editerEcheance(e){
         const v = valeurCategorie(cat);
         if (!dateSaisieOk(d1, "Date") || !dateSaisieOk(d2, "Jusqu'au", true)) return false;
         enregistrer("echeances", Object.assign(x, {libelle: lib.value.trim(), montant: m, recurrence: rec.value, debut: d1.value, fin: d2.value || null, ligneBudget: lb.value || null,
-          active: active.checked, aConfirmer: false, nature: nat.value, projet: proj.value.trim() || null, capital: capi.checked}, v.categorie === "À préciser" ? {} : v));
+          active: active.checked, aConfirmer: false, nature: nat.value, projet: proj.value.trim() || null, capital: capi.checked, enveloppe: env.checked && !!proj.value.trim()}, v.categorie === "À préciser" ? {} : v));
         return true;
       }}].filter(Boolean)});
   if (ok) rafraichirEcran();
@@ -5292,7 +5303,7 @@ function prochainPaiement(prevu){
 }
 function etatProjet(nom){
   const ech = vivants("echeances").filter(e => e.projet === nom && e.active !== false);
-  const prevu = ech.flatMap(e => occurrences(e, ajouterJours(aujourdhui(), 1), "2100-12-31").map(d => ({date: d, montant: e.montant, echeance: e}))).sort((a, b) => a.date < b.date ? -1 : 1);
+  const prevu = ech.flatMap(e => occurrences(e, ajouterJours(aujourdhui(), 1), "2100-12-31").map(d => ({date: d, montant: montantEcheance(e), echeance: e}))).sort((a, b) => a.date < b.date ? -1 : 1);
   const ops = operationsDuProjet(nom, ech);
   const paye = -somme(ops, o => o.montant), reste = -somme(prevu, x => x.montant);
   return {nom, ech, prevu, ops, paye, reste, total: paye + reste};
@@ -5875,6 +5886,12 @@ async function autotest(){
         v("téléphone : fournisseur retrouvé par un morceau du nom ou de l'alias", rechercherFournisseurs(["savour"], [{nom: "La Savoureine Eurre", alias: []}, {nom: "Autre", alias: ["SAVOUREINE SARL"]}, {nom: "Sans rapport", alias: []}]).map(f => f.nom), ["La Savoureine Eurre", "Autre"]);
         v("pièce : lecture illisible ni proposée ni apprise comme nom", [nomPlausible("‘ au qi Tee ce L j"), nomPlausible("La Savoureine")], [false, true]);
         v("projet : dépense rattachée par catégorie et nature, pièce par catégorie seule", [estDepenseProjet({categorie: "Travaux", sousCategorie: "Archi", nature: "Exceptionnelle"}, [{categorie: "Travaux"}]), estDepenseProjet({categorie: "Travaux", nature: "Courante"}, [{categorie: "Travaux"}]), estDepenseProjet({categorie: "Travaux"}, [{categorie: "Travaux"}], true), estDepenseProjet({categorie: "Courses", projet: "Maison"}, [])], [true, false, true, true]);
+        {
+          const ee = enregistrer("echeances", {libelle: "Enveloppe essai", montant: -1000, recurrence: "unique", debut: ajouterJours(aujourdhui(), 200), projet: "Essai env", categorie: "Essai env cat", nature: "Exceptionnelle", capital: true, enveloppe: true});
+          const oe = enregistrer("operations", {compte: "x", date: aujourdhui(), montant: -200, libelle: "acompte", categorie: "Essai env cat", nature: "Exceptionnelle", projet: "Essai env"});
+          v("projet : l'enveloppe est consommée par les paiements", [montantEcheance(ee), etatProjet("Essai env").total], [-800, 1000]);
+          supprimer("operations", oe.id); supprimer("echeances", ee.id);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

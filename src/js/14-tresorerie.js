@@ -20,6 +20,15 @@ const estCapital = e => !!e.projet || !!e.capital || e.categorie === "Patrimoine
    Valeurs brutes : la fiscalité latente n'est pas déduite. */
 const estMobilisable = c => c.actif !== false && (c.mobilisable ?? ["livret", "assurance_vie", "retraite", "pea"].includes(c.type));
 
+/* Échéance « enveloppe » d'un projet (travaux…) : son montant est un plafond global. Reste à payer =
+   enveloppe − paiements déjà faits sur le projet − autres paiements prévus du projet (jamais négatif). */
+function montantEcheance(e){
+  if (!e.enveloppe || !e.projet || !(e.montant < 0)) return e.montant;
+  const ech = vivants("echeances").filter(x => x.projet === e.projet && x.active !== false);
+  const paye = -somme(operationsDuProjet(e.projet, ech), o => o.montant);
+  const autres = -somme(ech.filter(x => x !== e && x.id !== e.id && !x.enveloppe), x => somme(occurrences(x, ajouterJours(aujourdhui(), 1), "2100-12-31"), () => x.montant));
+  return -Math.max(0, -e.montant - paye - Math.max(0, autres));
+}
 function occurrences(e, debut, fin){
   const r = []; const d0 = e.debut || debut;
   if (e.recurrence === "unique" || !e.recurrence){ if (d0 >= debut && d0 <= fin) r.push(d0); return r; }
@@ -68,7 +77,7 @@ function simulerTresorerie(options){
   for (const e of vivants("echeances").filter(x => x.active !== false && (!x.compte || x.compte === compte.id))){
     if (e.ligneBudget) lignesLiees.add(e.ligneBudget);
     if (o.perimetre === "courant" && estCapital(e)) continue;
-    for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, e.montant, e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
+    for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, montantEcheance(e), e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
   }
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
   // Intérêts des livrets de l'année écoulée, virés au compte courant en janvier
@@ -159,7 +168,7 @@ function simulerEpargne(options){
   const ajouter = (d, m, libelle, genre, echeance) => { flux.set(d, (flux.get(d) || 0) + m); evenements.push({date: d, montant: m, libelle, genre, echeance}); };
   for (const e of vivants("echeances").filter(x => x.active !== false))
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)){
-      if (estCapital(e)) ajouter(d, e.montant, e.libelle + (e.projet ? " (projet " + e.projet + ")" : ""), e.projet ? "projet" : "capital", e);
+      if (estCapital(e)) ajouter(d, montantEcheance(e), e.libelle + (e.projet ? " (projet " + e.projet + ")" : ""), e.projet ? "projet" : "capital", e);
       else if (courant && estVirementDepuisEpargne(e, courant.compte)) ajouter(d, -e.montant, e.libelle + " (vers " + courant.compte.nom + ")", "courant", e);
     }
   const interetsLivrets = produitsEpargne(o.depart).livrets;

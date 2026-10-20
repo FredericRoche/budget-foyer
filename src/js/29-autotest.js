@@ -145,6 +145,12 @@ async function autotest(){
         v("téléphone : fournisseur retrouvé par un morceau du nom ou de l'alias", rechercherFournisseurs(["savour"], [{nom: "La Savoureine Eurre", alias: []}, {nom: "Autre", alias: ["SAVOUREINE SARL"]}, {nom: "Sans rapport", alias: []}]).map(f => f.nom), ["La Savoureine Eurre", "Autre"]);
         v("pièce : lecture illisible ni proposée ni apprise comme nom", [nomPlausible("‘ au qi Tee ce L j"), nomPlausible("La Savoureine")], [false, true]);
         v("projet : dépense rattachée par catégorie et nature, pièce par catégorie seule", [estDepenseProjet({categorie: "Travaux", sousCategorie: "Archi", nature: "Exceptionnelle"}, [{categorie: "Travaux"}]), estDepenseProjet({categorie: "Travaux", nature: "Courante"}, [{categorie: "Travaux"}]), estDepenseProjet({categorie: "Travaux"}, [{categorie: "Travaux"}], true), estDepenseProjet({categorie: "Courses", projet: "Maison"}, [])], [true, false, true, true]);
+        {
+          const ee = enregistrer("echeances", {libelle: "Enveloppe essai", montant: -1000, recurrence: "unique", debut: ajouterJours(aujourdhui(), 200), projet: "Essai env", categorie: "Essai env cat", nature: "Exceptionnelle", capital: true, enveloppe: true});
+          const oe = enregistrer("operations", {compte: "x", date: aujourdhui(), montant: -200, libelle: "acompte", categorie: "Essai env cat", nature: "Exceptionnelle", projet: "Essai env"});
+          v("projet : l'enveloppe est consommée par les paiements", [montantEcheance(ee), etatProjet("Essai env").total], [-800, 1000]);
+          supprimer("operations", oe.id); supprimer("echeances", ee.id);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

@@ -84,11 +84,13 @@ async function editerEcheance(e){
   const proj = h("input", {type: "text", value: x.projet || "", list: "ech-projets", placeholder: "vide : marche courante du foyer"});
   const listeProj = h("datalist", {id: "ech-projets"}, ...projets.map(n => h("option", {value: n})));
   const capi = h("input", {type: "checkbox", checked: !!x.capital || x.categorie === "Patrimoine", id: "ech-capital"});
+  const env = h("input", {type: "checkbox", checked: !!x.enveloppe, id: "ech-enveloppe"});
   const ok = await dialogue({titre: e ? "Modifier l'échéance" : "Nouvelle échéance", large: true, corps: h("div", null, h("div", {class: "grille-champs"},
     champ("Libellé", lib), champ("Montant (négatif = sortie)", mt), champ("Récurrence", rec), champ("Date (ou première date)", d1), champ("Jusqu'au (facultatif)", d2),
     champ("Catégorie", cat), champ("Nature", nat), champ("Remplace en trésorerie la ligne de budget", lb, "Évite de compter deux fois le loyer, par exemple."),
     champ("Projet (hors marche courante)", h("span", null, proj, listeProj), "Travaux, voiture… : suivis à part, avec leur financement.")),
     h("div", {class: "case"}, capi, h("label", {for: "ech-capital"}, "Flux de capital (cession de titres, placement…) : hors marche courante, suivi dans Projets ; un projet l'est toujours")),
+    h("div", {class: "case"}, env, h("label", {for: "ech-enveloppe"}, "Enveloppe du projet : les paiements du projet s'imputent sur ce montant, le reste à payer diminue d'autant")),
     h("div", {class: "case"}, active, h("label", {for: "ech-active"}, "Active"))),
     actions: [e ? {libelle: "Supprimer", classe: "danger", action: () => { supprimer("echeances", e.id); return true; }} : null, {libelle: "Annuler", classe: "discret", valeur: false},
       {libelle: "Enregistrer", classe: "primaire", action: () => {
@@ -96,7 +98,7 @@ async function editerEcheance(e){
         const v = valeurCategorie(cat);
         if (!dateSaisieOk(d1, "Date") || !dateSaisieOk(d2, "Jusqu'au", true)) return false;
         enregistrer("echeances", Object.assign(x, {libelle: lib.value.trim(), montant: m, recurrence: rec.value, debut: d1.value, fin: d2.value || null, ligneBudget: lb.value || null,
-          active: active.checked, aConfirmer: false, nature: nat.value, projet: proj.value.trim() || null, capital: capi.checked}, v.categorie === "À préciser" ? {} : v));
+          active: active.checked, aConfirmer: false, nature: nat.value, projet: proj.value.trim() || null, capital: capi.checked, enveloppe: env.checked && !!proj.value.trim()}, v.categorie === "À préciser" ? {} : v));
         return true;
       }}].filter(Boolean)});
   if (ok) rafraichirEcran();

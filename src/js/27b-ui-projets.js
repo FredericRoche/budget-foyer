@@ -21,7 +21,7 @@ function prochainPaiement(prevu){
 }
 function etatProjet(nom){
   const ech = vivants("echeances").filter(e => e.projet === nom && e.active !== false);
-  const prevu = ech.flatMap(e => occurrences(e, ajouterJours(aujourdhui(), 1), "2100-12-31").map(d => ({date: d, montant: e.montant, echeance: e}))).sort((a, b) => a.date < b.date ? -1 : 1);
+  const prevu = ech.flatMap(e => occurrences(e, ajouterJours(aujourdhui(), 1), "2100-12-31").map(d => ({date: d, montant: montantEcheance(e), echeance: e}))).sort((a, b) => a.date < b.date ? -1 : 1);
   const ops = operationsDuProjet(nom, ech);
   const paye = -somme(ops, o => o.montant), reste = -somme(prevu, x => x.montant);
   return {nom, ech, prevu, ops, paye, reste, total: paye + reste};
