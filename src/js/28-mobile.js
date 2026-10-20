@@ -97,6 +97,7 @@ function photographier(corps, saisie){
 function commercantsExtrait(){ return (MOBILE.extrait?.commercants || []).map(c => Object.assign({}, c, {alias: c.alias || []})); }
 async function formulaireMobile(corps, saisie, t){
   vider(corps);
+  if (!MOBILE.extrait && !DEMO) await chargerExtrait().catch(() => {});
   const ex = MOBILE.extrait;
   const fiche = t ? commercantPourTicket(t, commercantsExtrait()) : null;
   const dernier = await reglage("mobile_dernier", {});
@@ -144,6 +145,7 @@ async function formulaireMobile(corps, saisie, t){
     return true;
   };
   corps.append(
+    !ex ? h("div", {class: "bandeau info"}, "Liste des fournisseurs et des cartes pas encore reçue du PC : saisissez le nom à la main, il sera rapproché sur le PC.") : null,
     saisie.tickets.length ? h("div", {class: "bandeau calme"}, "Paiement groupé : ticket " + (saisie.tickets.length + 1) + " (déjà : " + saisie.tickets.map(x => euros(lireMontant(x.montant))).join(" + ") + ")") : null,
     t?.photo ? h("img", {class: "apercu-photo", src: URL.createObjectURL(new Blob([t.photo.octets], {type: t.photo.mime})), alt: "Ticket", style: {maxHeight: "18vh"}}) : null,
     h("div", {class: "bloc"}, h("label", null, "Montant", t?.montant ? h("span", {class: "propose"}, "proposé") : null), montant),

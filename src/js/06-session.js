@@ -124,6 +124,7 @@ async function synchroniser(octetsPrets){
       } catch (e){ if (!e.conflit) throw e; /* un autre appareil vient d'écrire : on relit et on fusionne */ }
     }
     if (ad.nom === "dossier") await fusionnerCopiesDeConflit(ad);
+    publierExtraitSiBesoin();
     SESSION.erreur = ""; SESSION.derniereSynchro = new Date();
   } catch (e){ SESSION.erreur = e.message; throw e; }
   finally { SESSION.enCours = false; majEtatSynchro(); }
@@ -202,6 +203,13 @@ function construireExtrait(){
   const commercants = vivants("commercants").map(c => ({nom: c.nom, alias: (c.alias || []).slice(0, 12), categorie: c.categorie || "", sousCategorie: c.sousCategorie || "",
     lieu: c.lieu || "", natures: Object.entries(c.natures || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(x => x[0])}));
   return {maj: Date.now(), lieux: LIVRE.parametres.lieux, cartes, categories: LIVRE.parametres.categories, commercants};
+}
+/* Le téléphone lit fournisseurs, cartes, catégories et lieux dans cet extrait : le tenir à jour sans geste. */
+let EXTRAIT_PUBLIE = 0;
+function publierExtraitSiBesoin(){
+  if (DEMO || !LIVRE?.cles?.extrait || Date.now() - EXTRAIT_PUBLIE < 30 * 60000) return;
+  EXTRAIT_PUBLIE = Date.now();
+  publierExtraitCommercants().catch(() => { EXTRAIT_PUBLIE = 0; });
 }
 async function publierExtraitCommercants(){
   const ad = SESSION.adaptateur;

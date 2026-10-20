@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-TbGAiMbt4FvGO3zLXVXk6vLP2JVXCTHGugvS2kc+Z2k=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-LghqpXOu2cEril57rk86+8sS2HU12bikhJI0umlkM40=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -344,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-19.2034";
+const VERSION_APP = "2026-10-20.1005";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1383,6 +1383,7 @@ async function synchroniser(octetsPrets){
       } catch (e){ if (!e.conflit) throw e; /* un autre appareil vient d'écrire : on relit et on fusionne */ }
     }
     if (ad.nom === "dossier") await fusionnerCopiesDeConflit(ad);
+    publierExtraitSiBesoin();
     SESSION.erreur = ""; SESSION.derniereSynchro = new Date();
   } catch (e){ SESSION.erreur = e.message; throw e; }
   finally { SESSION.enCours = false; majEtatSynchro(); }
@@ -1461,6 +1462,13 @@ function construireExtrait(){
   const commercants = vivants("commercants").map(c => ({nom: c.nom, alias: (c.alias || []).slice(0, 12), categorie: c.categorie || "", sousCategorie: c.sousCategorie || "",
     lieu: c.lieu || "", natures: Object.entries(c.natures || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(x => x[0])}));
   return {maj: Date.now(), lieux: LIVRE.parametres.lieux, cartes, categories: LIVRE.parametres.categories, commercants};
+}
+/* Le téléphone lit fournisseurs, cartes, catégories et lieux dans cet extrait : le tenir à jour sans geste. */
+let EXTRAIT_PUBLIE = 0;
+function publierExtraitSiBesoin(){
+  if (DEMO || !LIVRE?.cles?.extrait || Date.now() - EXTRAIT_PUBLIE < 30 * 60000) return;
+  EXTRAIT_PUBLIE = Date.now();
+  publierExtraitCommercants().catch(() => { EXTRAIT_PUBLIE = 0; });
 }
 async function publierExtraitCommercants(){
   const ad = SESSION.adaptateur;
@@ -5464,6 +5472,7 @@ function photographier(corps, saisie){
 function commercantsExtrait(){ return (MOBILE.extrait?.commercants || []).map(c => Object.assign({}, c, {alias: c.alias || []})); }
 async function formulaireMobile(corps, saisie, t){
   vider(corps);
+  if (!MOBILE.extrait && !DEMO) await chargerExtrait().catch(() => {});
   const ex = MOBILE.extrait;
   const fiche = t ? commercantPourTicket(t, commercantsExtrait()) : null;
   const dernier = await reglage("mobile_dernier", {});
@@ -5511,6 +5520,7 @@ async function formulaireMobile(corps, saisie, t){
     return true;
   };
   corps.append(
+    !ex ? h("div", {class: "bandeau info"}, "Liste des fournisseurs et des cartes pas encore reçue du PC : saisissez le nom à la main, il sera rapproché sur le PC.") : null,
     saisie.tickets.length ? h("div", {class: "bandeau calme"}, "Paiement groupé : ticket " + (saisie.tickets.length + 1) + " (déjà : " + saisie.tickets.map(x => euros(lireMontant(x.montant))).join(" + ") + ")") : null,
     t?.photo ? h("img", {class: "apercu-photo", src: URL.createObjectURL(new Blob([t.photo.octets], {type: t.photo.mime})), alt: "Ticket", style: {maxHeight: "18vh"}}) : null,
     h("div", {class: "bloc"}, h("label", null, "Montant", t?.montant ? h("span", {class: "propose"}, "proposé") : null), montant),
