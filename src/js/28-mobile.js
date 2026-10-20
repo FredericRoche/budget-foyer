@@ -150,7 +150,9 @@ async function formulaireMobile(corps, saisie, t){
     if (trouves.length === 1 && norm(trouves[0].nom).toLowerCase() === norm(cm.value).toLowerCase()) return;
     for (const f of trouves) liste.appendChild(h("button", {type: "button", onclick: () => { cm.value = f.nom; vider(liste); majSugg(); }},
       h("span", null, f.nom), f.categorie ? h("small", null, f.sousCategorie || f.categorie) : null));
-    if (!trouves.length) liste.appendChild(h("div", {class: "legende-tel"}, "Aucun fournisseur connu : ce nom sera proposé comme nouveau, à confirmer sur le PC."));
+    // En dernier recours seulement : un nouveau fournisseur, provisoire jusqu'à la validation sur le PC
+    liste.appendChild(h("button", {type: "button", class: "nouveau", onclick: () => { cm.value = cm.value.trim(); vider(liste); liste.appendChild(h("div", {class: "legende-tel"}, "Nouveau fournisseur, provisoire : à confirmer sur le PC.")); }},
+      h("span", null, "＋ Nouveau fournisseur : « " + cm.value.trim() + " »")));
   };
   cm.addEventListener("input", majListe);
   const nat = h("input", {type: "text", placeholder: "ce qui a été acheté, pour quoi"});

@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-GomRsQbRtnUUZ5tunZoITrchDeGzR66ES0KLcExBErI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ujcwgzXRBizdTnZoRmuZ3ScvQpcZpnmx25MAt5Y8lvo=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -176,6 +176,7 @@ td.choix:hover{background:var(--ivoire); outline:1px dotted var(--sauge)}
 .liste-fournisseurs{display:flex; flex-direction:column; margin-top:.25rem}
 .liste-fournisseurs button{display:flex; justify-content:space-between; gap:.6rem; text-align:left; min-height:44px; padding:.45rem .7rem; border:1px solid var(--filet-clair); border-top:none; background:#fff; font-size:1rem}
 .liste-fournisseurs button:first-child{border-top:1px solid var(--filet-clair)}
+.liste-fournisseurs button.nouveau{color:var(--vert-empire); font-style:italic}
 .liste-fournisseurs small{color:var(--sauge); font-size:.8rem; align-self:center}
 .suggestions{display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.3rem}
 .suggestions button{font-size:.82rem; border:1px dashed var(--sauge); padding:.05rem .45rem; color:var(--vert-profond); background:#fff}
@@ -348,7 +349,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1240";
+const VERSION_APP = "2026-10-20.1241";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -5560,7 +5561,9 @@ async function formulaireMobile(corps, saisie, t){
     if (trouves.length === 1 && norm(trouves[0].nom).toLowerCase() === norm(cm.value).toLowerCase()) return;
     for (const f of trouves) liste.appendChild(h("button", {type: "button", onclick: () => { cm.value = f.nom; vider(liste); majSugg(); }},
       h("span", null, f.nom), f.categorie ? h("small", null, f.sousCategorie || f.categorie) : null));
-    if (!trouves.length) liste.appendChild(h("div", {class: "legende-tel"}, "Aucun fournisseur connu : ce nom sera proposé comme nouveau, à confirmer sur le PC."));
+    // En dernier recours seulement : un nouveau fournisseur, provisoire jusqu'à la validation sur le PC
+    liste.appendChild(h("button", {type: "button", class: "nouveau", onclick: () => { cm.value = cm.value.trim(); vider(liste); liste.appendChild(h("div", {class: "legende-tel"}, "Nouveau fournisseur, provisoire : à confirmer sur le PC.")); }},
+      h("span", null, "＋ Nouveau fournisseur : « " + cm.value.trim() + " »")));
   };
   cm.addEventListener("input", majListe);
   const nat = h("input", {type: "text", placeholder: "ce qui a été acheté, pour quoi"});

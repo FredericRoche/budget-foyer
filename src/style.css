@@ -161,6 +161,7 @@ td.choix:hover{background:var(--ivoire); outline:1px dotted var(--sauge)}
 .liste-fournisseurs{display:flex; flex-direction:column; margin-top:.25rem}
 .liste-fournisseurs button{display:flex; justify-content:space-between; gap:.6rem; text-align:left; min-height:44px; padding:.45rem .7rem; border:1px solid var(--filet-clair); border-top:none; background:#fff; font-size:1rem}
 .liste-fournisseurs button:first-child{border-top:1px solid var(--filet-clair)}
+.liste-fournisseurs button.nouveau{color:var(--vert-empire); font-style:italic}
 .liste-fournisseurs small{color:var(--sauge); font-size:.8rem; align-self:center}
 .suggestions{display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.3rem}
 .suggestions button{font-size:.82rem; border:1px dashed var(--sauge); padding:.05rem .45rem; color:var(--vert-profond); background:#fff}
