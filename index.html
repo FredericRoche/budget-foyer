@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-RZTHyYhv3+40qS9qWxXb7Jdubeq4IOP1g+zW35w7Wnc=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-4Z4KL/ho3eFLBj3GQvTCSW/Vclq5AOqnBQZ1baouO/k=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -216,7 +216,7 @@ svg text{font-family:var(--serif)}
 
 /* ---------- Saisie mobile ---------- */
 .saisie{max-width:30rem; margin:0 auto; min-height:100vh; background:var(--papier)}
-.saisie .barre-tel{background:var(--vert-empire); color:#fff; padding:.7rem 1rem; font-variant-caps:small-caps; letter-spacing:.06em; display:flex; justify-content:space-between; align-items:center; font-size:1.05rem; position:sticky; top:0; z-index:5}
+.saisie .barre-tel{background:var(--vert-empire); color:#fff; padding:.7rem 1rem; font-variant-caps:small-caps; letter-spacing:.06em; display:flex; justify-content:space-between; align-items:center; font-size:1.05rem; position:sticky; top:0; z-index:5; padding-top:calc(.7rem + env(safe-area-inset-top))}
 .saisie .barre-tel button{background:transparent; color:#fff; border-color:rgba(255,255,255,.6); font-size:.85rem}
 .saisie .corps-tel{padding:1rem}
 .saisie .gros{width:100%; padding:.95rem; font-size:1.12rem; margin-bottom:.6rem; min-height:48px}
@@ -344,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1040";
+const VERSION_APP = "2026-10-20.1053";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -5460,7 +5460,7 @@ async function demonstrationMobile(){
   accueilMobile(corps);
 }
 async function accueilMobile(corps){
-  vider(corps);
+  vider(corps); scrollTo(0, 0);
   const file = DEMO ? [] : (await idbCles("file")).filter(k => String(k).startsWith("envoi:"));
   corps.append(h("button", {class: "primaire gros", onclick: () => photographier(corps, null)}, "📷 Photographier un ticket"),
     h("button", {class: "gros", onclick: () => formulaireMobile(corps, nouvelleSaisieMobile(), null)}, "Saisir sans ticket"));
@@ -5496,7 +5496,7 @@ function photographier(corps, saisie){
 
 function commercantsExtrait(){ return (MOBILE.extrait?.commercants || []).map(c => Object.assign({}, c, {alias: c.alias || []})); }
 async function formulaireMobile(corps, saisie, t){
-  vider(corps);
+  vider(corps); scrollTo(0, 0);
   if (!MOBILE.extrait && !DEMO) await chargerExtrait().catch(() => {});
   const ex = MOBILE.extrait;
   const fiche = t ? commercantPourTicket(t, commercantsExtrait()) : null;
@@ -5504,7 +5504,9 @@ async function formulaireMobile(corps, saisie, t){
   const montant = h("input", {type: "text", inputmode: "decimal", class: "montant", value: t?.montant ? nombre(t.montant) : ""});
   const date = champDate({value: t?.date || aujourdhui()});
   const cartes = ex?.cartes || [];
-  const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || dernier.carte || cartes[0]?.carte || "");
+  const chiffres = String(t?.carte4 || "").replace(/\D/g, "");
+  const carteLue = chiffres ? cartes.find(x => { const d = String(x.carte).replace(/\D/g, ""); return d.length >= 3 && chiffres.endsWith(d); }) : null;
+  const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || carteLue?.carte || dernier.carte || cartes[0]?.carte || "");
   const nomPropose = fiche ? fiche.nom : t ? nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")) : "";
   const cm = h("input", {type: "text", value: nomPropose, list: "liste-commercants", autocomplete: "off"});
   const liste = h("datalist", {id: "liste-commercants"}, commercantsExtrait().slice(0, 400).map(x => h("option", {value: x.nom})));

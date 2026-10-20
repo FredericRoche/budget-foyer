@@ -201,7 +201,7 @@ svg text{font-family:var(--serif)}
 
 /* ---------- Saisie mobile ---------- */
 .saisie{max-width:30rem; margin:0 auto; min-height:100vh; background:var(--papier)}
-.saisie .barre-tel{background:var(--vert-empire); color:#fff; padding:.7rem 1rem; font-variant-caps:small-caps; letter-spacing:.06em; display:flex; justify-content:space-between; align-items:center; font-size:1.05rem; position:sticky; top:0; z-index:5}
+.saisie .barre-tel{background:var(--vert-empire); color:#fff; padding:.7rem 1rem; font-variant-caps:small-caps; letter-spacing:.06em; display:flex; justify-content:space-between; align-items:center; font-size:1.05rem; position:sticky; top:0; z-index:5; padding-top:calc(.7rem + env(safe-area-inset-top))}
 .saisie .barre-tel button{background:transparent; color:#fff; border-color:rgba(255,255,255,.6); font-size:.85rem}
 .saisie .corps-tel{padding:1rem}
 .saisie .gros{width:100%; padding:.95rem; font-size:1.12rem; margin-bottom:.6rem; min-height:48px}

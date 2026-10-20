@@ -81,7 +81,7 @@ async function demonstrationMobile(){
   accueilMobile(corps);
 }
 async function accueilMobile(corps){
-  vider(corps);
+  vider(corps); scrollTo(0, 0);
   const file = DEMO ? [] : (await idbCles("file")).filter(k => String(k).startsWith("envoi:"));
   corps.append(h("button", {class: "primaire gros", onclick: () => photographier(corps, null)}, "📷 Photographier un ticket"),
     h("button", {class: "gros", onclick: () => formulaireMobile(corps, nouvelleSaisieMobile(), null)}, "Saisir sans ticket"));
@@ -117,7 +117,7 @@ function photographier(corps, saisie){
 
 function commercantsExtrait(){ return (MOBILE.extrait?.commercants || []).map(c => Object.assign({}, c, {alias: c.alias || []})); }
 async function formulaireMobile(corps, saisie, t){
-  vider(corps);
+  vider(corps); scrollTo(0, 0);
   if (!MOBILE.extrait && !DEMO) await chargerExtrait().catch(() => {});
   const ex = MOBILE.extrait;
   const fiche = t ? commercantPourTicket(t, commercantsExtrait()) : null;
@@ -125,7 +125,9 @@ async function formulaireMobile(corps, saisie, t){
   const montant = h("input", {type: "text", inputmode: "decimal", class: "montant", value: t?.montant ? nombre(t.montant) : ""});
   const date = champDate({value: t?.date || aujourdhui()});
   const cartes = ex?.cartes || [];
-  const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || dernier.carte || cartes[0]?.carte || "");
+  const chiffres = String(t?.carte4 || "").replace(/\D/g, "");
+  const carteLue = chiffres ? cartes.find(x => { const d = String(x.carte).replace(/\D/g, ""); return d.length >= 3 && chiffres.endsWith(d); }) : null;
+  const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || carteLue?.carte || dernier.carte || cartes[0]?.carte || "");
   const nomPropose = fiche ? fiche.nom : t ? nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")) : "";
   const cm = h("input", {type: "text", value: nomPropose, list: "liste-commercants", autocomplete: "off"});
   const liste = h("datalist", {id: "liste-commercants"}, commercantsExtrait().slice(0, 400).map(x => h("option", {value: x.nom})));
