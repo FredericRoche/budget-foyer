@@ -199,7 +199,7 @@ async function lireBoite(){
 
 /* ---------- Extrait des commerçants pour le téléphone ---------- */
 function construireExtrait(){
-  const cartes = vivants("comptes").filter(c => c.type === "carte" && c.carte && c.carte !== "LCL-NV" && c.actif !== false).map(c => ({carte: c.carte, nom: c.nom, titulaire: c.titulaire || ""}));
+  const cartes = vivants("comptes").filter(c => c.type === "carte" && c.carte && c.carte !== "LCL-NV" && c.actif !== false).map(c => ({carte: c.carte, nom: c.nom, titulaire: c.titulaire || "", chiffres: c.chiffres || []}));
   const commercants = vivants("commercants").map(c => ({nom: c.nom, alias: (c.alias || []).slice(0, 12), categorie: c.categorie || "", sousCategorie: c.sousCategorie || "",
     lieu: c.lieu || "", natures: Object.entries(c.natures || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(x => x[0])}));
   return {maj: Date.now(), lieux: LIVRE.parametres.lieux, cartes, categories: LIVRE.parametres.categories, commercants};
@@ -217,7 +217,7 @@ async function publierExtraitCommercants(){
   const extrait = vivants("commercants").map(c => ({nom: c.nom, alias: (c.alias || []).slice(0, 12), categorie: c.categorie || "", sousCategorie: c.sousCategorie || "",
     lieu: c.lieu || "", natures: Object.entries(c.natures || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(x => x[0])}));
   const cle = await cleExtrait(LIVRE.cles.extrait);
-  const cartes = vivants("comptes").filter(c => c.type === "carte" && c.carte && c.carte !== "LCL-NV" && c.actif !== false).map(c => ({carte: c.carte, nom: c.nom, titulaire: c.titulaire || ""}));
+  const cartes = vivants("comptes").filter(c => c.type === "carte" && c.carte && c.carte !== "LCL-NV" && c.actif !== false).map(c => ({carte: c.carte, nom: c.nom, titulaire: c.titulaire || "", chiffres: c.chiffres || []}));
   const p = await aesChiffrer(cle, await compresser(enc.encode(JSON.stringify({maj: Date.now(), lieux: LIVRE.parametres.lieux, cartes,
     categories: LIVRE.parametres.categories, commercants: extrait}))));
   await ad.ecrire("extrait-commercants.chiffre", enc.encode(JSON.stringify({format: "budget-foyer-extrait", v: 1, iv: p.iv, donnees: p.donnees})));

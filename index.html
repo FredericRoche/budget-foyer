@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-MTGaBsCYIwNRi2ebFcI9TRWdcuW00SyFgKtINupX4sU=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-OXebKpK2YThdMAiAcVhkD3zeZ3v/4B1+3B/a8pvHoes=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -344,7 +344,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1205";
+const VERSION_APP = "2026-10-20.1211";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1461,7 +1461,7 @@ async function lireBoite(){
 
 /* ---------- Extrait des commerçants pour le téléphone ---------- */
 function construireExtrait(){
-  const cartes = vivants("comptes").filter(c => c.type === "carte" && c.carte && c.carte !== "LCL-NV" && c.actif !== false).map(c => ({carte: c.carte, nom: c.nom, titulaire: c.titulaire || ""}));
+  const cartes = vivants("comptes").filter(c => c.type === "carte" && c.carte && c.carte !== "LCL-NV" && c.actif !== false).map(c => ({carte: c.carte, nom: c.nom, titulaire: c.titulaire || "", chiffres: c.chiffres || []}));
   const commercants = vivants("commercants").map(c => ({nom: c.nom, alias: (c.alias || []).slice(0, 12), categorie: c.categorie || "", sousCategorie: c.sousCategorie || "",
     lieu: c.lieu || "", natures: Object.entries(c.natures || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(x => x[0])}));
   return {maj: Date.now(), lieux: LIVRE.parametres.lieux, cartes, categories: LIVRE.parametres.categories, commercants};
@@ -1479,7 +1479,7 @@ async function publierExtraitCommercants(){
   const extrait = vivants("commercants").map(c => ({nom: c.nom, alias: (c.alias || []).slice(0, 12), categorie: c.categorie || "", sousCategorie: c.sousCategorie || "",
     lieu: c.lieu || "", natures: Object.entries(c.natures || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(x => x[0])}));
   const cle = await cleExtrait(LIVRE.cles.extrait);
-  const cartes = vivants("comptes").filter(c => c.type === "carte" && c.carte && c.carte !== "LCL-NV" && c.actif !== false).map(c => ({carte: c.carte, nom: c.nom, titulaire: c.titulaire || ""}));
+  const cartes = vivants("comptes").filter(c => c.type === "carte" && c.carte && c.carte !== "LCL-NV" && c.actif !== false).map(c => ({carte: c.carte, nom: c.nom, titulaire: c.titulaire || "", chiffres: c.chiffres || []}));
   const p = await aesChiffrer(cle, await compresser(enc.encode(JSON.stringify({maj: Date.now(), lieux: LIVRE.parametres.lieux, cartes,
     categories: LIVRE.parametres.categories, commercants: extrait}))));
   await ad.ecrire("extrait-commercants.chiffre", enc.encode(JSON.stringify({format: "budget-foyer-extrait", v: 1, iv: p.iv, donnees: p.donnees})));
@@ -2470,9 +2470,18 @@ function montantJustif(js){ return somme(js, j => versCentimes(j.montant)); }
 /* Candidats pour un justificatif ou un groupe de justificatifs (même paiement). */
 /* Les 4 derniers chiffres lus sur une facturette désignent la carte, s'ils correspondent à une carte connue. */
 function carteDesChiffres(carte4){
-  if (!carte4) return "";
-  const c = vivants("comptes").find(x => x.type === "carte" && /^X\d+/.test(x.carte || "") && carte4.endsWith(x.carte.slice(1)));
+  const d = String(carte4 || "").replace(/\D/g, "").slice(-4);
+  if (!d) return "";
+  const c = vivants("comptes").find(x => x.type === "carte" && (x.chiffres || []).includes(d))
+    || vivants("comptes").find(x => x.type === "carte" && /^X\d+/.test(x.carte || "") && d.endsWith(x.carte.slice(1)));
   return c ? c.carte : "";
+}
+/* Les 4 derniers chiffres d'une facturette validée avec une carte sont retenus pour cette carte. */
+function apprendreChiffresCarte(carte4, carte){
+  const d = String(carte4 || "").replace(/\D/g, "").slice(-4);
+  const c = d.length === 4 && carte ? vivants("comptes").find(x => x.type === "carte" && x.carte === carte) : null;
+  if (!c || (c.chiffres || []).includes(d)) return false;
+  c.chiffres = [...(c.chiffres || []), d]; enregistrer("comptes", c); return true;
 }
 function candidats(js){
   const j = Object.assign({}, js[0]); const cents = montantJustif(js);
@@ -4380,6 +4389,7 @@ function ecranRapprochement(j, etat, attente){
         f.x.commercant = fiche.id; invaliderIndex();
       }
       enregistrer("justificatifs", f.x);
+      if (apprendreChiffresCarte(f.x.carte4, f.x.carte)) message("Mémorisé : carte ****" + String(f.x.carte4).slice(-4) + " = " + libelleMoyen(f.x.carte) + ".");
       if (f.x.carte === "ESPECES" && !(f.x.operations || []).length) creerOperationEspeces(f.x);
     }
   };
@@ -5513,7 +5523,8 @@ async function formulaireMobile(corps, saisie, t){
   const date = champDate({value: t?.date || aujourdhui()});
   const cartes = ex?.cartes || [];
   const chiffres = String(t?.carte4 || "").replace(/\D/g, "");
-  const carteLue = chiffres ? cartes.find(x => { const d = String(x.carte).replace(/\D/g, ""); return d.length >= 3 && chiffres.endsWith(d); }) : null;
+  const carteLue = chiffres ? (cartes.find(x => (x.chiffres || []).includes(chiffres.slice(-4)))
+    || cartes.find(x => { const d = String(x.carte).replace(/\D/g, ""); return d.length >= 3 && chiffres.endsWith(d); })) : null;
   const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || carteLue?.carte || dernier.carte || cartes[0]?.carte || "");
   const nomPropose = fiche ? fiche.nom : t ? nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")) : "";
   const cm = h("input", {type: "text", value: nomPropose, list: "liste-commercants", autocomplete: "off"});
@@ -5747,6 +5758,12 @@ async function autotest(){
         v("téléphone : fournisseur inconnu laissé provisoire, aucune fiche créée", [vivants("commercants").length - nb0, jm.fournisseurProvisoire], [0, true]);
         const jv = await creerJustificatif({type: "ticket", date: "2027-03-10", montant: 4.5, commercantNom: "Essai espèces", carte: "ESPECES", origine: "mobile", aValider: true});
         rapprocherTout();
+        {
+          const ck = enregistrer("comptes", {nom: "Carte essai", type: "carte", carte: "X111", actif: true});
+          apprendreChiffresCarte("7998", "X111");
+          v("carte : 4 chiffres de la facturette appris puis reconnus", carteDesChiffres("############7998"), "X111");
+          supprimer("comptes", ck.id);
+        }
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }
       {

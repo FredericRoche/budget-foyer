@@ -97,6 +97,7 @@ function ecranRapprochement(j, etat, attente){
         f.x.commercant = fiche.id; invaliderIndex();
       }
       enregistrer("justificatifs", f.x);
+      if (apprendreChiffresCarte(f.x.carte4, f.x.carte)) message("Mémorisé : carte ****" + String(f.x.carte4).slice(-4) + " = " + libelleMoyen(f.x.carte) + ".");
       if (f.x.carte === "ESPECES" && !(f.x.operations || []).length) creerOperationEspeces(f.x);
     }
   };

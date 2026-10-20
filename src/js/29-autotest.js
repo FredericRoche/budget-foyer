@@ -135,6 +135,12 @@ async function autotest(){
         v("téléphone : fournisseur inconnu laissé provisoire, aucune fiche créée", [vivants("commercants").length - nb0, jm.fournisseurProvisoire], [0, true]);
         const jv = await creerJustificatif({type: "ticket", date: "2027-03-10", montant: 4.5, commercantNom: "Essai espèces", carte: "ESPECES", origine: "mobile", aValider: true});
         rapprocherTout();
+        {
+          const ck = enregistrer("comptes", {nom: "Carte essai", type: "carte", carte: "X111", actif: true});
+          apprendreChiffresCarte("7998", "X111");
+          v("carte : 4 chiffres de la facturette appris puis reconnus", carteDesChiffres("############7998"), "X111");
+          supprimer("comptes", ck.id);
+        }
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }
       {

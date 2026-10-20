@@ -28,9 +28,18 @@ function montantJustif(js){ return somme(js, j => versCentimes(j.montant)); }
 /* Candidats pour un justificatif ou un groupe de justificatifs (même paiement). */
 /* Les 4 derniers chiffres lus sur une facturette désignent la carte, s'ils correspondent à une carte connue. */
 function carteDesChiffres(carte4){
-  if (!carte4) return "";
-  const c = vivants("comptes").find(x => x.type === "carte" && /^X\d+/.test(x.carte || "") && carte4.endsWith(x.carte.slice(1)));
+  const d = String(carte4 || "").replace(/\D/g, "").slice(-4);
+  if (!d) return "";
+  const c = vivants("comptes").find(x => x.type === "carte" && (x.chiffres || []).includes(d))
+    || vivants("comptes").find(x => x.type === "carte" && /^X\d+/.test(x.carte || "") && d.endsWith(x.carte.slice(1)));
   return c ? c.carte : "";
+}
+/* Les 4 derniers chiffres d'une facturette validée avec une carte sont retenus pour cette carte. */
+function apprendreChiffresCarte(carte4, carte){
+  const d = String(carte4 || "").replace(/\D/g, "").slice(-4);
+  const c = d.length === 4 && carte ? vivants("comptes").find(x => x.type === "carte" && x.carte === carte) : null;
+  if (!c || (c.chiffres || []).includes(d)) return false;
+  c.chiffres = [...(c.chiffres || []), d]; enregistrer("comptes", c); return true;
 }
 function candidats(js){
   const j = Object.assign({}, js[0]); const cents = montantJustif(js);

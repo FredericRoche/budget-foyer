@@ -126,7 +126,8 @@ async function formulaireMobile(corps, saisie, t){
   const date = champDate({value: t?.date || aujourdhui()});
   const cartes = ex?.cartes || [];
   const chiffres = String(t?.carte4 || "").replace(/\D/g, "");
-  const carteLue = chiffres ? cartes.find(x => { const d = String(x.carte).replace(/\D/g, ""); return d.length >= 3 && chiffres.endsWith(d); }) : null;
+  const carteLue = chiffres ? (cartes.find(x => (x.chiffres || []).includes(chiffres.slice(-4)))
+    || cartes.find(x => { const d = String(x.carte).replace(/\D/g, ""); return d.length >= 3 && chiffres.endsWith(d); })) : null;
   const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || carteLue?.carte || dernier.carte || cartes[0]?.carte || "");
   const nomPropose = fiche ? fiche.nom : t ? nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")) : "";
   const cm = h("input", {type: "text", value: nomPropose, list: "liste-commercants", autocomplete: "off"});
