@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-gl99ZxUHYNMli7tiAgZ98ZEN1KANBLSzxZFKkBQ3R2M=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Ao0vSM2lhl7VSVMlBY9xI28PgiZG4T2mNazoQCVMruo=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1341";
+const VERSION_APP = "2026-10-20.1344";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2862,6 +2862,22 @@ function partLieu(ligne, lieu){
 const cleLigne = (c, s) => norm(c) + "|" + norm(s);
 
 /* Parts d'opérations (ventilations dépliées) dans une période. */
+/* Dépense d'un projet (travaux, voiture…) : champ « Projet » renseigné, ou catégorie d'une échéance de projet
+   (ou de sa liste « rattache ») avec la nature « Exceptionnelle ». Pour une pièce pas encore au relevé
+   (sans nature), la catégorie suffit (parCategorie). Même règle que l'écran Projets. */
+function reglesProjets(){
+  return vivants("echeances").filter(e => e.projet && e.active !== false)
+    .flatMap(e => [...(e.rattache || []), e.categorie ? {categorie: e.categorie, sousCategorie: e.sousCategorie} : null].filter(Boolean));
+}
+function estDepenseProjet(o, regles, parCategorie){
+  if (o.projet) return true;
+  const cat = (regles || reglesProjets()).some(r => r.categorie === o.categorie && (!r.sousCategorie || r.sousCategorie === o.sousCategorie));
+  return cat && (parCategorie || o.nature === "Exceptionnelle");
+}
+/* Dépenses de projets d'une période (montant positif), hors « Hors budget » et revenus. */
+function depensesProjets(debut, fin, regles){
+  return -somme(partsPeriode(debut, fin, p => !horsResultat(p) && p.nature !== "Revenu" && estDepenseProjet(p, regles)), p => p.montant);
+}
 function partsPeriode(debut, fin, filtre){
   const r = [];
   for (const op of vivants("operations")){
@@ -3696,13 +3712,17 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
      annee && budget ? h("button", {class: "discret", onclick: () => imprimerSynthese(budget, an)}, "Synthèse imprimable") : null]));
 
   const lignes = budget ? tableauBudget(budget, an, mo, mo, "") : [];
-  const tb = somme(lignes.filter(l => l.ligne), l => l.budget), tr = somme(lignes, l => l.realise);
+  // Marche courante seulement : les dépenses de projets (financées par l'épargne) sont suivies dans Projets
+  const regP = reglesProjets();
+  const borneB = d => (budget?.debut && budget.debut > d) ? budget.debut : d;
+  const finMo = finDeMois(an + "-" + pad2(mo) + "-01");
+  const tb = somme(lignes.filter(l => l.ligne), l => l.budget), tr = somme(lignes, l => l.realise) - depensesProjets(borneB(an + "-" + pad2(mo) + "-01"), finMo, regP);
   // Dépenses du mois saisies (tickets, factures, chèques) dont l'opération n'est pas encore au relevé,
   // retenues selon la même règle que le réalisé (hors « Hors budget » et revenus)
-  const taEnAttente = somme(vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && j.carte !== "ESPECES" && (j.date || "").slice(0, 7) === an + "-" + pad2(mo)
+  const taEnAttente = somme(vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && j.carte !== "ESPECES" && (j.date || "").slice(0, 7) === an + "-" + pad2(mo) && !estDepenseProjet(j, regP, true)
     && (n => !NATURES_HORS_RESULTAT.includes(n) && n !== "Revenu")((budget?.lignes || []).find(x => x.categorie === j.categorie && (x.sousCategorie || "") === (j.sousCategorie || ""))?.nature || natureParDefaut(j.categorie))), j => j.montant || 0);
   const cumulB = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.budget) : 0;
-  const cumulR = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.realise) : 0;
+  const cumulR = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.realise) - depensesProjets(borneB(an + "-01-01"), finMo, regP) : 0;
   const sim = simulerTresorerie(); const ana = ETAT_TRESO_CACHE || analyseTresorerie(sim);
   const bil = bilan(aujourdhui()); const bil0 = bilan(an + "-01-01");
   const ind = h("div", {class: "indicateurs"});
@@ -3716,7 +3736,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
       h("div", {class: "det"}, eurosSigne(Math.round(rA.courant / 12)) + " par mois · solde de l'année " + eurosSigne(Math.round(rA.soldeFinal)))));
   } else {
   ind.appendChild(h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Dépensé en " + MOIS_LONG[mo - 1]),
-    h("div", {class: "val"}, euros(tr, 0)), h("div", {class: "det"}, budget ? "pour un budget de " + euros(tb, 0) : "aucun budget pour " + an),
+    h("div", {class: "val"}, euros(tr, 0)), h("div", {class: "det"}, budget ? "pour un budget de " + euros(tb, 0) + " · hors projets" : "aucun budget pour " + an),
     taEnAttente > 0.5 ? h("div", {class: "det discret"}, "+ " + euros(taEnAttente, 0) + " saisis, pas encore au relevé") : null,
     h("div", {class: "jauge"}, h("span", {class: tr > tb ? "depasse" : "", style: {width: Math.min(100, tb ? tr / tb * 100 : 0) + "%"}}))));
   ind.appendChild(h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Reste à dépenser"),
@@ -5834,6 +5854,7 @@ async function autotest(){
         v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
         v("téléphone : fournisseur retrouvé par un morceau du nom ou de l'alias", rechercherFournisseurs(["savour"], [{nom: "La Savoureine Eurre", alias: []}, {nom: "Autre", alias: ["SAVOUREINE SARL"]}, {nom: "Sans rapport", alias: []}]).map(f => f.nom), ["La Savoureine Eurre", "Autre"]);
         v("pièce : lecture illisible ni proposée ni apprise comme nom", [nomPlausible("‘ au qi Tee ce L j"), nomPlausible("La Savoureine")], [false, true]);
+        v("projet : dépense rattachée par catégorie et nature, pièce par catégorie seule", [estDepenseProjet({categorie: "Travaux", sousCategorie: "Archi", nature: "Exceptionnelle"}, [{categorie: "Travaux"}]), estDepenseProjet({categorie: "Travaux", nature: "Courante"}, [{categorie: "Travaux"}]), estDepenseProjet({categorie: "Travaux"}, [{categorie: "Travaux"}], true), estDepenseProjet({categorie: "Courses", projet: "Maison"}, [])], [true, false, true, true]);
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

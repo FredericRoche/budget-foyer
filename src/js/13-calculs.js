@@ -21,6 +21,22 @@ function partLieu(ligne, lieu){
 const cleLigne = (c, s) => norm(c) + "|" + norm(s);
 
 /* Parts d'opérations (ventilations dépliées) dans une période. */
+/* Dépense d'un projet (travaux, voiture…) : champ « Projet » renseigné, ou catégorie d'une échéance de projet
+   (ou de sa liste « rattache ») avec la nature « Exceptionnelle ». Pour une pièce pas encore au relevé
+   (sans nature), la catégorie suffit (parCategorie). Même règle que l'écran Projets. */
+function reglesProjets(){
+  return vivants("echeances").filter(e => e.projet && e.active !== false)
+    .flatMap(e => [...(e.rattache || []), e.categorie ? {categorie: e.categorie, sousCategorie: e.sousCategorie} : null].filter(Boolean));
+}
+function estDepenseProjet(o, regles, parCategorie){
+  if (o.projet) return true;
+  const cat = (regles || reglesProjets()).some(r => r.categorie === o.categorie && (!r.sousCategorie || r.sousCategorie === o.sousCategorie));
+  return cat && (parCategorie || o.nature === "Exceptionnelle");
+}
+/* Dépenses de projets d'une période (montant positif), hors « Hors budget » et revenus. */
+function depensesProjets(debut, fin, regles){
+  return -somme(partsPeriode(debut, fin, p => !horsResultat(p) && p.nature !== "Revenu" && estDepenseProjet(p, regles)), p => p.montant);
+}
 function partsPeriode(debut, fin, filtre){
   const r = [];
   for (const op of vivants("operations")){
