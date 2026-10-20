@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-6TthtWdnB+M3pmC+HTyMz9VXoqSmB17stajOo0sAE3w=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-NgJXOi4St8/309N6mJApb5WRkQrSaSMTeo1tE//QXmI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -349,7 +349,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1247";
+const VERSION_APP = "2026-10-20.1253";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4314,6 +4314,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   let j = etat.choisi ? obtenir("justificatifs", etat.choisi) : attente[0];
   c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " saisie(s) du téléphone à valider · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
+     h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
      h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
   if (!j){
     c.appendChild(h("p", {class: "vide"}, aRapprocher.length ? "Rien à valider ni à trancher : " + aRapprocher.length + " justificatif(s) attendent leur opération au relevé. Cliquez sur une ligne pour l'ouvrir." : "Aucun justificatif à rapprocher."));
@@ -4322,7 +4323,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, x.auto ? "rapproché d'office" : "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, x.auto ? "rapproché d'office" : "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
 }});
 
 function ecranRapprochement(j, etat, attente){
@@ -4330,7 +4331,7 @@ function ecranRapprochement(j, etat, attente){
   const idx = attente.indexOf(j);
   const bloc = h("div");
   bloc.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".6rem"}},
-    h("div", null, h("strong", null, (groupe.length > 1 ? "Achat groupé · " : "") + (j.origine === "mobile" ? "Saisie du téléphone" : "Pièce ajoutée sur le PC") + " du " + dateFr(j.date)),
+    h("div", null, h("strong", null, (groupe.length > 1 ? "Achat groupé · " : "") + (j.origine === "mobile" ? "Saisie du téléphone" : j.sansPiece ? "Saisie sans pièce" : "Pièce ajoutée sur le PC") + " du " + dateFr(j.date)),
       j.statut === "rapproche" ? h("span", {class: "pos"}, " · rapproché") : null, j.aValider ? h("span", {class: "neg"}, " · à valider : vérifiez et corrigez, puis « Valider la saisie »") : null),
     idx >= 0 ? h("div", {class: "outils"}, h("button", {class: "discret", disabled: idx <= 0, onclick: () => { etat.choisi = attente[idx - 1].id; rafraichirEcran(); }}, "‹ Précédent"),
       h("span", {class: "discret"}, (idx + 1) + " sur " + attente.length),
@@ -4341,7 +4342,15 @@ function ecranRapprochement(j, etat, attente){
   for (const x of groupe){
     const cadre = h("div", {class: "ticket", style: {marginBottom: ".6rem"}}, h("span", {class: "discret"}, "chargement…"));
     pieces.appendChild(cadre);
-    lirePiece(x.id).then(p => { vider(cadre); if (!p) cadre.appendChild(h("span", {class: "discret"}, "pièce absente sur cet appareil"));
+    lirePiece(x.id).then(p => { vider(cadre); if (!p) cadre.append(h("span", {class: "discret"}, x.sansPiece ? "pièce attendue" : "pièce absente sur cet appareil"), h("br"),
+        h("button", {class: "mini", style: {marginTop: ".4rem"}, onclick: async () => {
+          const f = await choisirFichier("image/*,application/pdf", false); if (!f) return;
+          const lu = await lireFichier(f);
+          await enregistrerPiece(x.id, lu.octets, lu.genre === "image" ? lu.mime : "application/pdf");
+          const t = lu.texte ? extraireTicket(lu.texte) : null;
+          Object.assign(x, {sansPiece: false}, t?.numero && !x.numero ? {numero: t.numero} : {}, t?.texte && !x.texteOCR ? {texteOCR: t.texte} : {});
+          enregistrer("justificatifs", x); message("Pièce jointe" + (t?.numero ? " (facture n° " + t.numero + ")" : "") + "."); rafraichirEcran();
+        }}, "Joindre la pièce…"));
       else if (p.mime === "application/pdf") cadre.appendChild(h("a", {href: URL.createObjectURL(new Blob([p.octets], {type: p.mime})), target: "_blank", rel: "noopener"}, "Ouvrir le PDF"));
       else cadre.appendChild(h("img", {src: URL.createObjectURL(new Blob([p.octets], {type: p.mime})), alt: "Ticket"})); }).catch(() => { vider(cadre).appendChild(h("span", {class: "discret"}, "pièce illisible")); });
   }
@@ -4383,7 +4392,7 @@ function ecranRapprochement(j, etat, attente){
     const ligneCheque = h("div", {class: "champ-ocr", hidden: !String(x.carte || "").startsWith("CHQ:")}, h("label", null, "N° de chèque"), cheque, h("span", {class: "confiance"}, "pour le rapprochement"));
     carte.addEventListener("change", () => { ligneCheque.hidden = !carte.value.startsWith("CHQ:"); });
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
-    saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
+    saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
       ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""), ligneCheque);
