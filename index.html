@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-BcyGdfWRZOzFchtjXqLowlZx6swG7NAkY3jpE1So7lw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-C0MCSWQ/dNN1ZPOV1Fj7cgvChRMNWoxRU3KxZwcsVEo=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1703";
+const VERSION_APP = "2026-10-20.1847";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2713,13 +2713,43 @@ async function chargerOcr(progression){
 function chargerScript(src){
   return new Promise((ok, ko) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => ko(new Error("chargement de " + src)); document.head.appendChild(s); });
 }
-/* Réduit la photo (1 600 px au plus), la passe en niveaux de gris : plus léger à stocker, plus net à lire. */
+/* Le ticket dans la photo : plus grande zone claire et peu colorée (le papier), repérée sur une vignette.
+   Rien si elle est trop petite ou couvre presque toute l'image (ticket déjà bien cadré). */
+function cadrerPapier(src){
+  const w = 80, h = Math.max(1, Math.round(src.height * w / src.width));
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const ctx = c.getContext("2d"); ctx.imageSmoothingQuality = "high"; ctx.drawImage(src, 0, 0, w, h);
+  const p = ctx.getImageData(0, 0, w, h).data; const B = new Uint8Array(w * h);
+  for (let i = 0, k = 0; k < w * h; i += 4, k++){ const g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; const s = Math.max(p[i], p[i + 1], p[i + 2]) - Math.min(p[i], p[i + 1], p[i + 2]); B[k] = g > 170 && s < 25 ? 1 : 0; }
+  const vu = new Uint8Array(w * h); let best = null;
+  for (let k = 0; k < w * h; k++){
+    if (!B[k] || vu[k]) continue;
+    const pile = [k]; vu[k] = 1; let n = 0, x0 = w, x1 = 0, y0 = h, y1 = 0;
+    while (pile.length){
+      const q = pile.pop(); n++; const x = q % w, y = (q / w) | 0;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      for (const r of [x + 1 < w ? q + 1 : -1, x > 0 ? q - 1 : -1, y + 1 < h ? q + w : -1, y > 0 ? q - w : -1]) if (r >= 0 && B[r] && !vu[r]){ vu[r] = 1; pile.push(r); }
+    }
+    if (!best || n > best.n) best = {n, x0, x1, y0, y1};
+  }
+  if (!best) return null;
+  const part = best.n / (w * h); if (part < 0.04 || part > 0.7) return null;
+  const f = src.width / w, mx = (best.x1 - best.x0 + 1) * 0.06, my = (best.y1 - best.y0 + 1) * 0.12;
+  const x0 = Math.max(0, (best.x0 - mx) * f), y0 = Math.max(0, (best.y0 - my) * f);
+  return {x: x0, y: y0, l: Math.min(src.width, (best.x1 + 1 + mx) * f) - x0, h: Math.min(src.height, (best.y1 + 1 + my) * f) - y0};
+}
+/* Réduit la photo (1 600 px au plus) pour la garder ; pour la lire, cadre sur le ticket, agrandit si besoin
+   et passe en niveaux de gris contrastés. */
 async function preparerImage(blob, cote){
   const img = await createImageBitmap(blob);
   const k = Math.min(1, (cote || 1600) / Math.max(img.width, img.height));
-  const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-  const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0, c.width, c.height);
-  const couleur = await new Promise(r => c.toBlob(r, "image/jpeg", 0.8));
+  const photo = document.createElement("canvas"); photo.width = Math.round(img.width * k); photo.height = Math.round(img.height * k);
+  photo.getContext("2d").drawImage(img, 0, 0, photo.width, photo.height);
+  const couleur = await new Promise(r => photo.toBlob(r, "image/jpeg", 0.8));
+  const z = cadrerPapier(img) || {x: 0, y: 0, l: img.width, h: img.height};
+  const kz = Math.min(3, Math.max(1, 1200 / z.l), 2000 / Math.max(z.l, z.h));
+  const c = document.createElement("canvas"); c.width = Math.round(z.l * kz); c.height = Math.round(z.h * kz);
+  const ctx = c.getContext("2d"); ctx.imageSmoothingQuality = "high"; ctx.drawImage(img, z.x, z.y, z.l, z.h, 0, 0, c.width, c.height);
   const d = ctx.getImageData(0, 0, c.width, c.height); const p = d.data;
   for (let i = 0; i < p.length; i += 4){ const g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; const v = g > 160 ? 255 : g < 90 ? 0 : g; p[i] = p[i + 1] = p[i + 2] = v; }
   ctx.putImageData(d, 0, 0);
@@ -2778,6 +2808,13 @@ function extraireTicket(texte){
     const h = l.match(/\b([01]?\d|2[0-3])[:hH]([0-5]\d)(?:[:]([0-5]\d))?\b/); if (h && !res.heure) res.heure = pad2(h[1]) + ":" + h[2];
   }
   const auj = aujourdhui();
+  if (!dates.length) for (const l of lignes){
+    const m = l.match(/(?<![\d\/.])(\d{1,2}) ?[\/.] ?(\d{1,2})(?![\d\/.]| ?[\/.] ?\d)/);
+    if (!m || +m[1] < 1 || +m[1] > 31 || +m[2] < 1 || +m[2] > 12) continue;
+    let d = auj.slice(0, 4) + "-" + pad2(+m[2]) + "-" + pad2(+m[1]);
+    if (d > ajouterJours(auj, 1)) d = (+auj.slice(0, 4) - 1) + "-" + pad2(+m[2]) + "-" + pad2(+m[1]);
+    if (lireDate(d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4))){ dates.push(d); break; }
+  }
   const plausibles = dates.filter(d => d <= ajouterJours(auj, 1) && d >= ajouterJours(auj, -400));
   if (plausibles.length){ res.date = plausibles[0]; res.confiance.date = "sûr"; }
 
@@ -5898,6 +5935,10 @@ async function autotest(){
           const oe = enregistrer("operations", {compte: "x", date: aujourdhui(), montant: -200, libelle: "acompte", categorie: "Essai env cat", nature: "Exceptionnelle", projet: "Essai env"});
           v("projet : l'enveloppe est consommée par les paiements", [montantEcheance(ee), etatProjet("Essai env").total], [-800, 1000]);
           supprimer("operations", oe.id); supprimer("echeances", ee.id);
+        }
+        {
+          const d3 = ajouterJours(aujourdhui(), -3);
+          v("facturette : date sans année lisible (année du jour)", extraireTicket("CB CREDIT\nj " + d3.slice(8, 10) + "/" + d3.slice(5, 7) + ",\nOA 15:20:17\nMONTANT 49,00 EUR").date, d3);
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
