@@ -132,6 +132,39 @@ function listeCategories(){
   for (const [cat, sous] of Object.entries(LIVRE.parametres.categories)) for (const s of sous) r.push([cat, s]);
   return r;
 }
+/* Renomme une sous-catégorie partout : liste des catégories, opérations (et leurs ventilations), règles,
+   lignes de budget, échéances (et leurs rattachements), fiches fournisseurs (défaut et statistiques), justificatifs.
+   Si le nouveau nom existe déjà dans la catégorie, les deux sont réunies. Chaque enregistrement touché est
+   daté : la synchronisation propage le renommage aux autres appareils. Renvoie le nombre d'enregistrements touchés. */
+function renommerSousCategorie(cat, ancien, nouveau){
+  nouveau = (nouveau || "").trim();
+  const cats = LIVRE.parametres.categories;
+  if (!cat || !ancien || !nouveau || nouveau === ancien || !(cats[cat] || []).includes(ancien)) return 0;
+  const vise = x => x && x.categorie === cat && x.sousCategorie === ancien;
+  const changer = x => { if (vise(x)){ x.sousCategorie = nouveau; return true; } return false; };
+  let n = 0;
+  for (const coll of ["operations", "regles", "echeances", "commercants", "justificatifs"]){
+    for (const x of vivants(coll)){
+      let touche = changer(x);
+      if (coll === "operations") for (const v of x.ventilation || []) if (vise(Object.assign({categorie: x.categorie}, v, v.categorie ? {} : {categorie: x.categorie}))){ v.sousCategorie = nouveau; touche = true; }
+      if (coll === "echeances") for (const r of x.rattache || []) if (changer(r)) touche = true;
+      if (coll === "commercants" && x.stats){
+        const st = {};
+        for (const [k, v] of Object.entries(x.stats)){ const p = k.split("|"); if (p[0] === cat && p[1] === ancien){ p[1] = nouveau; touche = true; } const k2 = p.join("|"); st[k2] = (st[k2] || 0) + v; }
+        x.stats = st;
+      }
+      if (touche){ enregistrer(coll, x); n++; }
+    }
+  }
+  for (const b of vivants("budgets")){
+    let touche = false; for (const l of b.lignes || []) if (changer(l)) touche = true;
+    if (touche){ enregistrer("budgets", b); n++; }
+  }
+  cats[cat] = [...new Set(cats[cat].map(s => s === ancien ? nouveau : s))];
+  modifierParametres({categories: cats});
+  if (typeof invaliderIndex === "function") invaliderIndex();
+  return n;
+}
 function ajouterCategorie(cat, sous){
   if (!cat) return;
   const cats = LIVRE.parametres.categories;

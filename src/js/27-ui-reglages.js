@@ -106,7 +106,24 @@ function reglagesCategories(c){
   const liste = h("div");
   for (const [cat, sous] of Object.entries(p.categories)) liste.appendChild(h("p", null, h("strong", null, cat), " : " + sous.join(", ")));
   c.appendChild(h("section", {class: "carte", style: {marginTop: "1rem"}}, h("h2", null, "Catégories"), liste,
-    h("button", {class: "mini discret", onclick: async () => { const cat = await demander("Ajouter", "Catégorie", ""); if (!cat) return; const s2 = await demander("Ajouter", "Sous-catégorie", ""); if (s2){ ajouterCategorie(cat, s2); rafraichirEcran(); } }}, "Ajouter une sous-catégorie")));
+    h("div", {class: "outils"}, h("button", {class: "mini discret", onclick: async () => { const cat = await demander("Ajouter", "Catégorie", ""); if (!cat) return; const s2 = await demander("Ajouter", "Sous-catégorie", ""); if (s2){ ajouterCategorie(cat, s2); rafraichirEcran(); } }}, "Ajouter une sous-catégorie"),
+      h("button", {class: "mini discret", onclick: () => dialogueRenommerSousCategorie()}, "Renommer une sous-catégorie…"))));
+}
+async function dialogueRenommerSousCategorie(){
+  const options = Object.entries(LIVRE.parametres.categories).flatMap(([c, ss]) => ss.map(s => [c + "|" + s, c + " › " + s]));
+  const choix = selection(options, options[0]?.[0] || "");
+  const nouveau = h("input", {type: "text"});
+  const remplir = () => { nouveau.value = choix.value.split("|").slice(1).join("|"); };
+  choix.addEventListener("change", remplir); remplir();
+  const ok = await dialogue({titre: "Renommer une sous-catégorie", corps: h("div", null, champ("Sous-catégorie", choix), champ("Nouveau nom", nouveau,
+      "Le nouveau nom remplace l'ancien partout : opérations, règles, budget, échéances, fournisseurs, justificatifs. S'il existe déjà, les deux sont réunies.")),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Renommer", classe: "primaire", valeur: true}]});
+  if (!ok) return;
+  const [cat, ...reste] = choix.value.split("|"); const ancien = reste.join("|");
+  if (!nouveau.value.trim() || nouveau.value.trim() === ancien) return;
+  const n = renommerSousCategorie(cat, ancien, nouveau.value);
+  message("« " + ancien + " » renommée en « " + nouveau.value.trim() + " » (" + n + " enregistrement(s) mis à jour).");
+  rafraichirEcran();
 }
 
 function lienAppairage(){

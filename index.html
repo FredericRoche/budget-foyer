@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-l4jxCqJAqETPmiFEPAlzifbIMqQbQBnwlmlsDs4hlkw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KtrPpGgxOvBEC7AsyAN7dNsvpd89q8qCYQtKYhzRNiQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-20.1954";
+const VERSION_APP = "2026-10-21.1752";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -902,6 +902,39 @@ function listeCategories(){
   const r = [];
   for (const [cat, sous] of Object.entries(LIVRE.parametres.categories)) for (const s of sous) r.push([cat, s]);
   return r;
+}
+/* Renomme une sous-catégorie partout : liste des catégories, opérations (et leurs ventilations), règles,
+   lignes de budget, échéances (et leurs rattachements), fiches fournisseurs (défaut et statistiques), justificatifs.
+   Si le nouveau nom existe déjà dans la catégorie, les deux sont réunies. Chaque enregistrement touché est
+   daté : la synchronisation propage le renommage aux autres appareils. Renvoie le nombre d'enregistrements touchés. */
+function renommerSousCategorie(cat, ancien, nouveau){
+  nouveau = (nouveau || "").trim();
+  const cats = LIVRE.parametres.categories;
+  if (!cat || !ancien || !nouveau || nouveau === ancien || !(cats[cat] || []).includes(ancien)) return 0;
+  const vise = x => x && x.categorie === cat && x.sousCategorie === ancien;
+  const changer = x => { if (vise(x)){ x.sousCategorie = nouveau; return true; } return false; };
+  let n = 0;
+  for (const coll of ["operations", "regles", "echeances", "commercants", "justificatifs"]){
+    for (const x of vivants(coll)){
+      let touche = changer(x);
+      if (coll === "operations") for (const v of x.ventilation || []) if (vise(Object.assign({categorie: x.categorie}, v, v.categorie ? {} : {categorie: x.categorie}))){ v.sousCategorie = nouveau; touche = true; }
+      if (coll === "echeances") for (const r of x.rattache || []) if (changer(r)) touche = true;
+      if (coll === "commercants" && x.stats){
+        const st = {};
+        for (const [k, v] of Object.entries(x.stats)){ const p = k.split("|"); if (p[0] === cat && p[1] === ancien){ p[1] = nouveau; touche = true; } const k2 = p.join("|"); st[k2] = (st[k2] || 0) + v; }
+        x.stats = st;
+      }
+      if (touche){ enregistrer(coll, x); n++; }
+    }
+  }
+  for (const b of vivants("budgets")){
+    let touche = false; for (const l of b.lignes || []) if (changer(l)) touche = true;
+    if (touche){ enregistrer("budgets", b); n++; }
+  }
+  cats[cat] = [...new Set(cats[cat].map(s => s === ancien ? nouveau : s))];
+  modifierParametres({categories: cats});
+  if (typeof invaliderIndex === "function") invaliderIndex();
+  return n;
 }
 function ajouterCategorie(cat, sous){
   if (!cat) return;
@@ -5230,7 +5263,24 @@ function reglagesCategories(c){
   const liste = h("div");
   for (const [cat, sous] of Object.entries(p.categories)) liste.appendChild(h("p", null, h("strong", null, cat), " : " + sous.join(", ")));
   c.appendChild(h("section", {class: "carte", style: {marginTop: "1rem"}}, h("h2", null, "Catégories"), liste,
-    h("button", {class: "mini discret", onclick: async () => { const cat = await demander("Ajouter", "Catégorie", ""); if (!cat) return; const s2 = await demander("Ajouter", "Sous-catégorie", ""); if (s2){ ajouterCategorie(cat, s2); rafraichirEcran(); } }}, "Ajouter une sous-catégorie")));
+    h("div", {class: "outils"}, h("button", {class: "mini discret", onclick: async () => { const cat = await demander("Ajouter", "Catégorie", ""); if (!cat) return; const s2 = await demander("Ajouter", "Sous-catégorie", ""); if (s2){ ajouterCategorie(cat, s2); rafraichirEcran(); } }}, "Ajouter une sous-catégorie"),
+      h("button", {class: "mini discret", onclick: () => dialogueRenommerSousCategorie()}, "Renommer une sous-catégorie…"))));
+}
+async function dialogueRenommerSousCategorie(){
+  const options = Object.entries(LIVRE.parametres.categories).flatMap(([c, ss]) => ss.map(s => [c + "|" + s, c + " › " + s]));
+  const choix = selection(options, options[0]?.[0] || "");
+  const nouveau = h("input", {type: "text"});
+  const remplir = () => { nouveau.value = choix.value.split("|").slice(1).join("|"); };
+  choix.addEventListener("change", remplir); remplir();
+  const ok = await dialogue({titre: "Renommer une sous-catégorie", corps: h("div", null, champ("Sous-catégorie", choix), champ("Nouveau nom", nouveau,
+      "Le nouveau nom remplace l'ancien partout : opérations, règles, budget, échéances, fournisseurs, justificatifs. S'il existe déjà, les deux sont réunies.")),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Renommer", classe: "primaire", valeur: true}]});
+  if (!ok) return;
+  const [cat, ...reste] = choix.value.split("|"); const ancien = reste.join("|");
+  if (!nouveau.value.trim() || nouveau.value.trim() === ancien) return;
+  const n = renommerSousCategorie(cat, ancien, nouveau.value);
+  message("« " + ancien + " » renommée en « " + nouveau.value.trim() + " » (" + n + " enregistrement(s) mis à jour).");
+  rafraichirEcran();
 }
 
 function lienAppairage(){
@@ -5961,6 +6011,14 @@ async function autotest(){
           v("facturette : date sans année lisible (année du jour)", extraireTicket("CB CREDIT\nj " + d3.slice(8, 10) + "/" + d3.slice(5, 7) + ",\nOA 15:20:17\nMONTANT 49,00 EUR").date, d3);
         }
         v("libellé : « VIREMENT » retiré en entier", [cleLibelle("VIREMENT HENNER GMC"), cleLibelle("VIR SEPA M HUMBERT ARMAND"), cleLibelle("PRELEVEMENT EUROPEEN ORANGE SA"), cleLibelle("CB BOUCHERIE D'ICI VILLE 16/10")], ["HENNER GMC", "M HUMBERT ARMAND", "ORANGE SA", "BOUCHERIE D'ICI VILLE"]);
+        {
+          ajouterCategorie("Abonnements essai", "Domaines (Ancien prestataire)");
+          const or = enregistrer("operations", {compte: "x", date: "2027-01-05", montant: -13.68, libelle: "ESSAI DOMAINE", categorie: "Abonnements essai", sousCategorie: "Domaines (Ancien prestataire)", nature: "Courante"});
+          const fr = enregistrer("commercants", {nom: "Essai domaine", alias: [], categorie: "Abonnements essai", sousCategorie: "Domaines (Ancien prestataire)", stats: {"Abonnements essai|Domaines (Ancien prestataire)|Courante|": 3}, natures: {}});
+          const nr = renommerSousCategorie("Abonnements essai", "Domaines (Ancien prestataire)", "Domaines");
+          v("catégories : sous-catégorie renommée partout", [obtenir("operations", or.id).sousCategorie, obtenir("commercants", fr.id).sousCategorie, Object.keys(obtenir("commercants", fr.id).stats)[0], LIVRE.parametres.categories["Abonnements essai"].join(","), nr >= 2], ["Domaines", "Domaines", "Abonnements essai|Domaines|Courante|", "Domaines", true]);
+          supprimer("operations", or.id); supprimer("commercants", fr.id); delete LIVRE.parametres.categories["Abonnements essai"];
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

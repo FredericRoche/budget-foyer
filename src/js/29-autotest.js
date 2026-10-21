@@ -162,6 +162,14 @@ async function autotest(){
           v("facturette : date sans année lisible (année du jour)", extraireTicket("CB CREDIT\nj " + d3.slice(8, 10) + "/" + d3.slice(5, 7) + ",\nOA 15:20:17\nMONTANT 49,00 EUR").date, d3);
         }
         v("libellé : « VIREMENT » retiré en entier", [cleLibelle("VIREMENT HENNER GMC"), cleLibelle("VIR SEPA M HUMBERT ARMAND"), cleLibelle("PRELEVEMENT EUROPEEN ORANGE SA"), cleLibelle("CB BOUCHERIE D'ICI VILLE 16/10")], ["HENNER GMC", "M HUMBERT ARMAND", "ORANGE SA", "BOUCHERIE D'ICI VILLE"]);
+        {
+          ajouterCategorie("Abonnements essai", "Domaines (Ancien prestataire)");
+          const or = enregistrer("operations", {compte: "x", date: "2027-01-05", montant: -13.68, libelle: "ESSAI DOMAINE", categorie: "Abonnements essai", sousCategorie: "Domaines (Ancien prestataire)", nature: "Courante"});
+          const fr = enregistrer("commercants", {nom: "Essai domaine", alias: [], categorie: "Abonnements essai", sousCategorie: "Domaines (Ancien prestataire)", stats: {"Abonnements essai|Domaines (Ancien prestataire)|Courante|": 3}, natures: {}});
+          const nr = renommerSousCategorie("Abonnements essai", "Domaines (Ancien prestataire)", "Domaines");
+          v("catégories : sous-catégorie renommée partout", [obtenir("operations", or.id).sousCategorie, obtenir("commercants", fr.id).sousCategorie, Object.keys(obtenir("commercants", fr.id).stats)[0], LIVRE.parametres.categories["Abonnements essai"].join(","), nr >= 2], ["Domaines", "Domaines", "Abonnements essai|Domaines|Courante|", "Domaines", true]);
+          supprimer("operations", or.id); supprimer("commercants", fr.id); delete LIVRE.parametres.categories["Abonnements essai"];
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }
