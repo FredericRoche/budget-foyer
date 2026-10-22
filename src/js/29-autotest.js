@@ -345,6 +345,12 @@ async function autotest(){
       v("doublons probables : inclusion, ordre des mots, alias ; ni générique ni deux lieux", doublonsProbables(fs).map(g => g.map(x => x.id).sort().join("")).sort(), ["ab", "cd", "ij"]);
       v("doublons probables : groupe écarté", doublonsProbables(fs, ["a|b"]).length, 2);
       v("devis : fenêtre de date d'une facture", fenetre({type: "devis"}), fenetre({type: "facture"}));
+      const jOk = enregistrer("justificatifs", {type: "autre", date: "2027-05-20", montant: 1318.8, commercantNom: "Bureau d'études essai", statut: "a_rapprocher", operations: []});
+      const jDep = enregistrer("justificatifs", {type: "facturette", date: "2027-05-20", montant: 1318.8, commercantNom: "Lu de travers", origine: "depot", aValider: true, statut: "a_rapprocher", operations: []});
+      const jLoin = enregistrer("justificatifs", {type: "facture", date: "2027-09-01", montant: 1318.8, statut: "a_rapprocher", operations: []});
+      v("pièce du dépôt : saisie voisine signalée (même montant, 45 jours)", piecesVoisines(jDep).map(x => x.id), [jOk.id]);
+      vrai("pièce du dépôt à valider : jamais rapprochée d'office", (rapprocherTout(), obtenir("justificatifs", jDep.id).statut === "a_rapprocher"));
+      for (const x of [jOk, jDep, jLoin]) supprimer("justificatifs", x.id);
     }
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
   finally {

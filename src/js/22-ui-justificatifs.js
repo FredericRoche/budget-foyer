@@ -7,7 +7,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   const attente = nbValider ? aRapprocher.filter(j => j.aValider) : aRapprocher.filter(j => !j.reporte && candidats([j]).length);
   // Fiche refermée : on ne la rouvre pas d'office ; les autres restent proposées
   let j = etat.choisi ? obtenir("justificatifs", etat.choisi) : attente.find(x => x.id !== etat.ferme);
-  c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " saisie(s) du téléphone à valider · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
+  c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " pièce(s) à valider (téléphone ou dépôt) · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
      h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s)."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
@@ -18,16 +18,24 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
 }});
 
+/* Pièces déjà enregistrées qui pourraient être la même : même montant à 45 jours près, ou même fournisseur
+   à 45 jours près, ou même numéro de facture. Sert à la validation d'une pièce lue automatiquement. */
+function piecesVoisines(j){
+  return vivants("justificatifs").filter(x => x.id !== j.id && x.groupe !== j.id && !x.aValider && x.date && j.date && Math.abs(ecartJours(x.date, j.date)) <= 45
+    && ((j.montant && Math.abs((x.montant || 0) - j.montant) < 0.01) || (j.commercant && x.commercant === j.commercant) || (j.numero && x.numero === j.numero))).slice(0, 3);
+}
 function ecranRapprochement(j, etat, attente){
   const groupe = j.groupe ? vivants("justificatifs").filter(x => x.groupe === j.groupe) : [j];
   const idx = attente.indexOf(j);
   const bloc = h("div");
   bloc.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".6rem"}},
-    h("div", null, h("strong", null, (groupe.length > 1 ? "Achat groupé · " : "") + (j.origine === "mobile" ? "Saisie du téléphone" : j.sansPiece ? "Saisie sans pièce" : "Pièce ajoutée sur le PC") + " du " + dateFr(j.date)),
-      j.statut === "rapproche" ? h("span", {class: "pos"}, " · rapproché") : null, j.aValider ? h("span", {class: "neg"}, " · à valider : vérifiez et corrigez, puis « Valider la saisie »") : null),
+    h("div", null, h("strong", null, (groupe.length > 1 ? "Achat groupé · " : "") + (j.origine === "mobile" ? "Saisie du téléphone" : j.origine === "depot" ? "Pièce du dossier de dépôt" : j.sansPiece ? "Saisie sans pièce" : "Pièce ajoutée sur le PC") + " du " + dateFr(j.date)),
+      j.statut === "rapproche" ? h("span", {class: "pos"}, " · rapproché") : null, j.aValider ? h("span", {class: "neg"}, " · à valider : vérifiez et corrigez, puis « Valider la saisie »") : null,
+      j.aValider ? piecesVoisines(j).map(x => h("div", {class: "note"}, "Peut-être déjà saisie : " + (x.commercantNom || x.raisonSociale || "fournisseur ?") + ", " + euros(x.montant) + " du " + dateFr(x.date)
+        + (x.natureExacte ? " (« " + x.natureExacte + " »)" : "") + ". Si c'est la même pièce, supprimez celle-ci.")) : null),
     idx >= 0 ? h("div", {class: "outils"}, h("button", {class: "discret", disabled: idx <= 0, onclick: () => { etat.choisi = attente[idx - 1].id; rafraichirEcran(); }}, "‹ Précédent"),
       h("span", {class: "discret"}, (idx + 1) + " sur " + attente.length),
       h("button", {class: "discret", disabled: idx >= attente.length - 1, onclick: () => { etat.choisi = attente[idx + 1].id; rafraichirEcran(); }}, "Suivant ›")) : null,

@@ -158,7 +158,7 @@ async function enregistrerFichier(f, enLot){
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
     else if (lu.genre === "regles"){ const n = appliquerRegles(lu.contenu); message(n + " règle(s) importée(s).");
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
-    else if (lu.genre === "justificatif_pdf" || lu.genre === "image") await importerJustificatifPc(lu);
+    else if (lu.genre === "justificatif_pdf" || lu.genre === "image") await importerJustificatifPc(lu, !!f.source);
     else if (lu.genre === "document") enregistrer("documents", {genre: lu.sousGenre, fichier: lu.nom, date: lu.date, titre: lu.titre, quantite: lu.quantite, montant: lu.montant, sens: lu.sens, isin: lu.isin});
     f.statut = "fait";
     if (f.source) await rangerFichier(f);
@@ -166,8 +166,9 @@ async function enregistrerFichier(f, enLot){
     if (!enLot) rafraichirEcran();
   } catch (e){ f.erreur = e.message; f.statut = "erreur"; console.error(e); message(e.message, true); if (!enLot) rafraichirEcran(); }
 }
-/* Justificatif déposé sur le PC : lecture, puis écran de rapprochement. */
-async function importerJustificatifPc(lu){
+/* Justificatif déposé sur le PC : lecture, puis écran de rapprochement. Venu du dossier de dépôt, il n'a
+   été vu par personne : il attend une validation (moyen de paiement, doublon possible), comme une saisie du téléphone. */
+async function importerJustificatifPc(lu, depuisDepot){
   let t;
   if (lu.genre === "image"){ message("Lecture du ticket « " + lu.nom + " »…"); t = await lireTicket(new Blob([lu.octets], {type: lu.mime})); }
   else { t = Object.assign(extraireTicket(lu.texte), {photo: {mime: "application/pdf", octets: lu.octets}}); if (!/facturette/.test(t.type)) t.type = "facture"; }
@@ -177,7 +178,8 @@ async function importerJustificatifPc(lu){
   if (double && !(await confirmer("Une pièce identique est déjà enregistrée : " + (double.commercantNom || double.raisonSociale || "fournisseur ?") + (double.numero ? ", facture n° " + double.numero : "") + ", " + euros(double.montant) + " du " + dateFr(double.date)
     + ". L'ajouter quand même ?", "Ajouter quand même"))) return;
   const j = await creerJustificatif({type: t.type, date: t.date || aujourdhui(), heure: t.heure, montant: t.montant || 0, raisonSociale: t.raisonSociale, commercantNom: c ? c.nom : nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")),
-    commercant: c ? c.id : null, carte4: t.carte4, carte: carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: "pc", categorie: c?.categorie || "", sousCategorie: c?.sousCategorie || "", lieu: c?.lieu || "", aVerifier: true}, t.photo);
+    commercant: c ? c.id : null, carte4: t.carte4, carte: carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc", categorie: c?.categorie || "", sousCategorie: c?.sousCategorie || "", lieu: c?.lieu || "", aVerifier: true,
+    aValider: !!depuisDepot}, t.photo);
   rapprocherTout();
   ETAT_ECRAN.justificatifs = Object.assign(ETAT_ECRAN.justificatifs || {}, {choisi: j.id});
 }
