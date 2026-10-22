@@ -90,7 +90,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
   /* 4. Rapprochés automatiquement, réversibles */
   const autos = vivants("justificatifs").filter(j => j.auto && j.statut === "rapproche" && !j.vu).sort((a, b) => (a.rapprocheLe || "") < (b.rapprocheLe || "") ? 1 : -1);
   const s4 = h("section", {style: {marginTop: "1rem"}});
-  s4.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".4rem"}}, h("h2", {style: {margin: 0}}, "Rapprochés automatiquement depuis le dernier passage (" + autos.length + ")"),
+  s4.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".4rem"}}, h("h2", {style: {margin: 0}}, "Rapprochements faits depuis le dernier passage (" + autos.length + ")"),
     autos.length ? h("button", {class: "discret mini", onclick: () => { for (const j of autos) enregistrer("justificatifs", Object.assign(j, {vu: true})); rafraichirEcran(); }}, "Tout marquer comme vu") : null));
   s4.appendChild(tableau([{titre: "Quand"}, {titre: "Justificatif"}, {titre: "Opération"}, {titre: "Montant", num: true}, {titre: ""}], autos, {classe: "serre", vide: "Aucun.", ligne: j => {
     const op = obtenir("operations", (j.operations || [])[0]);

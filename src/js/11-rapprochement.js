@@ -6,11 +6,11 @@
    rattachent à la même opération sans double compte. Plusieurs tickets réglés en
    un seul paiement forment un « achat groupé » et ventilent l'opération. */
 
-const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", facturette: "Facturette CB", autre: "Autre"};
+const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", facturette: "Facturette CB", autre: "Autre"};
 
 function fenetre(j){
   const p = LIVRE.parametres;
-  return j.type === "facture" ? [p.tolFactureAvant, p.tolFactureApres] : [p.tolTicketAvant, p.tolTicketApres];
+  return j.type === "facture" || j.type === "devis" ? [p.tolFactureAvant, p.tolFactureApres] : [p.tolTicketAvant, p.tolTicketApres];
 }
 function compteCompatible(j, compte){
   if (!j.carte) return true;

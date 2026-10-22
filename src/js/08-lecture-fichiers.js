@@ -210,6 +210,12 @@ function reconnaitrePdf(nom, texte, octets){
       isin: m ? m[4] : "", montant: lireMontant(premier(T, /cr[ée]dit[ée] en date du \d{2}\/\d{2}\/\d{4} de ([\d .,]+) EUR/)),
       date: lireDate(premier(T, /en date du (\d{2}\/\d{2}\/\d{4})/))});
   }
+  // Avis d'imposition (DGFiP) : gardé pour le rangement, sans écriture comptable
+  if (/\bAVIS_(TF|TH|IR|PS|THRS)_/.test(T) || (/FINANCES PUBLIQUES/.test(T) && /avis d.imp[oô]t|taxes? fonci[eè]res?|taxe d.habitation/i.test(T))){
+    const an = premier(N, /(?:avis d.impot|taxes? foncieres?|taxe d.habitation)\s*(\d{4})/) || premier(nom, /(20\d{2})/);
+    const quoi = /\bAVIS_TF_|taxes? fonci/i.test(T + nom) ? "Taxe foncière" : /\bAVIS_TH|taxe d.habitation/i.test(T + nom) ? "Taxe d'habitation" : "Impôt sur le revenu";
+    return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : ""), date: an ? an + "-12-31" : null});
+  }
   if (/^COMPTEDEDEPOTS_/.test(nom)) return Object.assign(base, {genre: "inconnu", raison: "relevé de compte PDF : importez plutôt l'export CSV du compte (plus complet)"});
   // Pièce justificative (facture, ticket)
   return Object.assign(base, {genre: "justificatif_pdf"});

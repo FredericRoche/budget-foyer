@@ -11,6 +11,62 @@ function classementConstate(x){
   const [categorie, sousCategorie, nature, lieu] = k.split("|");
   return {categorie, sousCategorie, nature, lieu, nb};
 }
+/* Doublons probables : une fiche par enseigne, sous le nom tapé spontanément. Deux fiches se ressemblent
+   si les mots significatifs de l'une sont tous dans l'autre (« Enseigne » / « Enseigne rue X »,
+   « Jean Martin » / « M Martin Jean »), si elles partagent un alias, ou si leur premier mot
+   significatif est le même. Deux fiches d'une même enseigne à des lieux différents restent
+   distinctes : c'est l'analytique. */
+const MOTS_GENERIQUES_DOUBLONS = new Set(("le la les l au aux du de des d et en sur chez the m mme mr monsieur madame sarl sas sasu sa eurl sci snc ste societe ets etablissements cb carte " +
+  "boulangerie patisserie restaurant brasserie bar cafe hotel pharmacie garage cave boucherie charcuterie librairie maison auberge relais station magasin superette epicerie traiteur " +
+  "rue avenue bd boulevard place caisse grand grande petit petite marche centre saint sainte nouveau nouvelle").split(" "));
+const ENSEIGNES_ABREGEES = {fp: "franprix", mp: "monoprix"};
+function motsSignificatifs(nom){
+  const mots = norm(nom).replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+  if (mots.length && ENSEIGNES_ABREGEES[mots[0]]) mots[0] = ENSEIGNES_ABREGEES[mots[0]];
+  return mots.filter(m => m.length >= 3 && !MOTS_GENERIQUES_DOUBLONS.has(m) && !/^\d+$/.test(m));
+}
+function doublonsProbables(fiches, ignores){
+  const ign = new Set(ignores || []);
+  const infos = fiches.map(x => ({x, mots: motsSignificatifs(x.nom), alias: new Set((x.alias || []).filter(a => a && a.length >= 4))}));
+  const parent = infos.map((_, i) => i);
+  const racine = i => parent[i] === i ? i : (parent[i] = racine(parent[i]));
+  for (let i = 0; i < infos.length; i++) for (let j = i + 1; j < infos.length; j++){
+    const a = infos[i], b = infos[j];
+    if (a.x.lieu && b.x.lieu && a.x.lieu !== b.x.lieu) continue;
+    if (!a.mots.length || !b.mots.length) continue;
+    const [p, g] = a.mots.length <= b.mots.length ? [a.mots, b.mots] : [b.mots, a.mots];
+    const inclus = p.every(m => g.includes(m));
+    const memeTete = a.mots[0] === b.mots[0] && a.mots[0].length >= 4;
+    const aliasCommun = [...a.alias].some(x => b.alias.has(x));
+    if (inclus || memeTete || aliasCommun) parent[racine(j)] = racine(i);
+  }
+  const groupes = new Map();
+  infos.forEach((inf, i) => { const r = racine(i); if (!groupes.has(r)) groupes.set(r, []); groupes.get(r).push(inf.x); });
+  return [...groupes.values()].filter(g => g.length > 1).map(g => g.sort((a, b) => a.nom.localeCompare(b.nom, "fr")))
+    .filter(g => !ign.has(g.map(x => x.id).sort().join("|")));
+}
+async function fusionnerGroupe(groupe, nbAchats){
+  const parDefaut = [...groupe].sort((a, b) => (nbAchats.get(b.id) || 0) - (nbAchats.get(a.id) || 0) || a.nom.length - b.nom.length)[0];
+  const garde = selection(groupe.map(x => [x.id, x.nom + " (" + (nbAchats.get(x.id) || 0) + " achat" + ((nbAchats.get(x.id) || 0) > 1 ? "s" : "") + ")"]), parDefaut.id);
+  const cases = groupe.map(x => ({x, c: h("input", {type: "checkbox", checked: true, id: "fus-" + x.id})}));
+  const ok = await dialogue({titre: "Fusionner des fiches", corps: h("div", null, champ("Fiche gardée (son nom reste)", garde),
+    h("p", {class: "note"}, "Fiches absorbées (alias, historique et justificatifs passent dans la fiche gardée) :"),
+    cases.map(({x, c}) => h("div", {class: "case"}, c, h("label", {for: "fus-" + x.id}, x.nom + (x.lieu ? " · " + x.lieu : ""))))),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Fusionner", classe: "primaire", valeur: true}]});
+  if (!ok) return;
+  const g = obtenir("commercants", garde.value); let n = 0;
+  for (const {x, c} of cases) if (c.checked && x.id !== g.id){ fusionnerCommercants(g, obtenir("commercants", x.id)); n++; }
+  message(n ? n + " fiche(s) fusionnée(s) dans « " + g.nom + " »." : "Rien à fusionner."); rafraichirEcran();
+}
+async function nouveauFournisseur(etat){
+  const nom = await demander("Nouveau fournisseur", "Nom d'usage (le nom de l'enseigne, tel qu'on le dit)", "");
+  if (!nom || !nom.trim()) return;
+  const existe = vivants("commercants").find(x => norm(x.nom) === norm(nom.trim()));
+  if (existe){ message("« " + existe.nom + " » existe déjà."); etat.choisi = existe.id; rafraichirEcran(); return; }
+  const x = enregistrer("commercants", {nom: nom.trim(), alias: [], stats: {}, natures: {}, titulaires: {}});
+  invaliderIndex(); etat.choisi = x.id; rafraichirEcran();
+}
+
 declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   const q = norm(etat.recherche || "");
   const nbAchats = new Map(); for (const o of vivants("operations")) if (o.commercant) nbAchats.set(o.commercant, (nbAchats.get(o.commercant) || 0) + 1);
@@ -21,8 +77,22 @@ declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   const filtre = h("label", {class: "case", style: {margin: 0}}, h("input", {type: "checkbox", checked: !!etat.aVerifier, onchange: e => { etat.aVerifier = e.target.checked; rafraichirEcran(); }}), " à vérifier seulement");
   const filtre2 = h("label", {class: "case", style: {margin: 0}}, h("input", {type: "checkbox", checked: !!etat.deuxPlus, onchange: e => { etat.deuxPlus = e.target.checked; rafraichirEcran(); }}), " 2 achats et plus");
   c.appendChild(entete("Fournisseurs", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " fournisseurs, dont " + nbVerifies + " vérifiés", [recherche, filtre, filtre2,
+    h("button", {class: "discret", onclick: () => nouveauFournisseur(etat)}, "Nouveau fournisseur…"),
     h("button", {class: "discret", onclick: () => fusionDialogue()}, "Fusionner deux fiches…"),
     h("button", {class: "discret", onclick: () => publierExtraitCommercants().then(() => message("Extrait publié pour le téléphone.")).catch(e => message(e.message, true))}, "Publier l'extrait pour le téléphone")]));
+  const doublons = doublonsProbables(vivants("commercants"), LIVRE.parametres.doublonsIgnores);
+  if (doublons.length){
+    const d = h("details", {class: "carte", style: {marginBottom: "1rem"}}, h("summary", {style: {cursor: "pointer"}}, h("strong", null, "Doublons probables (" + doublons.length + ")"),
+      h("span", {class: "petit discret"}, " — fiches qui semblent désigner la même enseigne")),
+      tableau([{titre: "Fiches"}, {titre: "Achats", num: true}, {titre: ""}], doublons, {classe: "serre", limite: 200, ligne: gr => h("tr", null,
+        h("td", null, gr.map(x => x.nom + (x.lieu ? " (" + x.lieu + ")" : "")).join(" · ")),
+        h("td", {class: "num"}, gr.map(x => String(nbAchats.get(x.id) || 0)).join(" · ")),
+        h("td", null, h("button", {class: "mini primaire", onclick: () => fusionnerGroupe(gr, nbAchats)}, "Fusionner…"), " ",
+          h("button", {class: "mini discret", title: "Ne plus proposer ce groupe", onclick: () => { modifierParametres({doublonsIgnores: [...(LIVRE.parametres.doublonsIgnores || []), gr.map(x => x.id).sort().join("|")]}); rafraichirEcran(); }}, "Distinctes")))}));
+    try { d.open = localStorage.getItem("doublonsOuverts") === "1"; } catch (e) {}
+    d.addEventListener("toggle", () => { try { localStorage.setItem("doublonsOuverts", d.open ? "1" : "0"); } catch (e) {} });
+    c.appendChild(d);
+  }
   const choisi = etat.choisi ? obtenir("commercants", etat.choisi) : null;
   const g = h("div", {class: choisi ? "avec-panneau" : ""});
   g.appendChild(tableau([{titre: "Fournisseur", cle: x => x.nom}, {titre: "Alias reconnus"}, {titre: "Classement par défaut", cle: x => x.categorie || ""}, {titre: "Lieu", cle: x => x.lieu || ""},

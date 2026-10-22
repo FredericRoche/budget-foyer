@@ -3,7 +3,8 @@ let FICHIERS_EN_COURS = [];   // [{lu, compte, prep, statut, erreur}]
 
 declarerEcran("import", {titre: "Importer", rendre(c, etat){
   c.appendChild(entete("Importer", "Relevés, factures, plans, classeur, règles et justificatifs · les fichiers sont lus sur cet appareil ; rien n'est envoyé ailleurs.",
-    [h("button", {onclick: async () => { const f = await choisirFichier(".csv,.xlsx,.pdf,.json,image/*", true); if (f && f.length) await deposerFichiers(f); }}, "Choisir des fichiers…"),
+    ["showDirectoryPicker" in window ? h("button", {class: "primaire", onclick: () => importerDossierDepot().catch(e => message(e.message, true))}, "Importer le dossier de dépôt") : null,
+     h("button", {onclick: async () => { const f = await choisirFichier(".csv,.xlsx,.pdf,.json,image/*", true); if (f && f.length) await deposerFichiers(f); }}, "Choisir des fichiers…"),
      FICHIERS_EN_COURS.length ? h("button", {class: "discret", onclick: () => { FICHIERS_EN_COURS = []; rafraichirEcran(); }}, "Vider la liste") : null]));
   const depot = h("div", {class: "depot"}, h("strong", null, "Déposez ici tous les fichiers du mois d'un coup"), " (CSV, Excel, PDF) : chacun est reconnu.",
     h("div", {class: "note"}, "Exports CSV du compte et des cartes LCL (encours), export Amex, facture des cartes LCL (PDF), relevés de livrets, PEA, assurance-vie et retraite (PDF), classeur d'inventaire, fichier de règles, photos ou PDF de justificatifs."));
@@ -17,10 +18,12 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
   const gauche = h("section");
   if (FICHIERS_EN_COURS.length){
     gauche.appendChild(h("h2", null, "Fichiers reconnus (" + FICHIERS_EN_COURS.length + ")"));
-    gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}], FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
+    const avecDepot = FICHIERS_EN_COURS.some(f => f.source);
+    gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
-        reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)", document: "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
+        reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+        document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
       const controle = f.erreur ? h("span", {class: "neg"}, f.erreur) : lu.genre === "inconnu" ? h("span", {class: "neg"}, lu.raison)
@@ -32,11 +35,13 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       return h("tr", {class: f.statut === "fait" ? "" : ""}, h("td", {class: "petit"}, lu.nom), h("td", null, genre, f.compte ? h("span", {class: "libbanque"}, f.compte.nom) : null),
         h("td", null, periode), h("td", {class: "num"}, String(nouvelles)), h("td", {class: "petit"}, controle),
         h("td", null, f.statut === "fait" ? h("span", {class: "pos"}, "✓ enregistré") : f.statut === "pret" ? h("button", {class: "mini", onclick: () => enregistrerFichier(f)}, "Enregistrer") :
-          f.statut === "compte" ? h("button", {class: "mini primaire", onclick: () => creerCompteImport(f)}, "Créer le compte…") : ""));
+          f.statut === "compte" ? h("button", {class: "mini primaire", onclick: () => creerCompteImport(f)}, "Créer le compte…") : ""),
+        avecDepot ? h("td", {class: "petit"}, celluleRangement(f)) : null);
     }}));
     const prets = FICHIERS_EN_COURS.filter(f => f.statut === "pret");
     if (prets.length) gauche.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "primaire", onclick: async () => {
       for (const f of FICHIERS_EN_COURS.filter(x => x.statut === "pret")) await enregistrerFichier(f, true);
+      if (FICHIERS_EN_COURS.some(f => f.source)) await nettoyerDepot();
       rafraichirEcran();
     }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs s'appliqueront d'office.")));
     const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.statut === "pret");
@@ -156,6 +161,7 @@ async function enregistrerFichier(f, enLot){
     else if (lu.genre === "justificatif_pdf" || lu.genre === "image") await importerJustificatifPc(lu);
     else if (lu.genre === "document") enregistrer("documents", {genre: lu.sousGenre, fichier: lu.nom, date: lu.date, titre: lu.titre, quantite: lu.quantite, montant: lu.montant, sens: lu.sens, isin: lu.isin});
     f.statut = "fait";
+    if (f.source) await rangerFichier(f);
     for (const autre of FICHIERS_EN_COURS.filter(x => x.statut === "pret" && x !== f)) preparerFichier(autre);
     if (!enLot) rafraichirEcran();
   } catch (e){ f.erreur = e.message; f.statut = "erreur"; console.error(e); message(e.message, true); if (!enLot) rafraichirEcran(); }

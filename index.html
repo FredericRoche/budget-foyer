@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KtrPpGgxOvBEC7AsyAN7dNsvpd89q8qCYQtKYhzRNiQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KeEaEmwBYg26N14lhL1bL0U657cYDW8OK/ctgpeNWB4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-21.1752";
+const VERSION_APP = "2026-10-22.1553";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1989,6 +1989,12 @@ function reconnaitrePdf(nom, texte, octets){
       isin: m ? m[4] : "", montant: lireMontant(premier(T, /cr[ée]dit[ée] en date du \d{2}\/\d{2}\/\d{4} de ([\d .,]+) EUR/)),
       date: lireDate(premier(T, /en date du (\d{2}\/\d{2}\/\d{4})/))});
   }
+  // Avis d'imposition (DGFiP) : gardé pour le rangement, sans écriture comptable
+  if (/\bAVIS_(TF|TH|IR|PS|THRS)_/.test(T) || (/FINANCES PUBLIQUES/.test(T) && /avis d.imp[oô]t|taxes? fonci[eè]res?|taxe d.habitation/i.test(T))){
+    const an = premier(N, /(?:avis d.impot|taxes? foncieres?|taxe d.habitation)\s*(\d{4})/) || premier(nom, /(20\d{2})/);
+    const quoi = /\bAVIS_TF_|taxes? fonci/i.test(T + nom) ? "Taxe foncière" : /\bAVIS_TH|taxe d.habitation/i.test(T + nom) ? "Taxe d'habitation" : "Impôt sur le revenu";
+    return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : ""), date: an ? an + "-12-31" : null});
+  }
   if (/^COMPTEDEDEPOTS_/.test(nom)) return Object.assign(base, {genre: "inconnu", raison: "relevé de compte PDF : importez plutôt l'export CSV du compte (plus complet)"});
   // Pièce justificative (facture, ticket)
   return Object.assign(base, {genre: "justificatif_pdf"});
@@ -2517,11 +2523,11 @@ function appliquerReprise(prep, options){
    rattachent à la même opération sans double compte. Plusieurs tickets réglés en
    un seul paiement forment un « achat groupé » et ventilent l'opération. */
 
-const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", facturette: "Facturette CB", autre: "Autre"};
+const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", facturette: "Facturette CB", autre: "Autre"};
 
 function fenetre(j){
   const p = LIVRE.parametres;
-  return j.type === "facture" ? [p.tolFactureAvant, p.tolFactureApres] : [p.tolTicketAvant, p.tolTicketApres];
+  return j.type === "facture" || j.type === "devis" ? [p.tolFactureAvant, p.tolFactureApres] : [p.tolTicketAvant, p.tolTicketApres];
 }
 function compteCompatible(j, compte){
   if (!j.carte) return true;
@@ -3889,7 +3895,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
       h("tr", {class: (x.total ? "total" : "cliquable"), onclick: x.total ? null : () => aller("justificatifs")}, h("td", null, x.moyen), h("td", {class: "num"}, String(x.n)), h("td", {class: "num"}, euros(x.montant, 0)), h("td", null, x.depuis ? dateFr(x.depuis) : ""))}),
     h("p", {class: "note"}, "Factures et tickets saisis dont l'opération n'est pas encore dans un relevé importé. Les prélèvements, eux, n'apparaissent qu'au relevé.")) : null;
   grille.append(carteTreso, h("section", {class: "carte"}, h("h2", null, "À traiter"), listeT,
-    autos ? h("p", {class: "note"}, autos + " rapprochement(s) fait(s) d'office, réversibles (« À traiter »).") : null, blocEnc));
+    autos ? h("p", {class: "note"}, autos + " rapprochement(s) fait(s) depuis le dernier passage, à contrôler et réversibles (« À traiter »).") : null, blocEnc));
   c.appendChild(grille);
 
   // Revenus et résultat de l'année : mêmes chiffres que la version imprimable du budget
@@ -4080,7 +4086,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
   /* 4. Rapprochés automatiquement, réversibles */
   const autos = vivants("justificatifs").filter(j => j.auto && j.statut === "rapproche" && !j.vu).sort((a, b) => (a.rapprocheLe || "") < (b.rapprocheLe || "") ? 1 : -1);
   const s4 = h("section", {style: {marginTop: "1rem"}});
-  s4.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".4rem"}}, h("h2", {style: {margin: 0}}, "Rapprochés automatiquement depuis le dernier passage (" + autos.length + ")"),
+  s4.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".4rem"}}, h("h2", {style: {margin: 0}}, "Rapprochements faits depuis le dernier passage (" + autos.length + ")"),
     autos.length ? h("button", {class: "discret mini", onclick: () => { for (const j of autos) enregistrer("justificatifs", Object.assign(j, {vu: true})); rafraichirEcran(); }}, "Tout marquer comme vu") : null));
   s4.appendChild(tableau([{titre: "Quand"}, {titre: "Justificatif"}, {titre: "Opération"}, {titre: "Montant", num: true}, {titre: ""}], autos, {classe: "serre", vide: "Aucun.", ligne: j => {
     const op = obtenir("operations", (j.operations || [])[0]);
@@ -4284,7 +4290,8 @@ let FICHIERS_EN_COURS = [];   // [{lu, compte, prep, statut, erreur}]
 
 declarerEcran("import", {titre: "Importer", rendre(c, etat){
   c.appendChild(entete("Importer", "Relevés, factures, plans, classeur, règles et justificatifs · les fichiers sont lus sur cet appareil ; rien n'est envoyé ailleurs.",
-    [h("button", {onclick: async () => { const f = await choisirFichier(".csv,.xlsx,.pdf,.json,image/*", true); if (f && f.length) await deposerFichiers(f); }}, "Choisir des fichiers…"),
+    ["showDirectoryPicker" in window ? h("button", {class: "primaire", onclick: () => importerDossierDepot().catch(e => message(e.message, true))}, "Importer le dossier de dépôt") : null,
+     h("button", {onclick: async () => { const f = await choisirFichier(".csv,.xlsx,.pdf,.json,image/*", true); if (f && f.length) await deposerFichiers(f); }}, "Choisir des fichiers…"),
      FICHIERS_EN_COURS.length ? h("button", {class: "discret", onclick: () => { FICHIERS_EN_COURS = []; rafraichirEcran(); }}, "Vider la liste") : null]));
   const depot = h("div", {class: "depot"}, h("strong", null, "Déposez ici tous les fichiers du mois d'un coup"), " (CSV, Excel, PDF) : chacun est reconnu.",
     h("div", {class: "note"}, "Exports CSV du compte et des cartes LCL (encours), export Amex, facture des cartes LCL (PDF), relevés de livrets, PEA, assurance-vie et retraite (PDF), classeur d'inventaire, fichier de règles, photos ou PDF de justificatifs."));
@@ -4298,10 +4305,12 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
   const gauche = h("section");
   if (FICHIERS_EN_COURS.length){
     gauche.appendChild(h("h2", null, "Fichiers reconnus (" + FICHIERS_EN_COURS.length + ")"));
-    gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}], FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
+    const avecDepot = FICHIERS_EN_COURS.some(f => f.source);
+    gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
-        reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)", document: "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
+        reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+        document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
       const controle = f.erreur ? h("span", {class: "neg"}, f.erreur) : lu.genre === "inconnu" ? h("span", {class: "neg"}, lu.raison)
@@ -4313,11 +4322,13 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       return h("tr", {class: f.statut === "fait" ? "" : ""}, h("td", {class: "petit"}, lu.nom), h("td", null, genre, f.compte ? h("span", {class: "libbanque"}, f.compte.nom) : null),
         h("td", null, periode), h("td", {class: "num"}, String(nouvelles)), h("td", {class: "petit"}, controle),
         h("td", null, f.statut === "fait" ? h("span", {class: "pos"}, "✓ enregistré") : f.statut === "pret" ? h("button", {class: "mini", onclick: () => enregistrerFichier(f)}, "Enregistrer") :
-          f.statut === "compte" ? h("button", {class: "mini primaire", onclick: () => creerCompteImport(f)}, "Créer le compte…") : ""));
+          f.statut === "compte" ? h("button", {class: "mini primaire", onclick: () => creerCompteImport(f)}, "Créer le compte…") : ""),
+        avecDepot ? h("td", {class: "petit"}, celluleRangement(f)) : null);
     }}));
     const prets = FICHIERS_EN_COURS.filter(f => f.statut === "pret");
     if (prets.length) gauche.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "primaire", onclick: async () => {
       for (const f of FICHIERS_EN_COURS.filter(x => x.statut === "pret")) await enregistrerFichier(f, true);
+      if (FICHIERS_EN_COURS.some(f => f.source)) await nettoyerDepot();
       rafraichirEcran();
     }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs s'appliqueront d'office.")));
     const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.statut === "pret");
@@ -4437,6 +4448,7 @@ async function enregistrerFichier(f, enLot){
     else if (lu.genre === "justificatif_pdf" || lu.genre === "image") await importerJustificatifPc(lu);
     else if (lu.genre === "document") enregistrer("documents", {genre: lu.sousGenre, fichier: lu.nom, date: lu.date, titre: lu.titre, quantite: lu.quantite, montant: lu.montant, sens: lu.sens, isin: lu.isin});
     f.statut = "fait";
+    if (f.source) await rangerFichier(f);
     for (const autre of FICHIERS_EN_COURS.filter(x => x.statut === "pret" && x !== f)) preparerFichier(autre);
     if (!enLot) rafraichirEcran();
   } catch (e){ f.erreur = e.message; f.statut = "erreur"; console.error(e); message(e.message, true); if (!enLot) rafraichirEcran(); }
@@ -4457,6 +4469,237 @@ async function importerJustificatifPc(lu){
   ETAT_ECRAN.justificatifs = Object.assign(ETAT_ECRAN.justificatifs || {}, {choisi: j.id});
 }
 
+/* ===== 21b-dossier-import.js ===== */
+/* ================= Dossier de dépôt et rangement des fichiers importés =================
+   Chaque appareil désigne deux dossiers de son disque (poignées gardées dans ce
+   navigateur) : le dépôt, où l'on pose les téléchargements (par exemple sur le disque
+   externe), et les archives, où chaque fichier enregistré est rangé dans le dossier
+   de son compte, sous-dossier de l'année. Les règles de rangement (chemins relatifs
+   aux archives) vivent dans le livre et valent pour tous les appareils.
+   Rien n'est écrasé : un nom déjà pris reçoit un suffixe ; une copie identique déjà
+   rangée libère simplement le dépôt. Un fichier non reconnu ou en erreur reste au dépôt. */
+
+const DOSSIERS_IMPORT = {depot: {cle: "depot_racine", libelle: "Dossier de dépôt"}, archives: {cle: "archives_racine", libelle: "Dossier des archives"}};
+const FICHIERS_IGNORES = /^(desktop\.ini|thumbs\.db|\.ds_store)$|^~\$|^\./i;
+
+async function choisirDossierImport(quoi){
+  const d = await window.showDirectoryPicker({id: "bf-" + quoi, mode: "readwrite", startIn: "documents"});
+  await definirReglage(DOSSIERS_IMPORT[quoi].cle, d);
+  return d;
+}
+/* Poignée du dossier, autorisation redemandée si besoin (une fois par séance dans Chrome). */
+async function dossierImport(quoi, interactif){
+  const d = await reglage(DOSSIERS_IMPORT[quoi].cle, null);
+  if (!d) return null;
+  let p = await d.queryPermission({mode: "readwrite"});
+  if (p !== "granted" && interactif) p = await d.requestPermission({mode: "readwrite"});
+  return p === "granted" ? d : null;
+}
+
+/* ---------- Règles de rangement ---------- */
+function reglesRangement(){ return LIVRE.parametres.rangement || {}; }
+/* Clé de la règle qui s'applique au fichier : un compte, ou une famille de pièces. */
+function cleRangement(lu, compte){
+  if (["compte", "carte", "valorisation"].includes(lu.genre)) return compte ? "compte:" + compte.id : null;
+  if (lu.genre === "facture_cb") return "factures_cb";
+  if (lu.genre === "document") return lu.sousGenre === "avis_impot" ? "avis_impot" : "avis_opere";
+  if (lu.genre === "justificatif_pdf" || lu.genre === "image") return "justificatifs";
+  if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "plans";
+  return null;
+}
+const LIBELLES_RANGEMENT = {factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
+function libelleRangement(cle){ return cle.startsWith("compte:") ? libelleCompte(cle.slice(7)) : LIBELLES_RANGEMENT[cle] || cle; }
+
+/* Année du fichier : fin de période, date de valeur, arrêté, sinon aujourd'hui. */
+function anneeFichier(lu){ return String((lu.periode && lu.periode.fin) || lu.date || lu.arrete || lu.dateDebit || aujourdhui()).slice(0, 4); }
+
+/* Proposition de dossier quand aucune règle n'existe encore : on cherche dans les archives
+   le dossier dont le nom porte le numéro du compte (le plus profond l'emporte).
+   « index » : chemins relatifs des dossiers des archives (« A/B/C »). */
+function proposerRangement(lu, compte, index){
+  const compact = s => String(s || "").replace(/[\s.-]/g, "").toUpperCase();
+  const parNumero = numero => {
+    const n = compact(numero); if (n.length < 6) return null;
+    // Numéro exact d'abord ; sans ses zéros de tête ensuite (fautes de frappe des noms de dossier), s'il reste assez long
+    const chercher = m => index.filter(c => compact(c.split("/").pop()).includes(m)).sort((a, b) => b.split("/").length - a.split("/").length)[0] || null;
+    const court = n.replace(/^0+/, "");
+    return chercher(n) || (court.length >= 7 && court !== n ? chercher(court) : null);
+  };
+  const parNom = re => index.filter(c => re.test(c.split("/").pop())).sort((a, b) => a.split("/").length - b.split("/").length)[0] || null;
+  const enfant = (base, re) => base && index.find(c => c.startsWith(base + "/") && c.split("/").length === base.split("/").length + 1 && re.test(c.split("/").pop()));
+  const courant = () => { const c = compteCourantLcl(); return c ? parNumero(c.numero) : null; };
+  if (lu.genre === "compte"){ const b = parNumero(compte?.numero); return b ? b + "/Historiques CSV" : (compte ? compte.nom : null); }
+  if (lu.genre === "carte"){
+    if (lu.banque === "Amex"){ const b = parNom(/^amex$/i); return (b || "Amex") + "/Relevés"; }
+    const debit = compte?.compteDebit ? vivants("comptes").find(c => c.id === compte.compteDebit) : null;
+    const b = parNumero(compte?.numero) || parNumero(debit?.numero);
+    return b ? b + "/Encours cartes" : (compte ? compte.nom : null);
+  }
+  if (lu.genre === "valorisation"){
+    const b = parNumero(compte?.numero || lu.numero);
+    if (!b) return compte ? compte.nom : null;
+    return enfant(b, /relev[ée]s? et [ée]valuations?/i) || b;
+  }
+  if (lu.genre === "facture_cb"){ const b = courant(); const e = enfant(b, /avis d[ée]bit diff[ée]r[ée]/i); return e || (b ? b + "/Avis débit différé cartes" : "Factures des cartes LCL"); }
+  if (lu.genre === "document" && lu.sousGenre === "avis_impot") return parNom(/^imp[ôo]ts?$/i) || "Impôts";
+  if (lu.genre === "document") return parNom(/^avis d.op[ée]r[ée]$/i) || "Avis d'opéré";
+  if (lu.genre === "justificatif_pdf" || lu.genre === "image") return parNom(/^justificatifs$/i) || "Justificatifs";
+  if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "Budget/Plans importés";
+  return null;
+}
+
+/* Dossier (sans l'année) où ira le fichier : la règle du livre, sinon la proposition. */
+function dossierRangement(f){
+  const cle = cleRangement(f.lu, f.compte); if (!cle) return null;
+  const regle = reglesRangement()[cle];
+  return {cle, dossier: regle || proposerRangement(f.lu, f.compte, INDEX_ARCHIVES || []), propose: !regle};
+}
+async function modifierRangement(cle, actuel){
+  const v = await demander("Rangement · " + libelleRangement(cle), "Dossier, relatif aux archives (l'année est ajoutée d'office) ; vide = règle retirée", actuel || "");
+  if (v === null) return;
+  const r = Object.assign({}, reglesRangement());
+  const propre = v.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (propre) r[cle] = propre; else delete r[cle];
+  modifierParametres({rangement: r});
+  rafraichirEcran();
+}
+
+/* ---------- Index des dossiers des archives (trois niveaux) ---------- */
+let INDEX_ARCHIVES = null;
+async function indexerArchives(racine){
+  const res = [];
+  const parcourir = async (d, prefixe, niveau) => {
+    for await (const [nom, e] of d.entries()){
+      if (e.kind !== "directory" || /^(zz|\.)/i.test(nom)) continue;
+      const c = prefixe ? prefixe + "/" + nom : nom; res.push(c);
+      if (niveau < 3) await parcourir(e, c, niveau + 1);
+    }
+  };
+  await parcourir(racine, "", 1);
+  return res;
+}
+
+/* ---------- Lecture du dépôt ---------- */
+async function importerDossierDepot(){
+  let depot = await dossierImport("depot", true);
+  if (!depot){
+    if (!(await confirmer("Aucun dossier de dépôt n'est désigné sur cet appareil. Le choisir maintenant (par exemple « Budget foyer\\À importer » sur le disque externe) ?", "Choisir…"))) return;
+    try { depot = await choisirDossierImport("depot"); } catch (e){ if (e.name !== "AbortError") message(e.message, true); return; }
+  }
+  const archives = await dossierImport("archives", true);
+  INDEX_ARCHIVES = archives ? await indexerArchives(archives) : [];
+  const trouves = [];
+  const parcourir = async (d, prefixe) => {
+    for await (const [nom, e] of d.entries()){
+      if (FICHIERS_IGNORES.test(nom)) continue;
+      if (e.kind === "directory") await parcourir(e, prefixe + nom + "/");
+      else trouves.push({dossier: d, nom, chemin: prefixe + nom, poignee: e});
+    }
+  };
+  await parcourir(depot, "");
+  const dejaListes = new Set(FICHIERS_EN_COURS.filter(f => f.source).map(f => f.source.chemin));
+  const nouveaux = trouves.filter(t => !dejaListes.has(t.chemin)).sort((a, b) => a.chemin.localeCompare(b.chemin));
+  if (!nouveaux.length){ message("Le dossier de dépôt est vide."); aller("import"); return; }
+  aller("import");
+  for (const t of nouveaux){
+    const fichier = await t.poignee.getFile();
+    const f = {fichier, source: t, lu: {nom: t.chemin, genre: "en cours"}, statut: "lecture"};
+    FICHIERS_EN_COURS.push(f); rafraichirEcran();
+    await lireEtPreparer(f);
+    f.lu.nom = t.chemin;   // le chemin dans le dépôt situe le fichier mieux que son nom seul
+  }
+  if (!archives) message("Dossier des archives non désigné sur cet appareil : les fichiers enregistrés resteront au dépôt (Réglages › Stockage et appareil).", true);
+  rafraichirEcran();
+}
+
+/* ---------- Rangement d'un fichier enregistré ---------- */
+function nomLibre(nom, pris){
+  if (!pris.has(nom)) return nom;
+  const i = nom.lastIndexOf("."); const base = i > 0 ? nom.slice(0, i) : nom, ext = i > 0 ? nom.slice(i) : "";
+  for (let n = 2; ; n++){ const c = base + " (" + n + ")" + ext; if (!pris.has(c)) return c; }
+}
+function memesOctets(a, b){ if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; }
+
+async function rangerFichier(f){
+  const archives = await dossierImport("archives", true);
+  if (!archives){ f.rangement = {reste: "archives non désignées"}; return; }
+  const r = dossierRangement(f);
+  if (!r || !r.dossier){ f.rangement = {reste: "aucune règle"}; return; }
+  try {
+    let d = archives;
+    const chemin = r.dossier.split("/").filter(Boolean).concat(anneeFichier(f.lu));
+    for (const p of chemin) d = await d.getDirectoryHandle(p, {create: true});
+    const octets = new Uint8Array(await (await f.source.poignee.getFile()).arrayBuffer());
+    const pris = new Set(); let identique = null;
+    for await (const [nom, e] of d.entries()) if (e.kind === "file"){
+      pris.add(nom);
+      if (nom === f.source.nom || (await e.getFile()).size === octets.length){
+        if (memesOctets(new Uint8Array(await (await e.getFile()).arrayBuffer()), octets)) identique = nom;
+      }
+    }
+    let final = identique;
+    if (!final){
+      final = nomLibre(f.source.nom, pris);
+      const fh = await d.getFileHandle(final, {create: true});
+      const w = await fh.createWritable(); await w.write(octets); await w.close();
+      const relu = new Uint8Array(await (await fh.getFile()).arrayBuffer());
+      if (!memesOctets(relu, octets)) throw new Error("copie non conforme, le fichier reste au dépôt");
+    }
+    await f.source.dossier.removeEntry(f.source.nom);
+    // La proposition retenue devient la règle : le rangement suivant ira au même endroit
+    if (r.propose) modifierParametres({rangement: Object.assign({}, reglesRangement(), {[r.cle]: r.dossier})});
+    f.rangement = {chemin: chemin.join("/") + "/" + final, identique: !!identique};
+  } catch (e){ f.rangement = {erreur: e.message}; console.error(e); }
+}
+
+/* Après un lot : sous-dossiers du dépôt devenus vides retirés (la racine reste). */
+async function nettoyerDepot(){
+  const depot = await dossierImport("depot", false); if (!depot) return;
+  const vider = async d => {
+    let vide = true;
+    for await (const [nom, e] of d.entries()){
+      if (e.kind === "directory"){ if (await vider(e)) await d.removeEntry(nom); else vide = false; }
+      else if (FICHIERS_IGNORES.test(nom)) continue;
+      else vide = false;
+    }
+    return vide;
+  };
+  try {
+    for await (const [nom, e] of depot.entries()) if (e.kind === "directory" && await vider(e)) await depot.removeEntry(nom, {recursive: true});
+  } catch (e){ console.error(e); }
+}
+
+/* Cellule « Rangement » de l'écran d'import. */
+function celluleRangement(f){
+  if (!f.source) return h("span", {class: "discret"}, "—");
+  if (f.rangement?.chemin) return h("span", {class: "pos"}, "✓ " + (f.rangement.identique ? "déjà rangé : " : "") + f.rangement.chemin);
+  if (f.rangement?.erreur) return h("span", {class: "neg"}, "reste au dépôt : " + f.rangement.erreur);
+  if (f.rangement?.reste) return h("span", {class: "discret"}, "reste au dépôt (" + f.rangement.reste + ")");
+  if (f.statut === "erreur" || f.lu.genre === "inconnu") return h("span", {class: "discret"}, "reste au dépôt");
+  const r = dossierRangement(f);
+  if (!r) return h("span", {class: "discret"}, "reste au dépôt");
+  if (!r.dossier) return h("button", {class: "mini discret", onclick: () => modifierRangement(r.cle, "")}, "Définir le rangement…");
+  return h("span", null, "→ " + r.dossier + "/" + anneeFichier(f.lu) + (r.propose ? " (proposé)" : "") + " ",
+    h("button", {class: "mini discret", onclick: () => modifierRangement(r.cle, r.dossier)}, "Modifier"));
+}
+
+/* Réglages › Stockage et appareil : les deux dossiers de cet appareil et les règles du livre. */
+function sectionDossiersImport(){
+  const corps = h("div");
+  const ligne = (quoi) => {
+    const zone = h("span", {class: "discret"}, "…");
+    reglage(DOSSIERS_IMPORT[quoi].cle, null).then(d => { zone.textContent = d ? "« " + d.name + " »" : "non désigné"; zone.className = d ? "" : "discret"; });
+    return h("li", null, h("span", null, DOSSIERS_IMPORT[quoi].libelle + " : ", zone),
+      h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierImport(quoi); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
+  };
+  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives")));
+  const regles = Object.entries(reglesRangement()).sort((a, b) => libelleRangement(a[0]).localeCompare(libelleRangement(b[0])));
+  if (regles.length) corps.appendChild(tableau([{titre: "Pièces"}, {titre: "Rangées dans (+ année)"}, {titre: ""}], regles, {classe: "serre", ligne: ([cle, d]) =>
+    h("tr", null, h("td", null, libelleRangement(cle)), h("td", {class: "petit"}, d), h("td", null, h("button", {class: "mini discret", onclick: () => modifierRangement(cle, d)}, "Modifier")))}));
+  corps.appendChild(h("p", {class: "note"}, "Dépôt et archives sont propres à cet appareil (par exemple le dépôt sur le disque externe, les archives sur le disque interne). Les règles de rangement sont communes : elles se créent au premier rangement de chaque compte, à partir du dossier des archives qui porte son numéro."));
+  return h("section", {class: "carte", style: {marginTop: "1rem"}}, h("h2", null, "Dossiers d'import"), corps);
+}
+
 /* ===== 22-ui-justificatifs.js ===== */
 /* ================= Justificatifs : rapprochement et boîte de saisies ================= */
 declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
@@ -4470,7 +4713,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " saisie(s) du téléphone à valider · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
-     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
+     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s)."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
   if (!j){
     c.appendChild(h("p", {class: "vide"}, aRapprocher.length ? "Rien à valider ni à trancher : " + aRapprocher.length + " justificatif(s) attendent leur opération au relevé. Cliquez sur une ligne pour l'ouvrir." : "Aucun justificatif à rapprocher."));
   } else c.appendChild(ecranRapprochement(j, etat, attente));
@@ -4478,7 +4721,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, x.auto ? "rapproché d'office" : "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
 }});
 
 function ecranRapprochement(j, etat, attente){
@@ -4575,7 +4818,7 @@ function ecranRapprochement(j, etat, attente){
     }
   };
   saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini" + (j.aValider ? " primaire" : ""), onclick: () => { const v = groupe.some(x => x.aValider); if (enregistrerSaisie() === false) return;
-      if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s) d'office." : "."));
+      if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s)." : "."));
         // Saisie suivante à valider, sinon justificatif suivant
         const suivant = attente.find(x => x.aValider && !groupe.includes(x)) || attente[idx + 1]; etat.choisi = suivant ? suivant.id : null;
       } else { message("Saisie enregistrée."); etat.choisi = null; } rafraichirEcran(); }}, j.aValider ? "Valider la saisie" : "Enregistrer la saisie"),
@@ -4587,6 +4830,7 @@ function ecranRapprochement(j, etat, attente){
   if (j.statut === "rapproche"){
     const op = obtenir("operations", (j.operations || [])[0]);
     cand.append(h("p", null, "Rapproché de : ", op ? libelleCompte(op.compte) + " · " + dateFr(op.date) + " · " + op.libelle + " · " + euros(op.montant) : "—"),
+      j.auto ? h("p", {class: "note"}, "Rapprochement fait d'office" + (j.rapprocheLe ? " le " + dateFr(j.rapprocheLe.slice(0, 10)) : "") + " : à défaire s'il ne correspond pas au relevé.") : null,
       h("button", {class: "discret", onclick: () => { for (const x of groupe) delier(x); rafraichirEcran(); }}, "Défaire le rapprochement"));
   } else {
     const liste = candidats(groupe);
@@ -4605,7 +4849,7 @@ function ecranRapprochement(j, etat, attente){
     });
     if (!liste.length && !propositionsGroupe.length) cand.appendChild(h("p", {class: "vide"}, "Aucune opération de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates. Le relevé n'est peut-être pas encore importé."));
     const [av, ap] = fenetre(j);
-    cand.appendChild(h("p", {class: "note"}, "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" ? "facture" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office."));
+    cand.appendChild(h("p", {class: "note"}, "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" || j.type === "devis" ? "facture ou devis" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office."));
     cand.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}},
       h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => { if (!(x.operations || []).length) creerOperationEspeces(x); }); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
       h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) enregistrer("justificatifs", Object.assign(x, {reporte: aujourdhui()})); const suivant = attente[idx + 1]; etat.choisi = suivant ? suivant.id : null; rafraichirEcran(); }}, "Reporter")));
@@ -4652,6 +4896,62 @@ function classementConstate(x){
   const [categorie, sousCategorie, nature, lieu] = k.split("|");
   return {categorie, sousCategorie, nature, lieu, nb};
 }
+/* Doublons probables : une fiche par enseigne, sous le nom tapé spontanément. Deux fiches se ressemblent
+   si les mots significatifs de l'une sont tous dans l'autre (« Enseigne » / « Enseigne rue X »,
+   « Jean Martin » / « M Martin Jean »), si elles partagent un alias, ou si leur premier mot
+   significatif est le même. Deux fiches d'une même enseigne à des lieux différents restent
+   distinctes : c'est l'analytique. */
+const MOTS_GENERIQUES_DOUBLONS = new Set(("le la les l au aux du de des d et en sur chez the m mme mr monsieur madame sarl sas sasu sa eurl sci snc ste societe ets etablissements cb carte " +
+  "boulangerie patisserie restaurant brasserie bar cafe hotel pharmacie garage cave boucherie charcuterie librairie maison auberge relais station magasin superette epicerie traiteur " +
+  "rue avenue bd boulevard place caisse grand grande petit petite marche centre saint sainte nouveau nouvelle").split(" "));
+const ENSEIGNES_ABREGEES = {fp: "franprix", mp: "monoprix"};
+function motsSignificatifs(nom){
+  const mots = norm(nom).replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+  if (mots.length && ENSEIGNES_ABREGEES[mots[0]]) mots[0] = ENSEIGNES_ABREGEES[mots[0]];
+  return mots.filter(m => m.length >= 3 && !MOTS_GENERIQUES_DOUBLONS.has(m) && !/^\d+$/.test(m));
+}
+function doublonsProbables(fiches, ignores){
+  const ign = new Set(ignores || []);
+  const infos = fiches.map(x => ({x, mots: motsSignificatifs(x.nom), alias: new Set((x.alias || []).filter(a => a && a.length >= 4))}));
+  const parent = infos.map((_, i) => i);
+  const racine = i => parent[i] === i ? i : (parent[i] = racine(parent[i]));
+  for (let i = 0; i < infos.length; i++) for (let j = i + 1; j < infos.length; j++){
+    const a = infos[i], b = infos[j];
+    if (a.x.lieu && b.x.lieu && a.x.lieu !== b.x.lieu) continue;
+    if (!a.mots.length || !b.mots.length) continue;
+    const [p, g] = a.mots.length <= b.mots.length ? [a.mots, b.mots] : [b.mots, a.mots];
+    const inclus = p.every(m => g.includes(m));
+    const memeTete = a.mots[0] === b.mots[0] && a.mots[0].length >= 4;
+    const aliasCommun = [...a.alias].some(x => b.alias.has(x));
+    if (inclus || memeTete || aliasCommun) parent[racine(j)] = racine(i);
+  }
+  const groupes = new Map();
+  infos.forEach((inf, i) => { const r = racine(i); if (!groupes.has(r)) groupes.set(r, []); groupes.get(r).push(inf.x); });
+  return [...groupes.values()].filter(g => g.length > 1).map(g => g.sort((a, b) => a.nom.localeCompare(b.nom, "fr")))
+    .filter(g => !ign.has(g.map(x => x.id).sort().join("|")));
+}
+async function fusionnerGroupe(groupe, nbAchats){
+  const parDefaut = [...groupe].sort((a, b) => (nbAchats.get(b.id) || 0) - (nbAchats.get(a.id) || 0) || a.nom.length - b.nom.length)[0];
+  const garde = selection(groupe.map(x => [x.id, x.nom + " (" + (nbAchats.get(x.id) || 0) + " achat" + ((nbAchats.get(x.id) || 0) > 1 ? "s" : "") + ")"]), parDefaut.id);
+  const cases = groupe.map(x => ({x, c: h("input", {type: "checkbox", checked: true, id: "fus-" + x.id})}));
+  const ok = await dialogue({titre: "Fusionner des fiches", corps: h("div", null, champ("Fiche gardée (son nom reste)", garde),
+    h("p", {class: "note"}, "Fiches absorbées (alias, historique et justificatifs passent dans la fiche gardée) :"),
+    cases.map(({x, c}) => h("div", {class: "case"}, c, h("label", {for: "fus-" + x.id}, x.nom + (x.lieu ? " · " + x.lieu : ""))))),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Fusionner", classe: "primaire", valeur: true}]});
+  if (!ok) return;
+  const g = obtenir("commercants", garde.value); let n = 0;
+  for (const {x, c} of cases) if (c.checked && x.id !== g.id){ fusionnerCommercants(g, obtenir("commercants", x.id)); n++; }
+  message(n ? n + " fiche(s) fusionnée(s) dans « " + g.nom + " »." : "Rien à fusionner."); rafraichirEcran();
+}
+async function nouveauFournisseur(etat){
+  const nom = await demander("Nouveau fournisseur", "Nom d'usage (le nom de l'enseigne, tel qu'on le dit)", "");
+  if (!nom || !nom.trim()) return;
+  const existe = vivants("commercants").find(x => norm(x.nom) === norm(nom.trim()));
+  if (existe){ message("« " + existe.nom + " » existe déjà."); etat.choisi = existe.id; rafraichirEcran(); return; }
+  const x = enregistrer("commercants", {nom: nom.trim(), alias: [], stats: {}, natures: {}, titulaires: {}});
+  invaliderIndex(); etat.choisi = x.id; rafraichirEcran();
+}
+
 declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   const q = norm(etat.recherche || "");
   const nbAchats = new Map(); for (const o of vivants("operations")) if (o.commercant) nbAchats.set(o.commercant, (nbAchats.get(o.commercant) || 0) + 1);
@@ -4662,8 +4962,22 @@ declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   const filtre = h("label", {class: "case", style: {margin: 0}}, h("input", {type: "checkbox", checked: !!etat.aVerifier, onchange: e => { etat.aVerifier = e.target.checked; rafraichirEcran(); }}), " à vérifier seulement");
   const filtre2 = h("label", {class: "case", style: {margin: 0}}, h("input", {type: "checkbox", checked: !!etat.deuxPlus, onchange: e => { etat.deuxPlus = e.target.checked; rafraichirEcran(); }}), " 2 achats et plus");
   c.appendChild(entete("Fournisseurs", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " fournisseurs, dont " + nbVerifies + " vérifiés", [recherche, filtre, filtre2,
+    h("button", {class: "discret", onclick: () => nouveauFournisseur(etat)}, "Nouveau fournisseur…"),
     h("button", {class: "discret", onclick: () => fusionDialogue()}, "Fusionner deux fiches…"),
     h("button", {class: "discret", onclick: () => publierExtraitCommercants().then(() => message("Extrait publié pour le téléphone.")).catch(e => message(e.message, true))}, "Publier l'extrait pour le téléphone")]));
+  const doublons = doublonsProbables(vivants("commercants"), LIVRE.parametres.doublonsIgnores);
+  if (doublons.length){
+    const d = h("details", {class: "carte", style: {marginBottom: "1rem"}}, h("summary", {style: {cursor: "pointer"}}, h("strong", null, "Doublons probables (" + doublons.length + ")"),
+      h("span", {class: "petit discret"}, " — fiches qui semblent désigner la même enseigne")),
+      tableau([{titre: "Fiches"}, {titre: "Achats", num: true}, {titre: ""}], doublons, {classe: "serre", limite: 200, ligne: gr => h("tr", null,
+        h("td", null, gr.map(x => x.nom + (x.lieu ? " (" + x.lieu + ")" : "")).join(" · ")),
+        h("td", {class: "num"}, gr.map(x => String(nbAchats.get(x.id) || 0)).join(" · ")),
+        h("td", null, h("button", {class: "mini primaire", onclick: () => fusionnerGroupe(gr, nbAchats)}, "Fusionner…"), " ",
+          h("button", {class: "mini discret", title: "Ne plus proposer ce groupe", onclick: () => { modifierParametres({doublonsIgnores: [...(LIVRE.parametres.doublonsIgnores || []), gr.map(x => x.id).sort().join("|")]}); rafraichirEcran(); }}, "Distinctes")))}));
+    try { d.open = localStorage.getItem("doublonsOuverts") === "1"; } catch (e) {}
+    d.addEventListener("toggle", () => { try { localStorage.setItem("doublonsOuverts", d.open ? "1" : "0"); } catch (e) {} });
+    c.appendChild(d);
+  }
   const choisi = etat.choisi ? obtenir("commercants", etat.choisi) : null;
   const g = h("div", {class: choisi ? "avec-panneau" : ""});
   g.appendChild(tableau([{titre: "Fournisseur", cle: x => x.nom}, {titre: "Alias reconnus"}, {titre: "Classement par défaut", cle: x => x.categorie || ""}, {titre: "Lieu", cle: x => x.lieu || ""},
@@ -5343,6 +5657,7 @@ function reglagesStockage(c){
     h("section", {class: "carte"}, h("h2", null, "Cet appareil"), champ("Nom de l'appareil (affiché dans la synchronisation)", nom),
       h("button", {class: "mini primaire", onclick: () => { try { localStorage.setItem("bf_nom_appareil", nom.value.trim()); } catch (e) {} message("Enregistré."); majEtatSynchro(); }}, "Enregistrer"),
       h("p", {class: "note"}, "Identifiant technique : " + appareil()))));
+  if ("showDirectoryPicker" in window) c.appendChild(sectionDossiersImport());
 }
 
 function reglagesSecurite(c){
@@ -6161,6 +6476,39 @@ async function autotest(){
     const sj = simulerTresorerie({depart: "2027-03-31", jours: 60});
     const fluxJour = d => sj.jours.find(j => j.date === d).flux;
     v("trésorerie : loyer budgété à son jour habituel", [Math.round(fluxJour("2027-04-05") - fluxJour("2027-04-06")), sj.evenements.some(e => /Loyer \(budget, vers le 5\)/.test(e.libelle))], [-1000, true]);
+    {
+      /* --- Dossier de dépôt : rangement par compte --- */
+      const ix = ["Banque X 000099Z Compte essai", "Banque X 000099Z Compte essai/Avis débit différé cartes", "Épargne essai", "Épargne essai/Livret A 09999123456",
+        "Placements essai 012345B", "Placements essai 012345B/Relevés et évaluations", "Amex", "Assureur essai/Contrat 00777777K (retraite)"];
+      const lv = enregistrer("comptes", {nom: "Livret essai", type: "livret", numero: "123456"});
+      const ps = enregistrer("comptes", {nom: "PEA essai", type: "pea", numero: "012345"});
+      const rt = enregistrer("comptes", {nom: "Retraite essai", type: "retraite", numero: "0777777K"});
+      const cx = enregistrer("comptes", {nom: "Carte essai X1", type: "carte", banque: "LCL", carte: "X1", numero: "000099Z", compteDebit: cj.id});
+      v("rangement proposé : compte, carte, facture CB", [proposerRangement({genre: "compte"}, cj, ix), proposerRangement({genre: "carte", banque: "LCL"}, cx, ix), proposerRangement({genre: "facture_cb"}, null, ix)],
+        ["Banque X 000099Z Compte essai/Historiques CSV", "Banque X 000099Z Compte essai/Encours cartes", "Banque X 000099Z Compte essai/Avis débit différé cartes"]);
+      v("rangement proposé : livret, PEA, retraite (zéros de tête), Amex", [proposerRangement({genre: "valorisation"}, lv, ix), proposerRangement({genre: "valorisation"}, ps, ix),
+        proposerRangement({genre: "valorisation"}, rt, ix), proposerRangement({genre: "carte", banque: "Amex"}, null, ix)],
+        ["Épargne essai/Livret A 09999123456", "Placements essai 012345B/Relevés et évaluations", "Assureur essai/Contrat 00777777K (retraite)", "Amex/Relevés"]);
+      const sansDossier = enregistrer("comptes", {nom: "Compte sans dossier", type: "courant", numero: "000011A"});
+      v("rangement proposé : compte sans dossier → son nom ; avis d'impôt → Impôts", [proposerRangement({genre: "compte"}, sansDossier, ix), proposerRangement({genre: "document", sousGenre: "avis_impot"}, null, ix)], ["Compte sans dossier", "Impôts"]);
+      modifierParametres({rangement: {["compte:" + lv.id]: "Ailleurs/Livret"}});
+      v("rangement : la règle du livre l'emporte", dossierRangement({lu: {genre: "valorisation"}, compte: lv}), {cle: "compte:" + lv.id, dossier: "Ailleurs/Livret", propose: false});
+      modifierParametres({rangement: {}});
+      v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
+      v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);
+      v("avis d'impôt reconnu", [reconnaitrePdf("x.pdf", "AVIS_TF_RG\nCENTRE DES FINANCES PUBLIQUES\nAVIS DE TAXES FONCIERES 2026", null).titre,
+        reconnaitrePdf("y.pdf", "AVIS_IR_RG\nAvis d'impôt 2026 sur les revenus de 2025", null).sousGenre], ["Taxe foncière 2026", "avis_impot"]);
+      for (const x of [lv, ps, rt, cx, sansDossier]) enregistrer("comptes", Object.assign(x, {actif: false}));
+    }
+    {
+      /* --- Fournisseurs : doublons probables --- */
+      const fs = [{id: "a", nom: "Enseigne Essai"}, {id: "b", nom: "Enseigne Essai rue Longue"}, {id: "c", nom: "Jean Martin"}, {id: "d", nom: "M Martin Jean"},
+        {id: "e", nom: "Boulangerie du Coin"}, {id: "f", nom: "Boulangerie Durand"}, {id: "g", nom: "Primeur Essai", lieu: "Lieu A"}, {id: "h", nom: "Primeur Essai", lieu: "Lieu B"},
+        {id: "i", nom: "Superette Alpha", alias: ["ALPHA SAS 12"]}, {id: "j", nom: "Alpha Distribution", alias: ["ALPHA SAS 12"]}];
+      v("doublons probables : inclusion, ordre des mots, alias ; ni générique ni deux lieux", doublonsProbables(fs).map(g => g.map(x => x.id).sort().join("")).sort(), ["ab", "cd", "ij"]);
+      v("doublons probables : groupe écarté", doublonsProbables(fs, ["a|b"]).length, 2);
+      v("devis : fenêtre de date d'une facture", fenetre({type: "devis"}), fenetre({type: "facture"}));
+    }
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
   finally {
     LIVRE = memoire.LIVRE; Object.assign(SESSION, memoire.session); LIVRE_MODIFIE = memoire.modifie; planifierSauvegarde = sauvegardePlanifiee; invaliderIndex();

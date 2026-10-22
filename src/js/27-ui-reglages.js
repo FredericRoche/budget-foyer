@@ -186,6 +186,7 @@ function reglagesStockage(c){
     h("section", {class: "carte"}, h("h2", null, "Cet appareil"), champ("Nom de l'appareil (affiché dans la synchronisation)", nom),
       h("button", {class: "mini primaire", onclick: () => { try { localStorage.setItem("bf_nom_appareil", nom.value.trim()); } catch (e) {} message("Enregistré."); majEtatSynchro(); }}, "Enregistrer"),
       h("p", {class: "note"}, "Identifiant technique : " + appareil()))));
+  if ("showDirectoryPicker" in window) c.appendChild(sectionDossiersImport());
 }
 
 function reglagesSecurite(c){

@@ -312,6 +312,39 @@ async function autotest(){
     const sj = simulerTresorerie({depart: "2027-03-31", jours: 60});
     const fluxJour = d => sj.jours.find(j => j.date === d).flux;
     v("trésorerie : loyer budgété à son jour habituel", [Math.round(fluxJour("2027-04-05") - fluxJour("2027-04-06")), sj.evenements.some(e => /Loyer \(budget, vers le 5\)/.test(e.libelle))], [-1000, true]);
+    {
+      /* --- Dossier de dépôt : rangement par compte --- */
+      const ix = ["Banque X 000099Z Compte essai", "Banque X 000099Z Compte essai/Avis débit différé cartes", "Épargne essai", "Épargne essai/Livret A 09999123456",
+        "Placements essai 012345B", "Placements essai 012345B/Relevés et évaluations", "Amex", "Assureur essai/Contrat 00777777K (retraite)"];
+      const lv = enregistrer("comptes", {nom: "Livret essai", type: "livret", numero: "123456"});
+      const ps = enregistrer("comptes", {nom: "PEA essai", type: "pea", numero: "012345"});
+      const rt = enregistrer("comptes", {nom: "Retraite essai", type: "retraite", numero: "0777777K"});
+      const cx = enregistrer("comptes", {nom: "Carte essai X1", type: "carte", banque: "LCL", carte: "X1", numero: "000099Z", compteDebit: cj.id});
+      v("rangement proposé : compte, carte, facture CB", [proposerRangement({genre: "compte"}, cj, ix), proposerRangement({genre: "carte", banque: "LCL"}, cx, ix), proposerRangement({genre: "facture_cb"}, null, ix)],
+        ["Banque X 000099Z Compte essai/Historiques CSV", "Banque X 000099Z Compte essai/Encours cartes", "Banque X 000099Z Compte essai/Avis débit différé cartes"]);
+      v("rangement proposé : livret, PEA, retraite (zéros de tête), Amex", [proposerRangement({genre: "valorisation"}, lv, ix), proposerRangement({genre: "valorisation"}, ps, ix),
+        proposerRangement({genre: "valorisation"}, rt, ix), proposerRangement({genre: "carte", banque: "Amex"}, null, ix)],
+        ["Épargne essai/Livret A 09999123456", "Placements essai 012345B/Relevés et évaluations", "Assureur essai/Contrat 00777777K (retraite)", "Amex/Relevés"]);
+      const sansDossier = enregistrer("comptes", {nom: "Compte sans dossier", type: "courant", numero: "000011A"});
+      v("rangement proposé : compte sans dossier → son nom ; avis d'impôt → Impôts", [proposerRangement({genre: "compte"}, sansDossier, ix), proposerRangement({genre: "document", sousGenre: "avis_impot"}, null, ix)], ["Compte sans dossier", "Impôts"]);
+      modifierParametres({rangement: {["compte:" + lv.id]: "Ailleurs/Livret"}});
+      v("rangement : la règle du livre l'emporte", dossierRangement({lu: {genre: "valorisation"}, compte: lv}), {cle: "compte:" + lv.id, dossier: "Ailleurs/Livret", propose: false});
+      modifierParametres({rangement: {}});
+      v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
+      v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);
+      v("avis d'impôt reconnu", [reconnaitrePdf("x.pdf", "AVIS_TF_RG\nCENTRE DES FINANCES PUBLIQUES\nAVIS DE TAXES FONCIERES 2026", null).titre,
+        reconnaitrePdf("y.pdf", "AVIS_IR_RG\nAvis d'impôt 2026 sur les revenus de 2025", null).sousGenre], ["Taxe foncière 2026", "avis_impot"]);
+      for (const x of [lv, ps, rt, cx, sansDossier]) enregistrer("comptes", Object.assign(x, {actif: false}));
+    }
+    {
+      /* --- Fournisseurs : doublons probables --- */
+      const fs = [{id: "a", nom: "Enseigne Essai"}, {id: "b", nom: "Enseigne Essai rue Longue"}, {id: "c", nom: "Jean Martin"}, {id: "d", nom: "M Martin Jean"},
+        {id: "e", nom: "Boulangerie du Coin"}, {id: "f", nom: "Boulangerie Durand"}, {id: "g", nom: "Primeur Essai", lieu: "Lieu A"}, {id: "h", nom: "Primeur Essai", lieu: "Lieu B"},
+        {id: "i", nom: "Superette Alpha", alias: ["ALPHA SAS 12"]}, {id: "j", nom: "Alpha Distribution", alias: ["ALPHA SAS 12"]}];
+      v("doublons probables : inclusion, ordre des mots, alias ; ni générique ni deux lieux", doublonsProbables(fs).map(g => g.map(x => x.id).sort().join("")).sort(), ["ab", "cd", "ij"]);
+      v("doublons probables : groupe écarté", doublonsProbables(fs, ["a|b"]).length, 2);
+      v("devis : fenêtre de date d'une facture", fenetre({type: "devis"}), fenetre({type: "facture"}));
+    }
   } catch (e){ cas.push({nom: "exception", ok: false, obtenu: e.stack || String(e), attendu: "aucune"}); }
   finally {
     LIVRE = memoire.LIVRE; Object.assign(SESSION, memoire.session); LIVRE_MODIFIE = memoire.modifie; planifierSauvegarde = sauvegardePlanifiee; invaliderIndex();

@@ -98,7 +98,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
       h("tr", {class: (x.total ? "total" : "cliquable"), onclick: x.total ? null : () => aller("justificatifs")}, h("td", null, x.moyen), h("td", {class: "num"}, String(x.n)), h("td", {class: "num"}, euros(x.montant, 0)), h("td", null, x.depuis ? dateFr(x.depuis) : ""))}),
     h("p", {class: "note"}, "Factures et tickets saisis dont l'opération n'est pas encore dans un relevé importé. Les prélèvements, eux, n'apparaissent qu'au relevé.")) : null;
   grille.append(carteTreso, h("section", {class: "carte"}, h("h2", null, "À traiter"), listeT,
-    autos ? h("p", {class: "note"}, autos + " rapprochement(s) fait(s) d'office, réversibles (« À traiter »).") : null, blocEnc));
+    autos ? h("p", {class: "note"}, autos + " rapprochement(s) fait(s) depuis le dernier passage, à contrôler et réversibles (« À traiter »).") : null, blocEnc));
   c.appendChild(grille);
 
   // Revenus et résultat de l'année : mêmes chiffres que la version imprimable du budget
