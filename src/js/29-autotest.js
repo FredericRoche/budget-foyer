@@ -315,7 +315,8 @@ async function autotest(){
     {
       /* --- Dossier de dépôt : rangement par compte --- */
       const ix = ["Banque X 000099Z Compte essai", "Banque X 000099Z Compte essai/Avis débit différé cartes", "Épargne essai", "Épargne essai/Livret A 09999123456",
-        "Placements essai 012345B", "Placements essai 012345B/Relevés et évaluations", "Amex", "Assureur essai/Contrat 00777777K (retraite)"];
+        "Placements essai 012345B", "Placements essai 012345B/Relevés et évaluations", "Amex", "Assureur essai/Contrat 00777777K (retraite)", "Budget/Copie essai/justificatifs"];
+      v("rangement proposé : justificatifs au premier niveau seulement", proposerRangement({genre: "justificatif_pdf"}, null, ix), "Justificatifs");
       const lv = enregistrer("comptes", {nom: "Livret essai", type: "livret", numero: "123456"});
       const ps = enregistrer("comptes", {nom: "PEA essai", type: "pea", numero: "012345"});
       const rt = enregistrer("comptes", {nom: "Retraite essai", type: "retraite", numero: "0777777K"});

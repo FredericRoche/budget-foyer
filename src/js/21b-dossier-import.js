@@ -53,7 +53,8 @@ function proposerRangement(lu, compte, index){
     const court = n.replace(/^0+/, "");
     return chercher(n) || (court.length >= 7 && court !== n ? chercher(court) : null);
   };
-  const parNom = re => index.filter(c => re.test(c.split("/").pop())).sort((a, b) => a.split("/").length - b.split("/").length)[0] || null;
+  // Dossier d'une famille de pièces : au premier niveau des archives seulement (un « justificatifs » plus bas peut être une copie de sauvegarde)
+  const parNom = re => index.find(c => !c.includes("/") && re.test(c)) || null;
   const enfant = (base, re) => base && index.find(c => c.startsWith(base + "/") && c.split("/").length === base.split("/").length + 1 && re.test(c.split("/").pop()));
   const courant = () => { const c = compteCourantLcl(); return c ? parNumero(c.numero) : null; };
   if (lu.genre === "compte"){ const b = parNumero(compte?.numero); return b ? b + "/Historiques CSV" : (compte ? compte.nom : null); }
@@ -147,6 +148,19 @@ function nomLibre(nom, pris){
   for (let n = 2; ; n++){ const c = base + " (" + n + ")" + ext; if (!pris.has(c)) return c; }
 }
 function memesOctets(a, b){ if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; }
+/* Chemin d'un fichier de même contenu sous « d » (trois niveaux), ou null ; la taille trie avant la comparaison. */
+async function copieIdentique(d, octets, prefixe, niveau){
+  for await (const [nom, e] of d.entries()){
+    if (e.kind === "file"){
+      const fi = await e.getFile();
+      if (fi.size === octets.length && memesOctets(new Uint8Array(await fi.arrayBuffer()), octets)) return prefixe + "/" + nom;
+    } else if ((niveau || 1) < 3){
+      const t = await copieIdentique(e, octets, prefixe + "/" + nom, (niveau || 1) + 1);
+      if (t) return t;
+    }
+  }
+  return null;
+}
 
 async function rangerFichier(f){
   const archives = await dossierImport("archives", true);
@@ -154,29 +168,32 @@ async function rangerFichier(f){
   const r = dossierRangement(f);
   if (!r || !r.dossier){ f.rangement = {reste: "aucune règle"}; return; }
   try {
-    let d = archives;
-    const chemin = r.dossier.split("/").filter(Boolean).concat(anneeFichier(f.lu));
-    for (const p of chemin) d = await d.getDirectoryHandle(p, {create: true});
     const octets = new Uint8Array(await (await f.source.poignee.getFile()).arrayBuffer());
-    const pris = new Set(); let identique = null;
-    for await (const [nom, e] of d.entries()) if (e.kind === "file"){
-      pris.add(nom);
-      if (nom === f.source.nom || (await e.getFile()).size === octets.length){
-        if (memesOctets(new Uint8Array(await (await e.getFile()).arrayBuffer()), octets)) identique = nom;
-      }
+    // Copie identique déjà rangée dans le dossier du compte (à n'importe quel niveau, sous un autre nom) : rien à copier
+    let base = archives;
+    const parties = r.dossier.split("/").filter(Boolean);
+    try { for (const p of parties) base = await base.getDirectoryHandle(p); } catch (e){ base = null; }
+    const dejaRange = base ? await copieIdentique(base, octets, parties.join("/")) : null;
+    if (dejaRange){
+      await f.source.dossier.removeEntry(f.source.nom);
+      if (r.propose) modifierParametres({rangement: Object.assign({}, reglesRangement(), {[r.cle]: r.dossier})});
+      f.rangement = {chemin: dejaRange, identique: true};
+      return;
     }
-    let final = identique;
-    if (!final){
-      final = nomLibre(f.source.nom, pris);
-      const fh = await d.getFileHandle(final, {create: true});
-      const w = await fh.createWritable(); await w.write(octets); await w.close();
-      const relu = new Uint8Array(await (await fh.getFile()).arrayBuffer());
-      if (!memesOctets(relu, octets)) throw new Error("copie non conforme, le fichier reste au dépôt");
-    }
+    let d = archives;
+    const chemin = parties.concat(anneeFichier(f.lu));
+    for (const p of chemin) d = await d.getDirectoryHandle(p, {create: true});
+    const pris = new Set();
+    for await (const [nom] of d.entries()) pris.add(nom);
+    const final = nomLibre(f.source.nom, pris);
+    const fh = await d.getFileHandle(final, {create: true});
+    const w = await fh.createWritable(); await w.write(octets); await w.close();
+    const relu = new Uint8Array(await (await fh.getFile()).arrayBuffer());
+    if (!memesOctets(relu, octets)) throw new Error("copie non conforme, le fichier reste au dépôt");
     await f.source.dossier.removeEntry(f.source.nom);
     // La proposition retenue devient la règle : le rangement suivant ira au même endroit
     if (r.propose) modifierParametres({rangement: Object.assign({}, reglesRangement(), {[r.cle]: r.dossier})});
-    f.rangement = {chemin: chemin.join("/") + "/" + final, identique: !!identique};
+    f.rangement = {chemin: chemin.join("/") + "/" + final, identique: false};
   } catch (e){ f.rangement = {erreur: e.message}; console.error(e); }
 }
 
