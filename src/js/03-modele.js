@@ -139,8 +139,10 @@ function listeCategories(){
 function renommerSousCategorie(cat, ancien, nouveau){
   nouveau = (nouveau || "").trim();
   const cats = LIVRE.parametres.categories;
-  if (!cat || !ancien || !nouveau || nouveau === ancien || !(cats[cat] || []).includes(ancien)) return 0;
-  const vise = x => x && x.categorie === cat && x.sousCategorie === ancien;
+  // Comparaison en texte : la liste déroulante rend « true » là où le livre a pu garder le booléen true.
+  const meme = s => s != null && String(s) === String(ancien);
+  if (!cat || !ancien || !nouveau || nouveau === String(ancien) || !(cats[cat] || []).some(meme)) return 0;
+  const vise = x => x && x.categorie === cat && meme(x.sousCategorie);
   const changer = x => { if (vise(x)){ x.sousCategorie = nouveau; return true; } return false; };
   let n = 0;
   for (const coll of ["operations", "regles", "echeances", "commercants", "justificatifs"]){
@@ -150,7 +152,7 @@ function renommerSousCategorie(cat, ancien, nouveau){
       if (coll === "echeances") for (const r of x.rattache || []) if (changer(r)) touche = true;
       if (coll === "commercants" && x.stats){
         const st = {};
-        for (const [k, v] of Object.entries(x.stats)){ const p = k.split("|"); if (p[0] === cat && p[1] === ancien){ p[1] = nouveau; touche = true; } const k2 = p.join("|"); st[k2] = (st[k2] || 0) + v; }
+        for (const [k, v] of Object.entries(x.stats)){ const p = k.split("|"); if (p[0] === cat && meme(p[1])){ p[1] = nouveau; touche = true; } const k2 = p.join("|"); st[k2] = (st[k2] || 0) + v; }
         x.stats = st;
       }
       if (touche){ enregistrer(coll, x); n++; }
@@ -160,13 +162,39 @@ function renommerSousCategorie(cat, ancien, nouveau){
     let touche = false; for (const l of b.lignes || []) if (changer(l)) touche = true;
     if (touche){ enregistrer("budgets", b); n++; }
   }
-  cats[cat] = [...new Set(cats[cat].map(s => s === ancien ? nouveau : s))];
+  cats[cat] = [...new Set(cats[cat].map(s => meme(s) ? nouveau : s))];
   modifierParametres({categories: cats});
   if (typeof invaliderIndex === "function") invaliderIndex();
   return n;
 }
+/* Réparation à l'ouverture : une sous-catégorie doit être un texte. Avant le correctif du 24/10/2026,
+   « Annuler » dans une saisie rendait true, enregistré tel quel (« Informatique (licence) › true »).
+   Un booléen true ou un nombre devient son texte (« true »), pour rester visible et pouvoir être renommé
+   dans Réglages ; false et null, qui ne désignent rien, sont retirés des listes et vidés dans les
+   enregistrements (sans sous-catégorie, comme un champ absent). Renvoie le nombre de corrections. */
+function reparerSousCategories(){
+  const texte = s => s === true || typeof s === "number" ? String(s) : s === false || s === null ? "" : s;
+  const fautif = s => s != null && typeof s !== "string";
+  let n = 0;
+  const cats = LIVRE.parametres.categories || {};
+  if (Object.values(cats).some(l => (l || []).some(s => typeof s !== "string"))){
+    for (const [c, l] of Object.entries(cats)) cats[c] = [...new Set((l || []).map(texte).filter(s => typeof s === "string" && s))];
+    modifierParametres({categories: cats}); n++;
+  }
+  const corriger = x => { if (x && fautif(x.sousCategorie)){ x.sousCategorie = texte(x.sousCategorie); return true; } return false; };
+  for (const coll of ["operations", "regles", "echeances", "commercants", "justificatifs", "budgets"]){
+    for (const x of vivants(coll)){
+      let touche = corriger(x);
+      for (const sous of [x.ventilation, x.rattache, x.lignes]) for (const y of sous || []) if (corriger(y)) touche = true;
+      if (touche){ enregistrer(coll, x); n++; }
+    }
+  }
+  if (n && typeof invaliderIndex === "function") invaliderIndex();
+  return n;
+}
 function ajouterCategorie(cat, sous){
-  if (!cat) return;
+  if (!cat || typeof cat !== "string") return;
+  if (typeof sous !== "string") sous = "";
   const cats = LIVRE.parametres.categories;
   if (!cats[cat]) cats[cat] = [];
   if (sous && !cats[cat].includes(sous)) cats[cat].push(sous);

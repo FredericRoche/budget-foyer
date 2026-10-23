@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-CaGeUR/kgKtLZI2YwQN0A+S5QAaH90SsYWLGQMRY/pQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-XnApnXvd6c8Jcw5FthQ/IprVA1p3SpDuNWHtnFetWqg=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-24.0118";
+const VERSION_APP = "2026-10-24.0121";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -910,8 +910,10 @@ function listeCategories(){
 function renommerSousCategorie(cat, ancien, nouveau){
   nouveau = (nouveau || "").trim();
   const cats = LIVRE.parametres.categories;
-  if (!cat || !ancien || !nouveau || nouveau === ancien || !(cats[cat] || []).includes(ancien)) return 0;
-  const vise = x => x && x.categorie === cat && x.sousCategorie === ancien;
+  // Comparaison en texte : la liste déroulante rend « true » là où le livre a pu garder le booléen true.
+  const meme = s => s != null && String(s) === String(ancien);
+  if (!cat || !ancien || !nouveau || nouveau === String(ancien) || !(cats[cat] || []).some(meme)) return 0;
+  const vise = x => x && x.categorie === cat && meme(x.sousCategorie);
   const changer = x => { if (vise(x)){ x.sousCategorie = nouveau; return true; } return false; };
   let n = 0;
   for (const coll of ["operations", "regles", "echeances", "commercants", "justificatifs"]){
@@ -921,7 +923,7 @@ function renommerSousCategorie(cat, ancien, nouveau){
       if (coll === "echeances") for (const r of x.rattache || []) if (changer(r)) touche = true;
       if (coll === "commercants" && x.stats){
         const st = {};
-        for (const [k, v] of Object.entries(x.stats)){ const p = k.split("|"); if (p[0] === cat && p[1] === ancien){ p[1] = nouveau; touche = true; } const k2 = p.join("|"); st[k2] = (st[k2] || 0) + v; }
+        for (const [k, v] of Object.entries(x.stats)){ const p = k.split("|"); if (p[0] === cat && meme(p[1])){ p[1] = nouveau; touche = true; } const k2 = p.join("|"); st[k2] = (st[k2] || 0) + v; }
         x.stats = st;
       }
       if (touche){ enregistrer(coll, x); n++; }
@@ -931,13 +933,39 @@ function renommerSousCategorie(cat, ancien, nouveau){
     let touche = false; for (const l of b.lignes || []) if (changer(l)) touche = true;
     if (touche){ enregistrer("budgets", b); n++; }
   }
-  cats[cat] = [...new Set(cats[cat].map(s => s === ancien ? nouveau : s))];
+  cats[cat] = [...new Set(cats[cat].map(s => meme(s) ? nouveau : s))];
   modifierParametres({categories: cats});
   if (typeof invaliderIndex === "function") invaliderIndex();
   return n;
 }
+/* Réparation à l'ouverture : une sous-catégorie doit être un texte. Avant le correctif du 24/10/2026,
+   « Annuler » dans une saisie rendait true, enregistré tel quel (« Informatique (licence) › true »).
+   Un booléen true ou un nombre devient son texte (« true »), pour rester visible et pouvoir être renommé
+   dans Réglages ; false et null, qui ne désignent rien, sont retirés des listes et vidés dans les
+   enregistrements (sans sous-catégorie, comme un champ absent). Renvoie le nombre de corrections. */
+function reparerSousCategories(){
+  const texte = s => s === true || typeof s === "number" ? String(s) : s === false || s === null ? "" : s;
+  const fautif = s => s != null && typeof s !== "string";
+  let n = 0;
+  const cats = LIVRE.parametres.categories || {};
+  if (Object.values(cats).some(l => (l || []).some(s => typeof s !== "string"))){
+    for (const [c, l] of Object.entries(cats)) cats[c] = [...new Set((l || []).map(texte).filter(s => typeof s === "string" && s))];
+    modifierParametres({categories: cats}); n++;
+  }
+  const corriger = x => { if (x && fautif(x.sousCategorie)){ x.sousCategorie = texte(x.sousCategorie); return true; } return false; };
+  for (const coll of ["operations", "regles", "echeances", "commercants", "justificatifs", "budgets"]){
+    for (const x of vivants(coll)){
+      let touche = corriger(x);
+      for (const sous of [x.ventilation, x.rattache, x.lignes]) for (const y of sous || []) if (corriger(y)) touche = true;
+      if (touche){ enregistrer(coll, x); n++; }
+    }
+  }
+  if (n && typeof invaliderIndex === "function") invaliderIndex();
+  return n;
+}
 function ajouterCategorie(cat, sous){
-  if (!cat) return;
+  if (!cat || typeof cat !== "string") return;
+  if (typeof sous !== "string") sous = "";
   const cats = LIVRE.parametres.categories;
   if (!cats[cat]) cats[cat] = [];
   if (sous && !cats[cat].includes(sous)) cats[cat].push(sous);
@@ -1351,6 +1379,7 @@ async function ouvrirLivre(motDePasse, souvenir){
     try { livre = fusionnerLivres(await dechiffrerLivre(cache.octets, SESSION.cle), livre).livre; LIVRE_MODIFIE = true; } catch (e) {}
   }
   LIVRE = completerLivre(livre);
+  try { reparerSousCategories(); } catch (e) {}
   try { const nr = reparerFichesEment(); if (nr) setTimeout(() => message(nr + " fiche(s) fournisseur « Ement… » corrigée(s) (libellés « VIREMENT » mal coupés)."), 1500); } catch (e) {}
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";
@@ -6369,6 +6398,18 @@ async function autotest(){
           const nr = renommerSousCategorie("Abonnements essai", "Domaines (Ancien prestataire)", "Domaines");
           v("catégories : sous-catégorie renommée partout", [obtenir("operations", or.id).sousCategorie, obtenir("commercants", fr.id).sousCategorie, Object.keys(obtenir("commercants", fr.id).stats)[0], LIVRE.parametres.categories["Abonnements essai"].join(","), nr >= 2], ["Domaines", "Domaines", "Abonnements essai|Domaines|Courante|", "Domaines", true]);
           supprimer("operations", or.id); supprimer("commercants", fr.id); delete LIVRE.parametres.categories["Abonnements essai"];
+        }
+        {
+          // Sous-catégorie enregistrée comme le booléen true (Annuler avant le correctif du 24/10/2026) : réparée puis renommable.
+          LIVRE.parametres.categories["Licence essai"] = ["Logiciels", true, null, false];
+          const ob = enregistrer("operations", {compte: "x", date: "2027-01-06", montant: -9, libelle: "ESSAI LICENCE", categorie: "Licence essai", sousCategorie: true, nature: "Courante"});
+          const jb = enregistrer("justificatifs", {type: "facture", date: "2027-01-06", montant: 9, categorie: "Licence essai", sousCategorie: true});
+          const nb = reparerSousCategories();
+          const avant = [LIVRE.parametres.categories["Licence essai"].join(","), obtenir("operations", ob.id).sousCategorie, obtenir("justificatifs", jb.id).sousCategorie, nb >= 3];
+          const nr = renommerSousCategorie("Licence essai", "true", "Licence");
+          v("sous-catégorie « true » booléenne : réparée en texte puis renommée", [avant, nr, obtenir("operations", ob.id).sousCategorie, LIVRE.parametres.categories["Licence essai"].join(","), reparerSousCategories()],
+            [["Logiciels,true", "true", "true", true], 2, "Licence", "Logiciels,Licence", 0]);
+          supprimer("operations", ob.id); supprimer("justificatifs", jb.id); delete LIVRE.parametres.categories["Licence essai"];
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);

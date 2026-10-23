@@ -176,6 +176,18 @@ async function autotest(){
           v("catégories : sous-catégorie renommée partout", [obtenir("operations", or.id).sousCategorie, obtenir("commercants", fr.id).sousCategorie, Object.keys(obtenir("commercants", fr.id).stats)[0], LIVRE.parametres.categories["Abonnements essai"].join(","), nr >= 2], ["Domaines", "Domaines", "Abonnements essai|Domaines|Courante|", "Domaines", true]);
           supprimer("operations", or.id); supprimer("commercants", fr.id); delete LIVRE.parametres.categories["Abonnements essai"];
         }
+        {
+          // Sous-catégorie enregistrée comme le booléen true (Annuler avant le correctif du 24/10/2026) : réparée puis renommable.
+          LIVRE.parametres.categories["Licence essai"] = ["Logiciels", true, null, false];
+          const ob = enregistrer("operations", {compte: "x", date: "2027-01-06", montant: -9, libelle: "ESSAI LICENCE", categorie: "Licence essai", sousCategorie: true, nature: "Courante"});
+          const jb = enregistrer("justificatifs", {type: "facture", date: "2027-01-06", montant: 9, categorie: "Licence essai", sousCategorie: true});
+          const nb = reparerSousCategories();
+          const avant = [LIVRE.parametres.categories["Licence essai"].join(","), obtenir("operations", ob.id).sousCategorie, obtenir("justificatifs", jb.id).sousCategorie, nb >= 3];
+          const nr = renommerSousCategorie("Licence essai", "true", "Licence");
+          v("sous-catégorie « true » booléenne : réparée en texte puis renommée", [avant, nr, obtenir("operations", ob.id).sousCategorie, LIVRE.parametres.categories["Licence essai"].join(","), reparerSousCategories()],
+            [["Logiciels,true", "true", "true", true], 2, "Licence", "Logiciels,Licence", 0]);
+          supprimer("operations", ob.id); supprimer("justificatifs", jb.id); delete LIVRE.parametres.categories["Licence essai"];
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }
