@@ -22,10 +22,12 @@ function dialogue(o){
       actions.appendChild(h("button", {class: a.classe || "", onclick: async () => {
         try {
           // Une action qui renvoie false garde la fenêtre ouverte (saisie incomplète) ; un bouton sans action
-          // la ferme toujours, avec sa valeur (false pour « Annuler »).
-          if (!a.action) return fermer(a.valeur ?? true);
+          // la ferme toujours, avec sa valeur (false ou null pour « Annuler », respectés tels quels :
+          // « ?? » changerait le null de demander() en true).
+          const valeur = "valeur" in a ? a.valeur : true;
+          if (!a.action) return fermer(valeur);
           const r = await a.action();
-          if (r !== false) fermer(r === undefined ? a.valeur ?? true : r);
+          if (r !== false) fermer(r === undefined ? valeur : r);
         } catch (e){ message(e.message, true); }
       }}, a.libelle));
     }
@@ -72,8 +74,9 @@ function selectionCategorie(cat, sous, attrs){
   s.appendChild(h("option", {value: "__nouvelle__"}, "Nouvelle catégorie…"));
   s.addEventListener("change", async () => {
     if (s.value !== "__nouvelle__") return;
-    const c = await demander("Nouvelle catégorie", "Catégorie (existante ou nouvelle)", cat || ""); if (!c){ s.value = (cat || "À préciser") + "|" + (sous || "À préciser"); return; }
-    const ss = await demander("Nouvelle catégorie", "Sous-catégorie de « " + c + " »", ""); if (!ss) return;
+    const retablir = () => { s.value = (cat || "À préciser") + "|" + (sous || "À préciser"); };
+    const c = await demander("Nouvelle catégorie", "Catégorie (existante ou nouvelle)", cat || ""); if (!c){ retablir(); return; }
+    const ss = await demander("Nouvelle catégorie", "Sous-catégorie de « " + c + " »", ""); if (!ss){ retablir(); return; }
     ajouterCategorie(c, ss);
     const o = h("option", {value: c + "|" + ss, selected: true}, c + " › " + ss); s.insertBefore(o, s.lastChild); s.value = o.value;
     s.dispatchEvent(new Event("change"));

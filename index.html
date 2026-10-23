@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Y2385gEf64jw06FZczCtYp0kv9PZ6wL1lMXz1V+qZl8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-CaGeUR/kgKtLZI2YwQN0A+S5QAaH90SsYWLGQMRY/pQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-22.1709";
+const VERSION_APP = "2026-10-24.0118";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3364,10 +3364,12 @@ function dialogue(o){
       actions.appendChild(h("button", {class: a.classe || "", onclick: async () => {
         try {
           // Une action qui renvoie false garde la fenêtre ouverte (saisie incomplète) ; un bouton sans action
-          // la ferme toujours, avec sa valeur (false pour « Annuler »).
-          if (!a.action) return fermer(a.valeur ?? true);
+          // la ferme toujours, avec sa valeur (false ou null pour « Annuler », respectés tels quels :
+          // « ?? » changerait le null de demander() en true).
+          const valeur = "valeur" in a ? a.valeur : true;
+          if (!a.action) return fermer(valeur);
           const r = await a.action();
-          if (r !== false) fermer(r === undefined ? a.valeur ?? true : r);
+          if (r !== false) fermer(r === undefined ? valeur : r);
         } catch (e){ message(e.message, true); }
       }}, a.libelle));
     }
@@ -3414,8 +3416,9 @@ function selectionCategorie(cat, sous, attrs){
   s.appendChild(h("option", {value: "__nouvelle__"}, "Nouvelle catégorie…"));
   s.addEventListener("change", async () => {
     if (s.value !== "__nouvelle__") return;
-    const c = await demander("Nouvelle catégorie", "Catégorie (existante ou nouvelle)", cat || ""); if (!c){ s.value = (cat || "À préciser") + "|" + (sous || "À préciser"); return; }
-    const ss = await demander("Nouvelle catégorie", "Sous-catégorie de « " + c + " »", ""); if (!ss) return;
+    const retablir = () => { s.value = (cat || "À préciser") + "|" + (sous || "À préciser"); };
+    const c = await demander("Nouvelle catégorie", "Catégorie (existante ou nouvelle)", cat || ""); if (!c){ retablir(); return; }
+    const ss = await demander("Nouvelle catégorie", "Sous-catégorie de « " + c + " »", ""); if (!ss){ retablir(); return; }
     ajouterCategorie(c, ss);
     const o = h("option", {value: c + "|" + ss, selected: true}, c + " › " + ss); s.insertBefore(o, s.lastChild); s.value = o.value;
     s.dispatchEvent(new Event("change"));
@@ -6252,6 +6255,12 @@ async function autotest(){
       const pr = dialogue({titre: "essai", corps: h("p", null, "x"), actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "OK", classe: "primaire", valeur: true}]});
       document.querySelector("#dialogue .actions button").click();
       v("dialogue : Annuler ferme et rend false", [await pr, $("voile").hidden], [false, true]);
+      // demander() : « Annuler » (valeur null) ne doit pas devenir true, qui créait une sous-catégorie « true ».
+      const pa = demander("essai", "x", "texte");
+      document.querySelector("#dialogue .actions button").click();
+      const pv = demander("essai", "x", "texte");
+      document.querySelector("#dialogue .actions button.primaire").click();
+      v("demander : Annuler rend null, Valider le texte", [await pa, await pv, $("voile").hidden], [null, "texte", true]);
     }
     /* --- Reprise d'historique : date de débit estimée des achats carte, encours à venir --- */
     {
