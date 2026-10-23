@@ -181,12 +181,34 @@ async function autotest(){
           LIVRE.parametres.categories["Licence essai"] = ["Logiciels", true, null, false];
           const ob = enregistrer("operations", {compte: "x", date: "2027-01-06", montant: -9, libelle: "ESSAI LICENCE", categorie: "Licence essai", sousCategorie: true, nature: "Courante"});
           const jb = enregistrer("justificatifs", {type: "facture", date: "2027-01-06", montant: 9, categorie: "Licence essai", sousCategorie: true});
-          const nb = reparerSousCategories();
+          const nb = reparerCategories();
           const avant = [LIVRE.parametres.categories["Licence essai"].join(","), obtenir("operations", ob.id).sousCategorie, obtenir("justificatifs", jb.id).sousCategorie, nb >= 3];
           const nr = renommerSousCategorie("Licence essai", "true", "Licence");
-          v("sous-catégorie « true » booléenne : réparée en texte puis renommée", [avant, nr, obtenir("operations", ob.id).sousCategorie, LIVRE.parametres.categories["Licence essai"].join(","), reparerSousCategories()],
+          v("sous-catégorie « true » booléenne : réparée en texte puis renommée", [avant, nr, obtenir("operations", ob.id).sousCategorie, LIVRE.parametres.categories["Licence essai"].join(","), reparerCategories()],
             [["Logiciels,true", "true", "true", true], 2, "Licence", "Logiciels,Licence", 0]);
           supprimer("operations", ob.id); supprimer("justificatifs", jb.id); delete LIVRE.parametres.categories["Licence essai"];
+        }
+        {
+          // Catégorie nommée « true » : ses enregistrements passent en « À préciser », elle disparaît de la liste.
+          LIVRE.parametres.categories["true"] = ["true"];
+          const jt = enregistrer("justificatifs", {type: "facture", date: "2027-01-07", montant: 5, categorie: "true", sousCategorie: true});
+          reparerCategories();
+          v("catégorie « true » : retirée, enregistrement en « À préciser »", ["true" in LIVRE.parametres.categories, categorieComplete(obtenir("justificatifs", jt.id))], [false, "À préciser › À préciser"]);
+          supprimer("justificatifs", jt.id);
+        }
+        {
+          // Déplacement d'une sous-catégorie vers une autre catégorie, puis suppression de la catégorie vidée.
+          ajouterCategorie("Départ essai", "Licence"); ajouterCategorie("Arrivée essai", "Courant");
+          const jd = enregistrer("justificatifs", {type: "facture", date: "2027-01-08", montant: 145, categorie: "Départ essai", sousCategorie: "Licence"});
+          const od = enregistrer("operations", {compte: "x", date: "2027-01-08", montant: -150, libelle: "ESSAI VENTILÉ", categorie: "Arrivée essai", sousCategorie: "Courant", nature: "Courante",
+            ventilation: [{montant: -145, categorie: "Départ essai", sousCategorie: "Licence"}, {montant: -5}]});
+          const refus = supprimerCategorieVide("Départ essai");
+          const nd = deplacerSousCategorie("Départ essai", "Licence", "Arrivée essai", "Logiciels");
+          const ok = supprimerCategorieVide("Départ essai");
+          v("sous-catégorie déplacée vers une autre catégorie, catégorie vide supprimée",
+            [refus.usages, nd, categorieComplete(obtenir("justificatifs", jd.id)), categorieComplete(obtenir("operations", od.id).ventilation[0]), LIVRE.parametres.categories["Arrivée essai"].join(","), ok.supprimee, "Départ essai" in LIVRE.parametres.categories, supprimerCategorieVide("À préciser").protegee],
+            [2, 2, "Arrivée essai › Logiciels", "Arrivée essai › Logiciels", "Courant,Logiciels", true, false, true]);
+          supprimer("justificatifs", jd.id); supprimer("operations", od.id); delete LIVRE.parametres.categories["Arrivée essai"];
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);

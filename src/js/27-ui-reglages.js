@@ -106,11 +106,49 @@ function reglagesCategories(c){
   const liste = h("div");
   for (const [cat, sous] of Object.entries(p.categories)) liste.appendChild(h("p", null, h("strong", null, cat), " : " + sous.join(", ")));
   c.appendChild(h("section", {class: "carte", style: {marginTop: "1rem"}}, h("h2", null, "Catégories"), liste,
-    h("div", {class: "outils"}, h("button", {class: "mini discret", onclick: async () => { const cat = await demander("Ajouter", "Catégorie", ""); if (!cat) return; const s2 = await demander("Ajouter", "Sous-catégorie", ""); if (s2){ ajouterCategorie(cat, s2); rafraichirEcran(); } }}, "Ajouter une sous-catégorie"),
-      h("button", {class: "mini discret", onclick: () => dialogueRenommerSousCategorie()}, "Renommer une sous-catégorie…"))));
+    h("div", {class: "outils"}, h("button", {class: "mini discret", onclick: async () => { if (await dialogueAjouterSousCategorie()) rafraichirEcran(); }}, "Ajouter une sous-catégorie…"),
+      h("button", {class: "mini discret", onclick: () => dialogueRenommerSousCategorie()}, "Renommer une sous-catégorie…"),
+      h("button", {class: "mini discret", onclick: () => dialogueDeplacerSousCategorie()}, "Déplacer une sous-catégorie…"),
+      h("button", {class: "mini discret", onclick: () => dialogueSupprimerCategorie()}, "Supprimer une catégorie vide…"))));
+}
+const optionsSousCategories = () => Object.entries(LIVRE.parametres.categories).flatMap(([c, ss]) => ss.map(s => [c + "|" + s, c + " › " + s]));
+async function dialogueDeplacerSousCategorie(){
+  const options = optionsSousCategories();
+  const choix = selection(options, options[0]?.[0] || "");
+  const ch = choixCategorie();
+  const nouveau = h("input", {type: "text"});
+  const remplir = () => { nouveau.value = choix.value.split("|").slice(1).join("|"); };
+  choix.addEventListener("change", remplir); remplir();
+  const ok = await dialogue({titre: "Déplacer une sous-catégorie", corps: h("div", null, champ("Sous-catégorie à déplacer", choix), ...ch.elements, champ("Nom sous la catégorie d'arrivée", nouveau,
+      "Les enregistrements suivent partout : opérations, règles, budget, échéances, fournisseurs, justificatifs. Si la sous-catégorie existe déjà à l'arrivée, les deux sont réunies. La catégorie de départ reste, même vide : la retirer ensuite par « Supprimer une catégorie vide ».")),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Déplacer", classe: "primaire", action: () => {
+      if (!ch.valeur() || !nouveau.value.trim()){ message("Indiquez la catégorie d'arrivée et le nom.", true); return false; }
+      if (nomCategorieFautif(ch.valeur())){ message("« " + ch.valeur() + " » ne peut pas servir de nom de catégorie.", true); return false; }
+      return true;
+    }}]});
+  if (!ok) return;
+  const [cat, ...reste] = choix.value.split("|"); const ancien = reste.join("|");
+  const cible = ch.valeur(), nom = nouveau.value.trim();
+  if (cible === cat && nom === ancien) return;
+  const n = deplacerSousCategorie(cat, ancien, cible, nom);
+  message("« " + cat + " › " + ancien + " » déplacée vers « " + cible + " › " + nom + " » (" + n + " enregistrement(s) mis à jour).");
+  rafraichirEcran();
+}
+async function dialogueSupprimerCategorie(){
+  const cats = Object.keys(LIVRE.parametres.categories).filter(c => !CATEGORIES_PROTEGEES.includes(c));
+  if (!cats.length) return message("Aucune catégorie à retirer.");
+  const choix = selection(cats, cats[0]);
+  const ok = await dialogue({titre: "Supprimer une catégorie vide", corps: h("div", null, champ("Catégorie", choix,
+      "Retirée avec ses sous-catégories, seulement si aucun enregistrement n'y est rattaché. Sinon, déplacer d'abord ses sous-catégories.")),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Supprimer", classe: "danger", valeur: true}]});
+  if (!ok) return;
+  const r = supprimerCategorieVide(choix.value);
+  if (r.usages) return message("« " + choix.value + " » n'est pas vide : " + r.usages + " enregistrement(s) y sont rattachés. Déplacez d'abord ses sous-catégories.", true);
+  message("Catégorie « " + choix.value + " » retirée.");
+  rafraichirEcran();
 }
 async function dialogueRenommerSousCategorie(){
-  const options = Object.entries(LIVRE.parametres.categories).flatMap(([c, ss]) => ss.map(s => [c + "|" + s, c + " › " + s]));
+  const options = optionsSousCategories();
   const choix = selection(options, options[0]?.[0] || "");
   const nouveau = h("input", {type: "text"});
   const remplir = () => { nouveau.value = choix.value.split("|").slice(1).join("|"); };

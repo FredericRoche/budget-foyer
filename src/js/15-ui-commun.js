@@ -75,13 +75,37 @@ function selectionCategorie(cat, sous, attrs){
   s.addEventListener("change", async () => {
     if (s.value !== "__nouvelle__") return;
     const retablir = () => { s.value = (cat || "À préciser") + "|" + (sous || "À préciser"); };
-    const c = await demander("Nouvelle catégorie", "Catégorie (existante ou nouvelle)", cat || ""); if (!c){ retablir(); return; }
-    const ss = await demander("Nouvelle catégorie", "Sous-catégorie de « " + c + " »", ""); if (!ss){ retablir(); return; }
-    ajouterCategorie(c, ss);
-    const o = h("option", {value: c + "|" + ss, selected: true}, c + " › " + ss); s.insertBefore(o, s.lastChild); s.value = o.value;
+    const r = await dialogueAjouterSousCategorie(cat); if (!r){ retablir(); return; }
+    const o = h("option", {value: r.cat + "|" + r.sous, selected: true}, r.cat + " › " + r.sous); s.insertBefore(o, s.lastChild); s.value = o.value;
     s.dispatchEvent(new Event("change"));
   });
   return s;
+}
+/* Liste des catégories existantes, plus « Nouvelle catégorie… » qui fait paraître un champ de saisie :
+   une sous-catégorie se range sous une catégorie choisie, sans saisie libre ambiguë. */
+function choixCategorie(defaut){
+  const cats = Object.keys(LIVRE.parametres.categories).filter(c => c !== "À préciser");
+  const liste = selection([...cats, ["__nouvelle__", "Nouvelle catégorie…"]], cats.includes(defaut) ? defaut : cats[0] || "__nouvelle__");
+  const nom = h("input", {type: "text"});
+  const blocNom = champ("Nom de la nouvelle catégorie", nom, "Catégorie de premier niveau. Pour ranger sous une catégorie existante, la choisir dans la liste.");
+  const voir = () => { blocNom.hidden = liste.value !== "__nouvelle__"; if (!blocNom.hidden) nom.focus(); };
+  liste.addEventListener("change", voir); blocNom.hidden = liste.value !== "__nouvelle__";
+  return {elements: [champ("Catégorie", liste), blocNom], valeur: () => liste.value === "__nouvelle__" ? nom.value.trim() : liste.value};
+}
+/* Ajoute une sous-catégorie ; rend {cat, sous}, ou null si annulé. */
+async function dialogueAjouterSousCategorie(defaut){
+  const ch = choixCategorie(defaut);
+  const sous = h("input", {type: "text"});
+  const r = await dialogue({titre: "Ajouter une sous-catégorie", corps: h("div", null, ...ch.elements, champ("Sous-catégorie", sous)),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: null}, {libelle: "Ajouter", classe: "primaire", action: () => {
+      const cat = ch.valeur(), s = sous.value.trim();
+      if (!cat || !s){ message("Indiquez la catégorie et la sous-catégorie.", true); return false; }
+      if (nomCategorieFautif(cat)){ message("« " + cat + " » ne peut pas servir de nom de catégorie.", true); return false; }
+      return {cat, sous: s};
+    }}]});
+  if (!r) return null;
+  ajouterCategorie(r.cat, r.sous);
+  return r;
 }
 const valeurCategorie = sel => { const [c, s] = sel.value.split("|"); return {categorie: c, sousCategorie: s || ""}; };
 function selectionLieu(valeur, attrs){ return selection([["", "—"], ...LIVRE.parametres.lieux.map(l => [l, l])], valeur || "", attrs); }

@@ -132,63 +132,106 @@ function listeCategories(){
   for (const [cat, sous] of Object.entries(LIVRE.parametres.categories)) for (const s of sous) r.push([cat, s]);
   return r;
 }
-/* Renomme une sous-catégorie partout : liste des catégories, opérations (et leurs ventilations), règles,
-   lignes de budget, échéances (et leurs rattachements), fiches fournisseurs (défaut et statistiques), justificatifs.
-   Si le nouveau nom existe déjà dans la catégorie, les deux sont réunies. Chaque enregistrement touché est
-   daté : la synchronisation propage le renommage aux autres appareils. Renvoie le nombre d'enregistrements touchés. */
-function renommerSousCategorie(cat, ancien, nouveau){
-  nouveau = (nouveau || "").trim();
+/* Endroits où un enregistrement porte une catégorie : l'enregistrement lui-même, les ventilations d'une opération
+   (qui héritent de sa catégorie si elles n'en ont pas), les rattachements d'une échéance, les lignes d'un budget.
+   f(porteur, categorieEffective) rend true si elle a modifié le porteur ; l'enregistrement est alors daté
+   (la synchronisation propage le changement). Renvoie le nombre d'enregistrements touchés. */
+const COLLECTIONS_CATEGORIE = ["operations", "regles", "echeances", "commercants", "justificatifs", "budgets"];
+function parcourirCategories(f, sansEnregistrer){
+  let n = 0;
+  for (const coll of COLLECTIONS_CATEGORIE){
+    for (const x of vivants(coll)){
+      const catX = x.categorie;
+      let touche = coll !== "budgets" && f(x, catX);
+      for (const v of x.ventilation || []) if (f(v, v.categorie || catX)) touche = true;
+      for (const y of [...(x.rattache || []), ...(x.lignes || [])]) if (f(y, y.categorie)) touche = true;
+      if (touche){ if (!sansEnregistrer) enregistrer(coll, x); n++; }
+    }
+  }
+  return n;
+}
+/* Nombre d'enregistrements rattachés à une catégorie (statistiques des fournisseurs non comprises). */
+function usagesCategorie(cat){ return parcourirCategories((y, c) => c === cat, true); }
+/* Déplace une sous-catégorie partout, vers la même catégorie (renommage) ou une autre : liste des catégories,
+   opérations (et leurs ventilations), règles, lignes de budget, échéances (et leurs rattachements), fiches
+   fournisseurs (défaut et statistiques), justificatifs. Si la cible existe déjà, les deux sont réunies.
+   La catégorie d'origine reste dans la liste, même vide (Réglages › Supprimer une catégorie vide).
+   Renvoie le nombre d'enregistrements touchés. */
+function deplacerSousCategorie(cat, ancien, cible, nouveau){
+  nouveau = (nouveau || "").trim(); cible = (cible || "").trim();
   const cats = LIVRE.parametres.categories;
   // Comparaison en texte : la liste déroulante rend « true » là où le livre a pu garder le booléen true.
   const meme = s => s != null && String(s) === String(ancien);
-  if (!cat || !ancien || !nouveau || nouveau === String(ancien) || !(cats[cat] || []).some(meme)) return 0;
-  const vise = x => x && x.categorie === cat && meme(x.sousCategorie);
-  const changer = x => { if (vise(x)){ x.sousCategorie = nouveau; return true; } return false; };
-  let n = 0;
-  for (const coll of ["operations", "regles", "echeances", "commercants", "justificatifs"]){
-    for (const x of vivants(coll)){
-      let touche = changer(x);
-      if (coll === "operations") for (const v of x.ventilation || []) if (vise(Object.assign({categorie: x.categorie}, v, v.categorie ? {} : {categorie: x.categorie}))){ v.sousCategorie = nouveau; touche = true; }
-      if (coll === "echeances") for (const r of x.rattache || []) if (changer(r)) touche = true;
-      if (coll === "commercants" && x.stats){
-        const st = {};
-        for (const [k, v] of Object.entries(x.stats)){ const p = k.split("|"); if (p[0] === cat && meme(p[1])){ p[1] = nouveau; touche = true; } const k2 = p.join("|"); st[k2] = (st[k2] || 0) + v; }
-        x.stats = st;
-      }
-      if (touche){ enregistrer(coll, x); n++; }
+  if (!cat || !ancien || !cible || !nouveau || (cible === cat && nouveau === String(ancien)) || !(cats[cat] || []).some(meme)) return 0;
+  const n = parcourirCategories((y, c) => {
+    let touche = false;
+    if (c === cat && meme(y.sousCategorie)){ y.categorie = cible; y.sousCategorie = nouveau; touche = true; }
+    if (y.stats){
+      const st = {};
+      for (const [k, v] of Object.entries(y.stats)){ const p = k.split("|"); if (p[0] === cat && meme(p[1])){ p[0] = cible; p[1] = nouveau; touche = true; } const k2 = p.join("|"); st[k2] = (st[k2] || 0) + v; }
+      y.stats = st;
     }
+    return touche;
+  });
+  if (cible === cat) cats[cat] = [...new Set(cats[cat].map(s => meme(s) ? nouveau : s))];
+  else {
+    cats[cat] = cats[cat].filter(s => !meme(s));
+    cats[cible] = [...new Set([...(cats[cible] || []), nouveau])];
   }
-  for (const b of vivants("budgets")){
-    let touche = false; for (const l of b.lignes || []) if (changer(l)) touche = true;
-    if (touche){ enregistrer("budgets", b); n++; }
-  }
-  cats[cat] = [...new Set(cats[cat].map(s => meme(s) ? nouveau : s))];
   modifierParametres({categories: cats});
   if (typeof invaliderIndex === "function") invaliderIndex();
   return n;
 }
-/* Réparation à l'ouverture : une sous-catégorie doit être un texte. Avant le correctif du 24/10/2026,
-   « Annuler » dans une saisie rendait true, enregistré tel quel (« Informatique (licence) › true »).
-   Un booléen true ou un nombre devient son texte (« true »), pour rester visible et pouvoir être renommé
-   dans Réglages ; false et null, qui ne désignent rien, sont retirés des listes et vidés dans les
-   enregistrements (sans sous-catégorie, comme un champ absent). Renvoie le nombre de corrections. */
-function reparerSousCategories(){
+function renommerSousCategorie(cat, ancien, nouveau){ return deplacerSousCategorie(cat, ancien, cat, nouveau); }
+/* Retire une catégorie à laquelle aucun enregistrement n'est rattaché (ses sous-catégories partent avec elle,
+   et les statistiques des fournisseurs qui la citent). Renvoie {usages} sans rien faire si elle sert encore. */
+const CATEGORIES_PROTEGEES = ["À préciser", "Transfert"];
+function supprimerCategorieVide(cat){
+  const cats = LIVRE.parametres.categories;
+  if (!(cat in cats) || CATEGORIES_PROTEGEES.includes(cat)) return {usages: 0, protegee: true};
+  const usages = usagesCategorie(cat);
+  if (usages) return {usages};
+  parcourirCategories(y => {
+    if (!y.stats || !Object.keys(y.stats).some(k => k.split("|")[0] === cat)) return false;
+    y.stats = Object.fromEntries(Object.entries(y.stats).filter(([k]) => k.split("|")[0] !== cat));
+    return true;
+  });
+  delete cats[cat];
+  modifierParametres({categories: cats});
+  if (typeof invaliderIndex === "function") invaliderIndex();
+  return {usages: 0, supprimee: true};
+}
+/* Réparation à l'ouverture. Avant le correctif du 24/10/2026, « Annuler » dans une saisie rendait true,
+   enregistré tel quel (« Informatique (licence) › true », voire une catégorie « true »).
+   - Sous-catégorie : un booléen true ou un nombre devient son texte (« true »), pour rester visible et pouvoir
+     être renommé ou déplacé dans Réglages ; false et null, qui ne désignent rien, sont retirés des listes et
+     vidés dans les enregistrements (sans sous-catégorie, comme un champ absent).
+   - Catégorie : un nom qui n'est pas un texte, ou qui vaut « true », « false », « null » ou « undefined »,
+     ne désigne rien. Les enregistrements qui la portent passent en « À préciser › À préciser », la catégorie
+     est retirée de la liste, et des statistiques des fournisseurs.
+   Renvoie le nombre de corrections. */
+const nomCategorieFautif = c => c != null && c !== "" && (typeof c !== "string" || ["true", "false", "null", "undefined"].includes(c.trim()));
+function reparerCategories(){
   const texte = s => s === true || typeof s === "number" ? String(s) : s === false || s === null ? "" : s;
   const fautif = s => s != null && typeof s !== "string";
   let n = 0;
   const cats = LIVRE.parametres.categories || {};
-  if (Object.values(cats).some(l => (l || []).some(s => typeof s !== "string"))){
+  const clesFautives = Object.keys(cats).filter(nomCategorieFautif);
+  if (clesFautives.length || Object.values(cats).some(l => (l || []).some(s => typeof s !== "string"))){
+    for (const c of clesFautives) delete cats[c];
     for (const [c, l] of Object.entries(cats)) cats[c] = [...new Set((l || []).map(texte).filter(s => typeof s === "string" && s))];
+    if (!(cats["À préciser"] || []).includes("À préciser")) cats["À préciser"] = [...(cats["À préciser"] || []), "À préciser"];
     modifierParametres({categories: cats}); n++;
   }
-  const corriger = x => { if (x && fautif(x.sousCategorie)){ x.sousCategorie = texte(x.sousCategorie); return true; } return false; };
-  for (const coll of ["operations", "regles", "echeances", "commercants", "justificatifs", "budgets"]){
-    for (const x of vivants(coll)){
-      let touche = corriger(x);
-      for (const sous of [x.ventilation, x.rattache, x.lignes]) for (const y of sous || []) if (corriger(y)) touche = true;
-      if (touche){ enregistrer(coll, x); n++; }
+  n += parcourirCategories(y => {
+    let touche = false;
+    if (nomCategorieFautif(y.categorie)){ y.categorie = "À préciser"; y.sousCategorie = "À préciser"; touche = true; }
+    if (fautif(y.sousCategorie)){ y.sousCategorie = texte(y.sousCategorie); touche = true; }
+    if (y.stats && Object.keys(y.stats).some(k => nomCategorieFautif(k.split("|")[0]))){
+      y.stats = Object.fromEntries(Object.entries(y.stats).filter(([k]) => !nomCategorieFautif(k.split("|")[0]))); touche = true;
     }
-  }
+    return touche;
+  });
   if (n && typeof invaliderIndex === "function") invaliderIndex();
   return n;
 }

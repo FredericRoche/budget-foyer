@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-XnApnXvd6c8Jcw5FthQ/IprVA1p3SpDuNWHtnFetWqg=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-hTu7sa06xsC+Ov7YKmf+1VsWA/2O87nBVrIrFJRk7Xc=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-24.0121";
+const VERSION_APP = "2026-10-24.0133";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -903,63 +903,106 @@ function listeCategories(){
   for (const [cat, sous] of Object.entries(LIVRE.parametres.categories)) for (const s of sous) r.push([cat, s]);
   return r;
 }
-/* Renomme une sous-catégorie partout : liste des catégories, opérations (et leurs ventilations), règles,
-   lignes de budget, échéances (et leurs rattachements), fiches fournisseurs (défaut et statistiques), justificatifs.
-   Si le nouveau nom existe déjà dans la catégorie, les deux sont réunies. Chaque enregistrement touché est
-   daté : la synchronisation propage le renommage aux autres appareils. Renvoie le nombre d'enregistrements touchés. */
-function renommerSousCategorie(cat, ancien, nouveau){
-  nouveau = (nouveau || "").trim();
+/* Endroits où un enregistrement porte une catégorie : l'enregistrement lui-même, les ventilations d'une opération
+   (qui héritent de sa catégorie si elles n'en ont pas), les rattachements d'une échéance, les lignes d'un budget.
+   f(porteur, categorieEffective) rend true si elle a modifié le porteur ; l'enregistrement est alors daté
+   (la synchronisation propage le changement). Renvoie le nombre d'enregistrements touchés. */
+const COLLECTIONS_CATEGORIE = ["operations", "regles", "echeances", "commercants", "justificatifs", "budgets"];
+function parcourirCategories(f, sansEnregistrer){
+  let n = 0;
+  for (const coll of COLLECTIONS_CATEGORIE){
+    for (const x of vivants(coll)){
+      const catX = x.categorie;
+      let touche = coll !== "budgets" && f(x, catX);
+      for (const v of x.ventilation || []) if (f(v, v.categorie || catX)) touche = true;
+      for (const y of [...(x.rattache || []), ...(x.lignes || [])]) if (f(y, y.categorie)) touche = true;
+      if (touche){ if (!sansEnregistrer) enregistrer(coll, x); n++; }
+    }
+  }
+  return n;
+}
+/* Nombre d'enregistrements rattachés à une catégorie (statistiques des fournisseurs non comprises). */
+function usagesCategorie(cat){ return parcourirCategories((y, c) => c === cat, true); }
+/* Déplace une sous-catégorie partout, vers la même catégorie (renommage) ou une autre : liste des catégories,
+   opérations (et leurs ventilations), règles, lignes de budget, échéances (et leurs rattachements), fiches
+   fournisseurs (défaut et statistiques), justificatifs. Si la cible existe déjà, les deux sont réunies.
+   La catégorie d'origine reste dans la liste, même vide (Réglages › Supprimer une catégorie vide).
+   Renvoie le nombre d'enregistrements touchés. */
+function deplacerSousCategorie(cat, ancien, cible, nouveau){
+  nouveau = (nouveau || "").trim(); cible = (cible || "").trim();
   const cats = LIVRE.parametres.categories;
   // Comparaison en texte : la liste déroulante rend « true » là où le livre a pu garder le booléen true.
   const meme = s => s != null && String(s) === String(ancien);
-  if (!cat || !ancien || !nouveau || nouveau === String(ancien) || !(cats[cat] || []).some(meme)) return 0;
-  const vise = x => x && x.categorie === cat && meme(x.sousCategorie);
-  const changer = x => { if (vise(x)){ x.sousCategorie = nouveau; return true; } return false; };
-  let n = 0;
-  for (const coll of ["operations", "regles", "echeances", "commercants", "justificatifs"]){
-    for (const x of vivants(coll)){
-      let touche = changer(x);
-      if (coll === "operations") for (const v of x.ventilation || []) if (vise(Object.assign({categorie: x.categorie}, v, v.categorie ? {} : {categorie: x.categorie}))){ v.sousCategorie = nouveau; touche = true; }
-      if (coll === "echeances") for (const r of x.rattache || []) if (changer(r)) touche = true;
-      if (coll === "commercants" && x.stats){
-        const st = {};
-        for (const [k, v] of Object.entries(x.stats)){ const p = k.split("|"); if (p[0] === cat && meme(p[1])){ p[1] = nouveau; touche = true; } const k2 = p.join("|"); st[k2] = (st[k2] || 0) + v; }
-        x.stats = st;
-      }
-      if (touche){ enregistrer(coll, x); n++; }
+  if (!cat || !ancien || !cible || !nouveau || (cible === cat && nouveau === String(ancien)) || !(cats[cat] || []).some(meme)) return 0;
+  const n = parcourirCategories((y, c) => {
+    let touche = false;
+    if (c === cat && meme(y.sousCategorie)){ y.categorie = cible; y.sousCategorie = nouveau; touche = true; }
+    if (y.stats){
+      const st = {};
+      for (const [k, v] of Object.entries(y.stats)){ const p = k.split("|"); if (p[0] === cat && meme(p[1])){ p[0] = cible; p[1] = nouveau; touche = true; } const k2 = p.join("|"); st[k2] = (st[k2] || 0) + v; }
+      y.stats = st;
     }
+    return touche;
+  });
+  if (cible === cat) cats[cat] = [...new Set(cats[cat].map(s => meme(s) ? nouveau : s))];
+  else {
+    cats[cat] = cats[cat].filter(s => !meme(s));
+    cats[cible] = [...new Set([...(cats[cible] || []), nouveau])];
   }
-  for (const b of vivants("budgets")){
-    let touche = false; for (const l of b.lignes || []) if (changer(l)) touche = true;
-    if (touche){ enregistrer("budgets", b); n++; }
-  }
-  cats[cat] = [...new Set(cats[cat].map(s => meme(s) ? nouveau : s))];
   modifierParametres({categories: cats});
   if (typeof invaliderIndex === "function") invaliderIndex();
   return n;
 }
-/* Réparation à l'ouverture : une sous-catégorie doit être un texte. Avant le correctif du 24/10/2026,
-   « Annuler » dans une saisie rendait true, enregistré tel quel (« Informatique (licence) › true »).
-   Un booléen true ou un nombre devient son texte (« true »), pour rester visible et pouvoir être renommé
-   dans Réglages ; false et null, qui ne désignent rien, sont retirés des listes et vidés dans les
-   enregistrements (sans sous-catégorie, comme un champ absent). Renvoie le nombre de corrections. */
-function reparerSousCategories(){
+function renommerSousCategorie(cat, ancien, nouveau){ return deplacerSousCategorie(cat, ancien, cat, nouveau); }
+/* Retire une catégorie à laquelle aucun enregistrement n'est rattaché (ses sous-catégories partent avec elle,
+   et les statistiques des fournisseurs qui la citent). Renvoie {usages} sans rien faire si elle sert encore. */
+const CATEGORIES_PROTEGEES = ["À préciser", "Transfert"];
+function supprimerCategorieVide(cat){
+  const cats = LIVRE.parametres.categories;
+  if (!(cat in cats) || CATEGORIES_PROTEGEES.includes(cat)) return {usages: 0, protegee: true};
+  const usages = usagesCategorie(cat);
+  if (usages) return {usages};
+  parcourirCategories(y => {
+    if (!y.stats || !Object.keys(y.stats).some(k => k.split("|")[0] === cat)) return false;
+    y.stats = Object.fromEntries(Object.entries(y.stats).filter(([k]) => k.split("|")[0] !== cat));
+    return true;
+  });
+  delete cats[cat];
+  modifierParametres({categories: cats});
+  if (typeof invaliderIndex === "function") invaliderIndex();
+  return {usages: 0, supprimee: true};
+}
+/* Réparation à l'ouverture. Avant le correctif du 24/10/2026, « Annuler » dans une saisie rendait true,
+   enregistré tel quel (« Informatique (licence) › true », voire une catégorie « true »).
+   - Sous-catégorie : un booléen true ou un nombre devient son texte (« true »), pour rester visible et pouvoir
+     être renommé ou déplacé dans Réglages ; false et null, qui ne désignent rien, sont retirés des listes et
+     vidés dans les enregistrements (sans sous-catégorie, comme un champ absent).
+   - Catégorie : un nom qui n'est pas un texte, ou qui vaut « true », « false », « null » ou « undefined »,
+     ne désigne rien. Les enregistrements qui la portent passent en « À préciser › À préciser », la catégorie
+     est retirée de la liste, et des statistiques des fournisseurs.
+   Renvoie le nombre de corrections. */
+const nomCategorieFautif = c => c != null && c !== "" && (typeof c !== "string" || ["true", "false", "null", "undefined"].includes(c.trim()));
+function reparerCategories(){
   const texte = s => s === true || typeof s === "number" ? String(s) : s === false || s === null ? "" : s;
   const fautif = s => s != null && typeof s !== "string";
   let n = 0;
   const cats = LIVRE.parametres.categories || {};
-  if (Object.values(cats).some(l => (l || []).some(s => typeof s !== "string"))){
+  const clesFautives = Object.keys(cats).filter(nomCategorieFautif);
+  if (clesFautives.length || Object.values(cats).some(l => (l || []).some(s => typeof s !== "string"))){
+    for (const c of clesFautives) delete cats[c];
     for (const [c, l] of Object.entries(cats)) cats[c] = [...new Set((l || []).map(texte).filter(s => typeof s === "string" && s))];
+    if (!(cats["À préciser"] || []).includes("À préciser")) cats["À préciser"] = [...(cats["À préciser"] || []), "À préciser"];
     modifierParametres({categories: cats}); n++;
   }
-  const corriger = x => { if (x && fautif(x.sousCategorie)){ x.sousCategorie = texte(x.sousCategorie); return true; } return false; };
-  for (const coll of ["operations", "regles", "echeances", "commercants", "justificatifs", "budgets"]){
-    for (const x of vivants(coll)){
-      let touche = corriger(x);
-      for (const sous of [x.ventilation, x.rattache, x.lignes]) for (const y of sous || []) if (corriger(y)) touche = true;
-      if (touche){ enregistrer(coll, x); n++; }
+  n += parcourirCategories(y => {
+    let touche = false;
+    if (nomCategorieFautif(y.categorie)){ y.categorie = "À préciser"; y.sousCategorie = "À préciser"; touche = true; }
+    if (fautif(y.sousCategorie)){ y.sousCategorie = texte(y.sousCategorie); touche = true; }
+    if (y.stats && Object.keys(y.stats).some(k => nomCategorieFautif(k.split("|")[0]))){
+      y.stats = Object.fromEntries(Object.entries(y.stats).filter(([k]) => !nomCategorieFautif(k.split("|")[0]))); touche = true;
     }
-  }
+    return touche;
+  });
   if (n && typeof invaliderIndex === "function") invaliderIndex();
   return n;
 }
@@ -1379,7 +1422,7 @@ async function ouvrirLivre(motDePasse, souvenir){
     try { livre = fusionnerLivres(await dechiffrerLivre(cache.octets, SESSION.cle), livre).livre; LIVRE_MODIFIE = true; } catch (e) {}
   }
   LIVRE = completerLivre(livre);
-  try { reparerSousCategories(); } catch (e) {}
+  try { reparerCategories(); } catch (e) {}
   try { const nr = reparerFichesEment(); if (nr) setTimeout(() => message(nr + " fiche(s) fournisseur « Ement… » corrigée(s) (libellés « VIREMENT » mal coupés)."), 1500); } catch (e) {}
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";
@@ -3446,13 +3489,37 @@ function selectionCategorie(cat, sous, attrs){
   s.addEventListener("change", async () => {
     if (s.value !== "__nouvelle__") return;
     const retablir = () => { s.value = (cat || "À préciser") + "|" + (sous || "À préciser"); };
-    const c = await demander("Nouvelle catégorie", "Catégorie (existante ou nouvelle)", cat || ""); if (!c){ retablir(); return; }
-    const ss = await demander("Nouvelle catégorie", "Sous-catégorie de « " + c + " »", ""); if (!ss){ retablir(); return; }
-    ajouterCategorie(c, ss);
-    const o = h("option", {value: c + "|" + ss, selected: true}, c + " › " + ss); s.insertBefore(o, s.lastChild); s.value = o.value;
+    const r = await dialogueAjouterSousCategorie(cat); if (!r){ retablir(); return; }
+    const o = h("option", {value: r.cat + "|" + r.sous, selected: true}, r.cat + " › " + r.sous); s.insertBefore(o, s.lastChild); s.value = o.value;
     s.dispatchEvent(new Event("change"));
   });
   return s;
+}
+/* Liste des catégories existantes, plus « Nouvelle catégorie… » qui fait paraître un champ de saisie :
+   une sous-catégorie se range sous une catégorie choisie, sans saisie libre ambiguë. */
+function choixCategorie(defaut){
+  const cats = Object.keys(LIVRE.parametres.categories).filter(c => c !== "À préciser");
+  const liste = selection([...cats, ["__nouvelle__", "Nouvelle catégorie…"]], cats.includes(defaut) ? defaut : cats[0] || "__nouvelle__");
+  const nom = h("input", {type: "text"});
+  const blocNom = champ("Nom de la nouvelle catégorie", nom, "Catégorie de premier niveau. Pour ranger sous une catégorie existante, la choisir dans la liste.");
+  const voir = () => { blocNom.hidden = liste.value !== "__nouvelle__"; if (!blocNom.hidden) nom.focus(); };
+  liste.addEventListener("change", voir); blocNom.hidden = liste.value !== "__nouvelle__";
+  return {elements: [champ("Catégorie", liste), blocNom], valeur: () => liste.value === "__nouvelle__" ? nom.value.trim() : liste.value};
+}
+/* Ajoute une sous-catégorie ; rend {cat, sous}, ou null si annulé. */
+async function dialogueAjouterSousCategorie(defaut){
+  const ch = choixCategorie(defaut);
+  const sous = h("input", {type: "text"});
+  const r = await dialogue({titre: "Ajouter une sous-catégorie", corps: h("div", null, ...ch.elements, champ("Sous-catégorie", sous)),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: null}, {libelle: "Ajouter", classe: "primaire", action: () => {
+      const cat = ch.valeur(), s = sous.value.trim();
+      if (!cat || !s){ message("Indiquez la catégorie et la sous-catégorie.", true); return false; }
+      if (nomCategorieFautif(cat)){ message("« " + cat + " » ne peut pas servir de nom de catégorie.", true); return false; }
+      return {cat, sous: s};
+    }}]});
+  if (!r) return null;
+  ajouterCategorie(r.cat, r.sous);
+  return r;
 }
 const valeurCategorie = sel => { const [c, s] = sel.value.split("|"); return {categorie: c, sousCategorie: s || ""}; };
 function selectionLieu(valeur, attrs){ return selection([["", "—"], ...LIVRE.parametres.lieux.map(l => [l, l])], valeur || "", attrs); }
@@ -5636,11 +5703,49 @@ function reglagesCategories(c){
   const liste = h("div");
   for (const [cat, sous] of Object.entries(p.categories)) liste.appendChild(h("p", null, h("strong", null, cat), " : " + sous.join(", ")));
   c.appendChild(h("section", {class: "carte", style: {marginTop: "1rem"}}, h("h2", null, "Catégories"), liste,
-    h("div", {class: "outils"}, h("button", {class: "mini discret", onclick: async () => { const cat = await demander("Ajouter", "Catégorie", ""); if (!cat) return; const s2 = await demander("Ajouter", "Sous-catégorie", ""); if (s2){ ajouterCategorie(cat, s2); rafraichirEcran(); } }}, "Ajouter une sous-catégorie"),
-      h("button", {class: "mini discret", onclick: () => dialogueRenommerSousCategorie()}, "Renommer une sous-catégorie…"))));
+    h("div", {class: "outils"}, h("button", {class: "mini discret", onclick: async () => { if (await dialogueAjouterSousCategorie()) rafraichirEcran(); }}, "Ajouter une sous-catégorie…"),
+      h("button", {class: "mini discret", onclick: () => dialogueRenommerSousCategorie()}, "Renommer une sous-catégorie…"),
+      h("button", {class: "mini discret", onclick: () => dialogueDeplacerSousCategorie()}, "Déplacer une sous-catégorie…"),
+      h("button", {class: "mini discret", onclick: () => dialogueSupprimerCategorie()}, "Supprimer une catégorie vide…"))));
+}
+const optionsSousCategories = () => Object.entries(LIVRE.parametres.categories).flatMap(([c, ss]) => ss.map(s => [c + "|" + s, c + " › " + s]));
+async function dialogueDeplacerSousCategorie(){
+  const options = optionsSousCategories();
+  const choix = selection(options, options[0]?.[0] || "");
+  const ch = choixCategorie();
+  const nouveau = h("input", {type: "text"});
+  const remplir = () => { nouveau.value = choix.value.split("|").slice(1).join("|"); };
+  choix.addEventListener("change", remplir); remplir();
+  const ok = await dialogue({titre: "Déplacer une sous-catégorie", corps: h("div", null, champ("Sous-catégorie à déplacer", choix), ...ch.elements, champ("Nom sous la catégorie d'arrivée", nouveau,
+      "Les enregistrements suivent partout : opérations, règles, budget, échéances, fournisseurs, justificatifs. Si la sous-catégorie existe déjà à l'arrivée, les deux sont réunies. La catégorie de départ reste, même vide : la retirer ensuite par « Supprimer une catégorie vide ».")),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Déplacer", classe: "primaire", action: () => {
+      if (!ch.valeur() || !nouveau.value.trim()){ message("Indiquez la catégorie d'arrivée et le nom.", true); return false; }
+      if (nomCategorieFautif(ch.valeur())){ message("« " + ch.valeur() + " » ne peut pas servir de nom de catégorie.", true); return false; }
+      return true;
+    }}]});
+  if (!ok) return;
+  const [cat, ...reste] = choix.value.split("|"); const ancien = reste.join("|");
+  const cible = ch.valeur(), nom = nouveau.value.trim();
+  if (cible === cat && nom === ancien) return;
+  const n = deplacerSousCategorie(cat, ancien, cible, nom);
+  message("« " + cat + " › " + ancien + " » déplacée vers « " + cible + " › " + nom + " » (" + n + " enregistrement(s) mis à jour).");
+  rafraichirEcran();
+}
+async function dialogueSupprimerCategorie(){
+  const cats = Object.keys(LIVRE.parametres.categories).filter(c => !CATEGORIES_PROTEGEES.includes(c));
+  if (!cats.length) return message("Aucune catégorie à retirer.");
+  const choix = selection(cats, cats[0]);
+  const ok = await dialogue({titre: "Supprimer une catégorie vide", corps: h("div", null, champ("Catégorie", choix,
+      "Retirée avec ses sous-catégories, seulement si aucun enregistrement n'y est rattaché. Sinon, déplacer d'abord ses sous-catégories.")),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Supprimer", classe: "danger", valeur: true}]});
+  if (!ok) return;
+  const r = supprimerCategorieVide(choix.value);
+  if (r.usages) return message("« " + choix.value + " » n'est pas vide : " + r.usages + " enregistrement(s) y sont rattachés. Déplacez d'abord ses sous-catégories.", true);
+  message("Catégorie « " + choix.value + " » retirée.");
+  rafraichirEcran();
 }
 async function dialogueRenommerSousCategorie(){
-  const options = Object.entries(LIVRE.parametres.categories).flatMap(([c, ss]) => ss.map(s => [c + "|" + s, c + " › " + s]));
+  const options = optionsSousCategories();
   const choix = selection(options, options[0]?.[0] || "");
   const nouveau = h("input", {type: "text"});
   const remplir = () => { nouveau.value = choix.value.split("|").slice(1).join("|"); };
@@ -6404,12 +6509,34 @@ async function autotest(){
           LIVRE.parametres.categories["Licence essai"] = ["Logiciels", true, null, false];
           const ob = enregistrer("operations", {compte: "x", date: "2027-01-06", montant: -9, libelle: "ESSAI LICENCE", categorie: "Licence essai", sousCategorie: true, nature: "Courante"});
           const jb = enregistrer("justificatifs", {type: "facture", date: "2027-01-06", montant: 9, categorie: "Licence essai", sousCategorie: true});
-          const nb = reparerSousCategories();
+          const nb = reparerCategories();
           const avant = [LIVRE.parametres.categories["Licence essai"].join(","), obtenir("operations", ob.id).sousCategorie, obtenir("justificatifs", jb.id).sousCategorie, nb >= 3];
           const nr = renommerSousCategorie("Licence essai", "true", "Licence");
-          v("sous-catégorie « true » booléenne : réparée en texte puis renommée", [avant, nr, obtenir("operations", ob.id).sousCategorie, LIVRE.parametres.categories["Licence essai"].join(","), reparerSousCategories()],
+          v("sous-catégorie « true » booléenne : réparée en texte puis renommée", [avant, nr, obtenir("operations", ob.id).sousCategorie, LIVRE.parametres.categories["Licence essai"].join(","), reparerCategories()],
             [["Logiciels,true", "true", "true", true], 2, "Licence", "Logiciels,Licence", 0]);
           supprimer("operations", ob.id); supprimer("justificatifs", jb.id); delete LIVRE.parametres.categories["Licence essai"];
+        }
+        {
+          // Catégorie nommée « true » : ses enregistrements passent en « À préciser », elle disparaît de la liste.
+          LIVRE.parametres.categories["true"] = ["true"];
+          const jt = enregistrer("justificatifs", {type: "facture", date: "2027-01-07", montant: 5, categorie: "true", sousCategorie: true});
+          reparerCategories();
+          v("catégorie « true » : retirée, enregistrement en « À préciser »", ["true" in LIVRE.parametres.categories, categorieComplete(obtenir("justificatifs", jt.id))], [false, "À préciser › À préciser"]);
+          supprimer("justificatifs", jt.id);
+        }
+        {
+          // Déplacement d'une sous-catégorie vers une autre catégorie, puis suppression de la catégorie vidée.
+          ajouterCategorie("Départ essai", "Licence"); ajouterCategorie("Arrivée essai", "Courant");
+          const jd = enregistrer("justificatifs", {type: "facture", date: "2027-01-08", montant: 145, categorie: "Départ essai", sousCategorie: "Licence"});
+          const od = enregistrer("operations", {compte: "x", date: "2027-01-08", montant: -150, libelle: "ESSAI VENTILÉ", categorie: "Arrivée essai", sousCategorie: "Courant", nature: "Courante",
+            ventilation: [{montant: -145, categorie: "Départ essai", sousCategorie: "Licence"}, {montant: -5}]});
+          const refus = supprimerCategorieVide("Départ essai");
+          const nd = deplacerSousCategorie("Départ essai", "Licence", "Arrivée essai", "Logiciels");
+          const ok = supprimerCategorieVide("Départ essai");
+          v("sous-catégorie déplacée vers une autre catégorie, catégorie vide supprimée",
+            [refus.usages, nd, categorieComplete(obtenir("justificatifs", jd.id)), categorieComplete(obtenir("operations", od.id).ventilation[0]), LIVRE.parametres.categories["Arrivée essai"].join(","), ok.supprimee, "Départ essai" in LIVRE.parametres.categories, supprimerCategorieVide("À préciser").protegee],
+            [2, 2, "Arrivée essai › Logiciels", "Arrivée essai › Logiciels", "Courant,Logiciels", true, false, true]);
+          supprimer("justificatifs", jd.id); supprimer("operations", od.id); delete LIVRE.parametres.categories["Arrivée essai"];
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
