@@ -210,6 +210,14 @@ async function autotest(){
             [2, 2, "Arrivée essai › Logiciels", "Arrivée essai › Logiciels", "Courant,Logiciels", true, false, true]);
           supprimer("justificatifs", jd.id); supprimer("operations", od.id); delete LIVRE.parametres.categories["Arrivée essai"];
         }
+        {
+          const bl = {lignes: [{categorie: "Assurances essai", sousCategorie: "Habitation", nature: "Courante", annuel: 1200, repartition: {Ville: 0.5, Campagne: 0.5}, logement: true}]};
+          const o1 = enregistrer("operations", {compte: "x", date: "2027-03-05", montant: -100, libelle: "ESSAI ASSURANCE", categorie: "Assurances essai", sousCategorie: "Habitation", nature: "Courante", lieu: ""});
+          const o2 = enregistrer("operations", {compte: "x", date: "2027-03-06", montant: -30, libelle: "ESSAI ASSURANCE 2", categorie: "Assurances essai", sousCategorie: "Habitation", nature: "Courante", lieu: "Ville"});
+          const rp = l => somme(tableauBudget(bl, 2027, 3, 3, l).filter(x => x.categorie === "Assurances essai"), x => x.realise);
+          v("lieu : dépense sans lieu répartie comme son budget, dépense localisée gardée", [rp("Ville"), rp("Campagne"), rp("Autres"), estLogement(tableauBudget(bl, 2027, 3, 3, "Ville")[0])], [80, 50, 0, true]);
+          supprimer("operations", o1.id); supprimer("operations", o2.id);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

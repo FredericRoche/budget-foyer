@@ -45,23 +45,33 @@ function partsPeriode(debut, fin, filtre){
   }
   return r;
 }
-/* Réalisé par ligne de budget (clé catégorie|sous-catégorie) et par lieu. */
-function realiseParLigne(debut, fin, lieu){
-  const m = new Map(); const horsBudget = [];
+/* Réalisé par ligne de budget (clé catégorie|sous-catégorie) et par lieu. Une opération qui porte un lieu précis
+   le garde ; une opération sans lieu précis (vide ou « Autres ») est répartie comme sa ligne de budget
+   (assurance habitation 50/50, etc.), ou reste dans « Autres » si la ligne n'est pas répartie. */
+function realiseParLigne(debut, fin, lieu, budget){
+  const m = new Map();
+  const reps = new Map(); for (const l of budget?.lignes || []) if (l.repartition) reps.set(cleLigne(l.categorie, l.sousCategorie), l.repartition);
   for (const p of partsPeriode(debut, fin, p => !horsResultat(p) && p.nature !== "Revenu")){
-    if (lieu && (p.lieu || "Autres") !== lieu) continue;
     const k = cleLigne(p.categorie, p.sousCategorie);
-    m.set(k, (m.get(k) || 0) - p.montant);
+    let part = 1;
+    if (lieu){
+      const pl = p.lieu || "Autres";
+      if (pl !== "Autres") part = pl === lieu ? 1 : 0;
+      else { const r = reps.get(k); part = r ? (r[lieu] || 0) : (lieu === "Autres" ? 1 : 0); }
+    }
+    if (part) m.set(k, (m.get(k) || 0) - p.montant * part);
   }
   return m;
 }
+/* Ligne du coût du logement : case cochée sur la ligne de budget, sinon la catégorie « Logement ». */
+function estLogement(l){ return l.ligne && l.ligne.logement !== undefined && l.ligne.logement !== null ? !!l.ligne.logement : norm(l.categorie || "") === "logement"; }
 /* Tableau budget/réalisé du mois (ou d'une période de mois) pour un lieu. */
 function tableauBudget(budget, annee, moisDebut, moisFin, lieu){
   // Un budget peut ne couvrir qu'une partie de l'année (« debut ») : le réalisé est alors compté à partir de cette date.
   const borne = d => (budget?.debut && budget.debut > d) ? budget.debut : d;
   const debut = borne(`${annee}-${pad2(moisDebut)}-01`), fin = finDeMois(`${annee}-${pad2(moisFin)}-01`);
-  const realise = debut <= fin ? realiseParLigne(debut, fin, lieu) : new Map();
-  const realiseAnnee = realiseParLigne(borne(`${annee}-01-01`), fin, lieu);
+  const realise = debut <= fin ? realiseParLigne(debut, fin, lieu, budget) : new Map();
+  const realiseAnnee = realiseParLigne(borne(`${annee}-01-01`), fin, lieu, budget);
   const lignes = [];
   const vues = new Set();
   for (const l of budget?.lignes || []){
