@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-6Wp6g9mdyAsZn3q72g/VvhI6iujg1A4RnTzWPBvu7ys=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ANjUob4P59KAwYJCSp4RhmbPLa4VERp0aThoanZLY7Y=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-24.1304";
+const VERSION_APP = "2026-10-24.1407";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3081,13 +3081,16 @@ function tableauBudget(budget, annee, moisDebut, moisFin, lieu){
   const realise = debut <= fin ? realiseParLigne(debut, fin, lieu, budget) : new Map();
   const realiseAnnee = realiseParLigne(borne(`${annee}-01-01`), fin, lieu, budget);
   const lignes = [];
-  const vues = new Set();
+  const vues = new Map();
   for (const l of budget?.lignes || []){
-    const k = cleLigne(l.categorie, l.sousCategorie); vues.add(k);
+    const k = cleLigne(l.categorie, l.sousCategorie);
     const part = partLieu(l, lieu);
     let b = 0; for (let mo = moisDebut; mo <= moisFin; mo++) b += budgetDuMois(l, mo) * part;
-    lignes.push({ligne: l, nature: l.nature, categorie: l.categorie, sousCategorie: l.sousCategorie, budget: b, realise: realise.get(k) || 0,
-      cumul: realiseAnnee.get(k) || 0, annuel: l.annuel * part});
+    const deja = vues.get(k);
+    if (deja){ deja.budget += b; deja.annuel += l.annuel * part; deja.lignesFusionnees = (deja.lignesFusionnees || 1) + 1; continue; }
+    const x = {ligne: l, nature: l.nature, categorie: l.categorie, sousCategorie: l.sousCategorie, budget: b, realise: realise.get(k) || 0,
+      cumul: realiseAnnee.get(k) || 0, annuel: l.annuel * part};
+    vues.set(k, x); lignes.push(x);
   }
   // Dépenses sans ligne de budget
   for (const [k, v] of realise){
@@ -6600,6 +6603,13 @@ async function autotest(){
           const rp = l => somme(tableauBudget(bl, 2027, 3, 3, l).filter(x => x.categorie === "Assurances essai"), x => x.realise);
           v("lieu : dépense sans lieu répartie comme son budget, dépense localisée gardée", [rp("Ville"), rp("Campagne"), rp("Autres"), estLogement(tableauBudget(bl, 2027, 3, 3, "Ville")[0])], [80, 50, 0, true]);
           supprimer("operations", o1.id); supprimer("operations", o2.id);
+        }
+        {
+          const bd = {lignes: [{categorie: "Énergie essai", sousCategorie: "Élec et gaz", nature: "Courante", annuel: 1200}, {categorie: "Énergie essai", sousCategorie: "Élec et gaz", nature: "Courante", annuel: 2400}]};
+          const od = enregistrer("operations", {compte: "x", date: "2027-04-05", montant: -100, libelle: "ESSAI ENERGIE", categorie: "Énergie essai", sousCategorie: "Élec et gaz", nature: "Courante"});
+          const td = tableauBudget(bd, 2027, 4, 4, "").filter(x => x.categorie === "Énergie essai");
+          v("budget : deux lignes de même nom réunies, réalisé compté une fois", [td.length, td[0].budget, td[0].realise], [1, 300, 100]);
+          supprimer("operations", od.id);
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);

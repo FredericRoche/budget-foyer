@@ -218,6 +218,13 @@ async function autotest(){
           v("lieu : dépense sans lieu répartie comme son budget, dépense localisée gardée", [rp("Ville"), rp("Campagne"), rp("Autres"), estLogement(tableauBudget(bl, 2027, 3, 3, "Ville")[0])], [80, 50, 0, true]);
           supprimer("operations", o1.id); supprimer("operations", o2.id);
         }
+        {
+          const bd = {lignes: [{categorie: "Énergie essai", sousCategorie: "Élec et gaz", nature: "Courante", annuel: 1200}, {categorie: "Énergie essai", sousCategorie: "Élec et gaz", nature: "Courante", annuel: 2400}]};
+          const od = enregistrer("operations", {compte: "x", date: "2027-04-05", montant: -100, libelle: "ESSAI ENERGIE", categorie: "Énergie essai", sousCategorie: "Élec et gaz", nature: "Courante"});
+          const td = tableauBudget(bd, 2027, 4, 4, "").filter(x => x.categorie === "Énergie essai");
+          v("budget : deux lignes de même nom réunies, réalisé compté une fois", [td.length, td[0].budget, td[0].realise], [1, 300, 100]);
+          supprimer("operations", od.id);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

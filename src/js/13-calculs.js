@@ -73,13 +73,16 @@ function tableauBudget(budget, annee, moisDebut, moisFin, lieu){
   const realise = debut <= fin ? realiseParLigne(debut, fin, lieu, budget) : new Map();
   const realiseAnnee = realiseParLigne(borne(`${annee}-01-01`), fin, lieu, budget);
   const lignes = [];
-  const vues = new Set();
+  const vues = new Map();
   for (const l of budget?.lignes || []){
-    const k = cleLigne(l.categorie, l.sousCategorie); vues.add(k);
+    const k = cleLigne(l.categorie, l.sousCategorie);
     const part = partLieu(l, lieu);
     let b = 0; for (let mo = moisDebut; mo <= moisFin; mo++) b += budgetDuMois(l, mo) * part;
-    lignes.push({ligne: l, nature: l.nature, categorie: l.categorie, sousCategorie: l.sousCategorie, budget: b, realise: realise.get(k) || 0,
-      cumul: realiseAnnee.get(k) || 0, annuel: l.annuel * part});
+    const deja = vues.get(k);
+    if (deja){ deja.budget += b; deja.annuel += l.annuel * part; deja.lignesFusionnees = (deja.lignesFusionnees || 1) + 1; continue; }
+    const x = {ligne: l, nature: l.nature, categorie: l.categorie, sousCategorie: l.sousCategorie, budget: b, realise: realise.get(k) || 0,
+      cumul: realiseAnnee.get(k) || 0, annuel: l.annuel * part};
+    vues.set(k, x); lignes.push(x);
   }
   // Dépenses sans ligne de budget
   for (const [k, v] of realise){
