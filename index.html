@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Ru8MK6p+6ZvOFXMdZ8t0YsPu6vm6lyMZJ6TzH2TTfG8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1odQOXvlgCr8RwPvwhw9JAZvAcqwTXSV7az/Ilv6SLE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -318,6 +318,11 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
 .pile{display:flex; flex-direction:column; gap:.3rem; flex:1}
 .pile > *{width:100%}
 
+#impression table.imp-sites{width:100%; border-collapse:collapse; font-size:9.5pt; margin-top:.6rem}
+#impression table.imp-sites th, #impression table.imp-sites td{padding:2px 5px; border-bottom:1px solid #ccc}
+#impression table.imp-sites th{border-bottom:1.5px solid #000; text-align:right}
+#impression table.imp-sites th:first-child, #impression table.imp-sites td:first-child{text-align:left}
+
 </style>
 </head>
 <body>
@@ -350,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-24.1411";
+const VERSION_APP = "2026-10-24.1424";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3668,7 +3673,7 @@ function construireNavigation(){
     h("div", {class: "rubrique"}, "Comptes"), lien("operations", "Opérations"), lien("import", "Importer"),
     lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(j => j.statut === "a_rapprocher").length || null),
     lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Fournisseurs"),
-    h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), lien("patrimoine", "Bilan et résultat"),
+    h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), lien("sites", "Coût par site"), lien("patrimoine", "Bilan et résultat"),
     lien("tresorerie", "Trésorerie", ana?.premierBas ? "!" : null, true),
     lien("epargne", "Épargne"), lien("projets", "Projets"),
     h("div", {class: "rubrique"}, "Appareil"), lien("reglages", "Réglages"),
@@ -5202,7 +5207,6 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
   c.appendChild(entete("Budget et réalisé", budget ? budget.nom + (budget.fige ? " · version figée" : "") + (budget.debut ? " · à partir du " + dateFr(budget.debut) : "") : "Aucun budget pour " + an, [
     segments([["", "Tous"], ...LIVRE.parametres.lieux.map(l => [l, l])], lieu, v => { etat.lieu = v; rafraichirEcran(); }),
     segments([["mois", MOIS_LONG[mo - 1]], ["cumul", "Cumul au " + dateCourte(finDeMois(m + "-01"))], ["annee", "Année " + an]], periode, v => { etat.periode = v; rafraichirEcran(); }),
-    segments([["liste", "Liste"], ["lieux", "Par lieu"]], etat.vue || "liste", v => { etat.vue = v; rafraichirEcran(); }),
     selecteurMois(etat, rafraichirEcran),
     budgets.length > 1 ? selection(budgets.map(b => [b.id, b.nom]), budget?.id, {onchange: e => { etat.budget = e.target.value; rafraichirEcran(); }}) : null,
     budget ? h("button", {class: "discret", onclick: () => exporterBudget(budget, an, lieu)}, "Exporter en Excel") : null,
@@ -5214,7 +5218,6 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
       etat.mois = (an + 1) + "-01"; etat.budget = b.id; rafraichirEcran();
     }}, "Copier pour " + (an + 1)) : null]));
   if (!budget){ c.appendChild(h("p", {class: "vide"}, "Reprenez le budget depuis le classeur d'inventaire (écran Importer), ou copiez celui d'une autre année (Réglages).")); return; }
-  if (etat.vue === "lieux"){ vueParLieu(c, budget, an, d1, d2); return; }
   const lignes = tableauBudget(budget, an, d1, d2, lieu);
   const lb = lignes.filter(l => l.ligne);
   const tb = somme(lb, l => l.budget), tr = somme(lignes, l => l.realise);
@@ -5266,28 +5269,60 @@ function tableauParLieu(budget, an, d1, d2){
   const groupes = [...new Set(toutes.filter(x => !x.logement).map(x => x.categorie))].map(cat => ({nom: cat, lignes: toutes.filter(x => !x.logement && x.categorie === cat)}));
   return {lieux, logement, groupes, total: {b: somme2(toutes, x => x.b), r: somme2(toutes, x => x.r)}, sousTotal: xs => ({b: somme2(xs, x => x.b), r: somme2(xs, x => x.r)})};
 }
-function vueParLieu(c, budget, an, d1, d2){
-  const t = tableauParLieu(budget, an, d1, d2);
-  const cellules = (b, r) => [...t.lieux.flatMap((_, i) => [h("td", {class: "num"}, euros(b[i], 0)), h("td", {class: "num" + (r[i] > b[i] * 1.1 && r[i] - b[i] > 50 ? " neg" : "")}, euros(r[i], 0))]),
-    h("td", {class: "num"}, euros(somme(b), 0)), h("td", {class: "num"}, euros(somme(r), 0))];
+// Tableau « Coût par site » : coût du logement détaillé, puis les autres postes par catégorie, puis le total.
+function tableCoutParSite(t, impression){
+  const e0 = v => euros(v, 0);
+  const cellules = (b, r) => [...t.lieux.flatMap((_, i) => [h("td", {class: "num"}, e0(b[i])), h("td", {class: "num" + (r[i] > b[i] * 1.1 && r[i] - b[i] > 50 ? " neg" : "")}, Math.abs(r[i]) < 0.5 ? "—" : e0(r[i]))]),
+    h("td", {class: "num fort"}, e0(somme(b))), h("td", {class: "num fort"}, Math.abs(somme(r)) < 0.5 ? "—" : e0(somme(r)))];
+  const cl = (ecran, imp) => impression ? imp : ecran;
   const corps = h("tbody");
-  const bloc = (titre, xs, classe) => {
-    if (!xs.length) return;
-    const st = t.sousTotal(xs);
-    corps.appendChild(h("tr", {class: classe || "groupe"}, h("td", null, titre), ...cellules(st.b, st.r)));
-    for (const x of xs) corps.appendChild(h("tr", null, h("td", {class: "retrait"}, (classe ? x.categorie + " › " : "") + x.sousCategorie, x.horsBudget ? h("span", {class: "petit neg"}, " (sans ligne de budget)") : null), ...cellules(x.b, x.r)));
-  };
-  bloc("Coût du logement", t.logement, "groupe logement");
-  for (const g of t.groupes) bloc(g.nom, g.lignes);
-  corps.appendChild(h("tr", {class: "total"}, h("td", null, "Total"), ...cellules(t.total.b, t.total.r)));
-  const tete2 = h("tr", null, h("th"), ...t.lieux.flatMap(() => [h("th", {class: "num"}, "Budget"), h("th", {class: "num"}, "Réalisé")]), h("th", {class: "num"}, "Budget"), h("th", {class: "num"}, "Réalisé"));
-  const tete1 = h("tr", null, h("th", null, "Catégorie · sous-catégorie"), ...t.lieux.map(lx => h("th", {colspan: 2, class: "num"}, lx)), h("th", {colspan: 2, class: "num"}, "Total"));
   const st = t.sousTotal(t.logement);
-  c.appendChild(h("div", {class: "indicateurs"}, t.lieux.map((lx, i) => h("div", {class: "indicateur"}, h("div", {class: "lib"}, "Logement · " + lx), h("div", {class: "val"}, euros(st.b[i], 0)),
-    h("div", {class: "det"}, "réalisé " + euros(st.r[i], 0))))));
-  c.appendChild(h("div", {class: "tableau"}, h("table", null, h("thead", null, tete1, tete2), corps)));
-  c.appendChild(h("p", {class: "note"}, "Une dépense sans lieu précis suit la répartition de sa ligne de budget (Modifier la ligne › Répartition par lieu) ; une dépense qui porte un lieu le garde. " +
-    "« Coût du logement » : catégorie Logement, et toute ligne cochée « Coût du logement » (assurance habitation, box, ramonage…)."));
+  if (t.logement.length){
+    corps.appendChild(h("tr", {class: cl("groupe logement", "imp-cat")}, h("td", null, "Coût du logement"), ...cellules(st.b, st.r)));
+    for (const x of t.logement) corps.appendChild(h("tr", {class: cl("", "imp-sous")}, h("td", {class: cl("retrait", "")}, x.sousCategorie), ...cellules(x.b, x.r)));
+  }
+  for (const g of t.groupes){ const s = t.sousTotal(g.lignes); corps.appendChild(h("tr", {class: cl("", "imp-sous")}, h("td", null, g.nom), ...cellules(s.b, s.r))); }
+  corps.appendChild(h("tr", {class: cl("total", "imp-total")}, h("td", null, "Total"), ...cellules(t.total.b, t.total.r)));
+  const tete1 = h("tr", null, h("th", null, "Poste"), ...t.lieux.map(lx => h("th", {colspan: 2, class: "num"}, lx)), h("th", {colspan: 2, class: "num"}, "Total"));
+  const tete2 = h("tr", null, h("th"), ...[...t.lieux, "Total"].flatMap(() => [h("th", {class: "num"}, "Budget"), h("th", {class: "num"}, "Réalisé")]));
+  return h("table", {class: impression ? "imp-sites" : null}, h("thead", null, tete1, tete2), corps);
+}
+function libellePeriode(an, d1, d2, periode){
+  return periode === "annee" || (d1 === 1 && d2 === 12) ? "année " + an : periode === "cumul" ? "du 1er janvier au " + dateFr(finDeMois(an + "-" + pad2(d2) + "-01")) : MOIS_LONG[d1 - 1] + " " + an;
+}
+declarerEcran("sites", {titre: "Coût par site", rendre(c, etat){
+  const m = moisCourant(etat); const an = +m.slice(0, 4), mo = +m.slice(5, 7);
+  const budget = (etat.budget && obtenir("budgets", etat.budget)?.annee === an) ? obtenir("budgets", etat.budget) : budgetActif(an);
+  const periode = etat.periode || "annee";
+  const [d1, d2] = periode === "mois" ? [mo, mo] : periode === "cumul" ? [1, mo] : [1, 12];
+  c.appendChild(entete("Coût par site", budget ? budget.nom + " · chaque lieu, poste par poste" : "Aucun budget pour " + an, [
+    segments([["mois", MOIS_LONG[mo - 1]], ["cumul", "Cumul au " + dateCourte(finDeMois(m + "-01"))], ["annee", "Année " + an]], periode, v => { etat.periode = v; rafraichirEcran(); }),
+    selecteurMois(etat, rafraichirEcran)]));
+  if (!budget){ c.appendChild(h("p", {class: "vide"}, "Aucun budget pour " + an + ".")); return; }
+  vueParLieu(c, budget, an, d1, d2, periode);
+}});
+function vueParLieu(c, budget, an, d1, d2, periode){
+  const t = tableauParLieu(budget, an, d1, d2);
+  const st = t.sousTotal(t.logement);
+  c.appendChild(h("div", {class: "indicateurs"}, t.lieux.map((lx, i) => h("div", {class: "indicateur"}, h("div", {class: "lib"}, lx), h("div", {class: "val"}, euros(t.total.b[i], 0)),
+    h("div", {class: "det"}, "dont logement " + euros(st.b[i], 0) + " · réalisé " + euros(t.total.r[i], 0))))));
+  c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("button", {class: "discret", onclick: () => imprimerCoutParSite(budget, an, d1, d2, periode)}, "Version imprimable")));
+  c.appendChild(h("div", {class: "tableau"}, tableCoutParSite(t, false)));
+  c.appendChild(h("p", {class: "note"}, "Budget et réalisé de la période (" + libellePeriode(an, d1, d2, periode) + "). Une dépense sans lieu précis suit la répartition de sa ligne de budget ; une dépense qui porte un lieu le garde. " +
+    "Coût du logement : catégorie Logement et lignes cochées « Coût du logement »."));
+}
+function imprimerCoutParSite(budget, an, d1, d2, periode){
+  const t = tableauParLieu(budget, an, d1, d2);
+  const st = t.sousTotal(t.logement);
+  const z = vider(document.getElementById("impression") || document.body.appendChild(h("div", {id: "impression"})));
+  z.appendChild(h("header", {class: "imp-tete"}, h("div", {class: "imp-foyer"}, LIVRE.parametres.nomFoyer || "Budget du foyer"), h("h1", null, "Coût par site"),
+    h("div", {class: "imp-soustitre"}, budget.nom + " · " + libellePeriode(an, d1, d2, periode) + " · édité le " + dateFr(aujourdhui()))));
+  z.appendChild(h("div", {class: "imp-chiffres"}, t.lieux.map((lx, i) => h("div", null, h("div", {class: "lib"}, lx + " · dont logement " + euros(st.b[i], 0)), h("div", {class: "val"}, euros(t.total.b[i], 0))))));
+  z.appendChild(tableCoutParSite(t, true));
+  z.appendChild(h("p", {class: "imp-note"}, "Budget de la période et réalisé à ce jour. Les dépenses communes sont réparties selon la clé de leur ligne de budget ; le coût du logement réunit la catégorie Logement et les lignes qui y sont rattachées."));
+  const finImp = () => { vider(z); window.removeEventListener("afterprint", finImp); };
+  window.addEventListener("afterprint", finImp);
+  window.print();
 }
 async function editerLigne(budget, ligne){
   const l = ligne || {id: "lb-" + idAleatoire(8), nature: "Courante", categorie: "", sousCategorie: "", annuel: 0, paiement: {compte: 1, cartes: 0, amex: 0}};

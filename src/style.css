@@ -302,3 +302,8 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
 @media (max-width: 760px){ .deux-colonnes{grid-template-columns:1fr} }
 .pile{display:flex; flex-direction:column; gap:.3rem; flex:1}
 .pile > *{width:100%}
+
+#impression table.imp-sites{width:100%; border-collapse:collapse; font-size:9.5pt; margin-top:.6rem}
+#impression table.imp-sites th, #impression table.imp-sites td{padding:2px 5px; border-bottom:1px solid #ccc}
+#impression table.imp-sites th{border-bottom:1.5px solid #000; text-align:right}
+#impression table.imp-sites th:first-child, #impression table.imp-sites td:first-child{text-align:left}
