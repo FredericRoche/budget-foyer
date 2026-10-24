@@ -63,8 +63,17 @@ function realiseParLigne(debut, fin, lieu, budget){
   }
   return m;
 }
-/* Ligne du coût du logement : case cochée sur la ligne de budget, sinon la catégorie « Logement ». */
-function estLogement(l){ return l.ligne && l.ligne.logement !== undefined && l.ligne.logement !== null ? !!l.ligne.logement : norm(l.categorie || "") === "logement"; }
+/* Place d'une ligne dans la synthèse par site : « logement », « site » (autre coût propre au site : stationnement…)
+   ou « foyer » (dépense qui suit le foyer partout, hors synthèse). Choix fait sur la ligne de budget ; à défaut,
+   l'ancienne case « Coût du logement », sinon la catégorie (Logement → logement, le reste → foyer). */
+const TYPES_SITE = [["logement", "Coût du logement"], ["site", "Autre coût propre au site"], ["foyer", "Dépense du foyer, hors synthèse"]];
+function typeSiteLigne(ligne, categorie){
+  if (ligne && TYPES_SITE.some(([k]) => k === ligne.site)) return ligne.site;
+  if (ligne && ligne.logement !== undefined && ligne.logement !== null) return ligne.logement ? "logement" : "foyer";
+  return norm(categorie || ligne?.categorie || "") === "logement" ? "logement" : "foyer";
+}
+function typeSite(l){ return typeSiteLigne(l.ligne, l.categorie); }
+function estLogement(l){ return typeSite(l) === "logement"; }
 /* Tableau budget/réalisé du mois (ou d'une période de mois) pour un lieu. */
 function tableauBudget(budget, annee, moisDebut, moisFin, lieu){
   // Un budget peut ne couvrir qu'une partie de l'année (« debut ») : le réalisé est alors compté à partir de cette date.

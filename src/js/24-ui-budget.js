@@ -62,30 +62,36 @@ function tableauParLieu(budget, an, d1, d2){
   const lignes = new Map();
   parLieu.forEach((ls, i) => { for (const l of ls){
     const k = cleLigne(l.categorie, l.sousCategorie);
-    if (!lignes.has(k)) lignes.set(k, {categorie: l.categorie, sousCategorie: l.sousCategorie, ligne: l.ligne, horsBudget: l.horsBudget, logement: estLogement(l), b: lieux.map(() => 0), r: lieux.map(() => 0)});
+    if (!lignes.has(k)) lignes.set(k, {categorie: l.categorie, sousCategorie: l.sousCategorie, ligne: l.ligne, horsBudget: l.horsBudget, type: typeSite(l), b: lieux.map(() => 0), r: lieux.map(() => 0)});
     const x = lignes.get(k); x.b[i] += l.budget; x.r[i] += l.realise; if (l.ligne) x.ligne = l.ligne;
   } });
   const toutes = [...lignes.values()].filter(x => x.b.some(v => Math.abs(v) > 0.5) || x.r.some(v => Math.abs(v) > 0.5))
     .sort((a, b) => (a.categorie + a.sousCategorie).localeCompare(b.categorie + b.sousCategorie, "fr"));
   const somme2 = (xs, f) => lieux.map((_, i) => somme(xs, x => f(x)[i]));
-  const logement = toutes.filter(x => x.logement);
-  const groupes = [...new Set(toutes.filter(x => !x.logement).map(x => x.categorie))].map(cat => ({nom: cat, lignes: toutes.filter(x => !x.logement && x.categorie === cat)}));
-  return {lieux, logement, groupes, total: {b: somme2(toutes, x => x.b), r: somme2(toutes, x => x.r)}, sousTotal: xs => ({b: somme2(xs, x => x.b), r: somme2(xs, x => x.r)})};
+  const sousTotal = xs => ({b: somme2(xs, x => x.b), r: somme2(xs, x => x.r)});
+  const logement = toutes.filter(x => x.type === "logement"), autresSite = toutes.filter(x => x.type === "site"), foyer = toutes.filter(x => x.type === "foyer");
+  return {lieux, logement, autresSite, foyer, synthese: sousTotal([...logement, ...autresSite]), total: sousTotal(toutes), sousTotal};
 }
-// Tableau « Coût par site » : coût du logement détaillé, puis les autres postes par catégorie, puis le total.
+// Tableau « Coût par site » : coût du logement, autres coûts propres au site, total de la synthèse ;
+// puis, pour information, les dépenses du foyer (hors synthèse), en total seulement.
 function tableCoutParSite(t, impression){
-  const e0 = v => euros(v, 0);
-  const cellules = (b, r) => [...t.lieux.flatMap((_, i) => [h("td", {class: "num"}, e0(b[i])), h("td", {class: "num" + (r[i] > b[i] * 1.1 && r[i] - b[i] > 50 ? " neg" : "")}, Math.abs(r[i]) < 0.5 ? "—" : e0(r[i]))]),
-    h("td", {class: "num fort"}, e0(somme(b))), h("td", {class: "num fort"}, Math.abs(somme(r)) < 0.5 ? "—" : e0(somme(r)))];
+  const e0 = v => euros(v, 0), tiret = v => Math.abs(v) < 0.5 ? "—" : e0(v);
+  const cellules = (b, r) => [...t.lieux.flatMap((_, i) => [h("td", {class: "num"}, e0(b[i])), h("td", {class: "num" + (r[i] > b[i] * 1.1 && r[i] - b[i] > 50 ? " neg" : "")}, tiret(r[i]))]),
+    h("td", {class: "num fort"}, e0(somme(b))), h("td", {class: "num fort"}, tiret(somme(r)))];
   const cl = (ecran, imp) => impression ? imp : ecran;
   const corps = h("tbody");
-  const st = t.sousTotal(t.logement);
-  if (t.logement.length){
-    corps.appendChild(h("tr", {class: cl("groupe logement", "imp-cat")}, h("td", null, "Coût du logement"), ...cellules(st.b, st.r)));
-    for (const x of t.logement) corps.appendChild(h("tr", {class: cl("", "imp-sous")}, h("td", {class: cl("retrait", "")}, x.sousCategorie), ...cellules(x.b, x.r)));
-  }
-  for (const g of t.groupes){ const s = t.sousTotal(g.lignes); corps.appendChild(h("tr", {class: cl("", "imp-sous")}, h("td", null, g.nom), ...cellules(s.b, s.r))); }
-  corps.appendChild(h("tr", {class: cl("total", "imp-total")}, h("td", null, "Total"), ...cellules(t.total.b, t.total.r)));
+  const bloc = (titre, xs) => {
+    if (!xs.length) return;
+    const s = t.sousTotal(xs);
+    corps.appendChild(h("tr", {class: cl("groupe", "imp-cat")}, h("td", null, titre), ...cellules(s.b, s.r)));
+    for (const x of xs) corps.appendChild(h("tr", {class: cl("", "imp-sous")}, h("td", {class: cl("retrait", "")}, x.sousCategorie + (x.horsBudget ? " (sans ligne de budget)" : "")), ...cellules(x.b, x.r)));
+  };
+  bloc("Coût du logement", t.logement);
+  bloc("Autres coûts propres au site", t.autresSite);
+  corps.appendChild(h("tr", {class: cl("total", "imp-total")}, h("td", null, "Total des coûts propres au site"), ...cellules(t.synthese.b, t.synthese.r)));
+  const f = t.sousTotal(t.foyer);
+  if (t.foyer.length) corps.appendChild(h("tr", {class: cl("discret", "imp-sous")}, h("td", null, "Pour information : dépenses du foyer, hors synthèse"),
+    ...t.lieux.flatMap(() => [h("td"), h("td")]), h("td", {class: "num"}, e0(somme(f.b))), h("td", {class: "num"}, tiret(somme(f.r)))));
   const tete1 = h("tr", null, h("th", null, "Poste"), ...t.lieux.map(lx => h("th", {colspan: 2, class: "num"}, lx)), h("th", {colspan: 2, class: "num"}, "Total"));
   const tete2 = h("tr", null, h("th"), ...[...t.lieux, "Total"].flatMap(() => [h("th", {class: "num"}, "Budget"), h("th", {class: "num"}, "Réalisé")]));
   return h("table", {class: impression ? "imp-sites" : null}, h("thead", null, tete1, tete2), corps);
@@ -107,12 +113,12 @@ declarerEcran("sites", {titre: "Coût par site", rendre(c, etat){
 function vueParLieu(c, budget, an, d1, d2, periode){
   const t = tableauParLieu(budget, an, d1, d2);
   const st = t.sousTotal(t.logement);
-  c.appendChild(h("div", {class: "indicateurs"}, t.lieux.map((lx, i) => h("div", {class: "indicateur"}, h("div", {class: "lib"}, lx), h("div", {class: "val"}, euros(t.total.b[i], 0)),
-    h("div", {class: "det"}, "dont logement " + euros(st.b[i], 0) + " · réalisé " + euros(t.total.r[i], 0))))));
+  c.appendChild(h("div", {class: "indicateurs"}, t.lieux.map((lx, i) => h("div", {class: "indicateur"}, h("div", {class: "lib"}, lx), h("div", {class: "val"}, euros(t.synthese.b[i], 0)),
+    h("div", {class: "det"}, "dont logement " + euros(st.b[i], 0) + " · réalisé " + euros(t.synthese.r[i], 0))))));
   c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("button", {class: "discret", onclick: () => imprimerCoutParSite(budget, an, d1, d2, periode)}, "Version imprimable")));
   c.appendChild(h("div", {class: "tableau"}, tableCoutParSite(t, false)));
   c.appendChild(h("p", {class: "note"}, "Budget et réalisé de la période (" + libellePeriode(an, d1, d2, periode) + "). Une dépense sans lieu précis suit la répartition de sa ligne de budget ; une dépense qui porte un lieu le garde. " +
-    "Coût du logement : catégorie Logement et lignes cochées « Coût du logement »."));
+    "Chaque ligne de budget se range en coût du logement, autre coût propre au site ou dépense du foyer (Budget et réalisé › Modifier la ligne) ; seules les deux premières entrent dans la synthèse."));
 }
 function imprimerCoutParSite(budget, an, d1, d2, periode){
   const t = tableauParLieu(budget, an, d1, d2);
@@ -120,9 +126,9 @@ function imprimerCoutParSite(budget, an, d1, d2, periode){
   const z = vider(document.getElementById("impression") || document.body.appendChild(h("div", {id: "impression"})));
   z.appendChild(h("header", {class: "imp-tete"}, h("div", {class: "imp-foyer"}, LIVRE.parametres.nomFoyer || "Budget du foyer"), h("h1", null, "Coût par site"),
     h("div", {class: "imp-soustitre"}, budget.nom + " · " + libellePeriode(an, d1, d2, periode) + " · édité le " + dateFr(aujourdhui()))));
-  z.appendChild(h("div", {class: "imp-chiffres"}, t.lieux.map((lx, i) => h("div", null, h("div", {class: "lib"}, lx + " · dont logement " + euros(st.b[i], 0)), h("div", {class: "val"}, euros(t.total.b[i], 0))))));
+  z.appendChild(h("div", {class: "imp-chiffres"}, t.lieux.map((lx, i) => h("div", null, h("div", {class: "lib"}, lx + " · dont logement " + euros(st.b[i], 0)), h("div", {class: "val"}, euros(t.synthese.b[i], 0))))));
   z.appendChild(tableCoutParSite(t, true));
-  z.appendChild(h("p", {class: "imp-note"}, "Budget de la période et réalisé à ce jour. Les dépenses communes sont réparties selon la clé de leur ligne de budget ; le coût du logement réunit la catégorie Logement et les lignes qui y sont rattachées."));
+  z.appendChild(h("p", {class: "imp-note"}, "Coûts propres à chaque site : ceux qui disparaîtraient avec lui (logement, stationnement…). Les dépenses du foyer, qui le suivent partout (alimentation, habillement, voiture…), sont données pour information. Budget de la période et réalisé à ce jour ; dépenses communes réparties selon la clé de leur ligne de budget."));
   const finImp = () => { vider(z); window.removeEventListener("afterprint", finImp); };
   window.addEventListener("afterprint", finImp);
   window.print();
@@ -135,7 +141,7 @@ async function editerLigne(budget, ligne){
   const lieux = LIVRE.parametres.lieux;
   const reps = lieux.map(lx => h("input", {type: "text", value: nombre(Math.round(((l.repartition || {})[lx] ?? (lx === "Autres" && !l.repartition ? 1 : 0)) * 100), 0), style: {width: "4.5rem"}}));
   const pay = ["compte", "cartes", "amex"].map(k => h("input", {type: "text", value: nombre(Math.round((l.paiement?.[k] || 0) * 100), 0), style: {width: "4.5rem"}}));
-  const logement = h("input", {type: "checkbox", id: "lb-logement", checked: l.logement !== undefined && l.logement !== null ? !!l.logement : norm(l.categorie || "") === "logement"});
+  const typeS = selection(TYPES_SITE, typeSiteLigne(l, l.categorie));
   const profil = h("input", {type: "text", value: Array.isArray(l.profil) ? l.profil.join(" ") : "", placeholder: "vide = 1/12 par mois ; sinon 12 poids, ex. 0 0 0 0 0 0 0 0 0 1 0 0"});
   const cpt = obtenir("comptes", LIVRE.parametres.compteTresorerie) || comptesDeType("courant")[0];
   const habituel = cpt && l.categorie ? joursHabituels(cpt.id, aujourdhui()).get(cleLigne(l.categorie, l.sousCategorie)) : null;
@@ -143,7 +149,7 @@ async function editerLigne(budget, ligne){
   const ok = await dialogue({titre: ligne ? "Modifier la ligne" : "Nouvelle ligne de budget", large: true, corps: h("div", null,
     h("div", {class: "grille-champs"}, champ("Catégorie", cat), champ("Nature", nat), champ("Montant annuel", annuel)),
     h("label", null, "Répartition par lieu (%)"), h("div", {class: "outils", style: {marginBottom: ".6rem"}}, lieux.map((lx, i) => h("span", null, lx + " ", reps[i]))),
-    h("div", {class: "case", style: {marginBottom: ".6rem"}}, logement, h("label", {for: "lb-logement"}, "Coût du logement (sous-total par lieu dans la vue « Par lieu »)")),
+    champ("Synthèse « Coût par site »", typeS, "Coût du logement ou autre coût propre au site : comptés par site. Dépense du foyer (alimentation, habillement…) : hors synthèse."),
     h("label", null, "Mode de paiement (%), pour la trésorerie"), h("div", {class: "outils", style: {marginBottom: ".6rem"}}, h("span", null, "compte ", pay[0]), h("span", null, "cartes LCL ", pay[1]), h("span", null, "Amex ", pay[2])),
     champ("Profil mensuel", profil, "Par exemple pour une taxe payée en octobre : 0 0 0 0 0 0 0 0 0 1 0 0."),
     champ("Jour de prélèvement sur le compte", jour, habituel ? "Vide = jour habituel tiré des opérations (le " + habituel + ")." : "Vide = étalé sur le mois (pas de jour habituel dans les opérations).")),
@@ -157,7 +163,7 @@ async function editerLigne(budget, ligne){
         if (prof && (prof.length !== 12 || prof.some(isNaN))){ message("Le profil doit compter 12 nombres.", true); return false; }
         const jr = jour.value.trim() ? Number(jour.value.trim()) : null;
         if (jr !== null && !(Number.isInteger(jr) && jr >= 1 && jr <= 31)){ message("Le jour doit être un nombre de 1 à 31.", true); return false; }
-        Object.assign(l, v, {logement: logement.checked, nature: nat.value, annuel: a, repartition: tr ? Object.fromEntries(Object.entries(r).map(([k, x]) => [k, x * 100 / tr])) : null,
+        Object.assign(l, v, {site: typeS.value, logement: typeS.value === "logement", nature: nat.value, annuel: a, repartition: tr ? Object.fromEntries(Object.entries(r).map(([k, x]) => [k, x * 100 / tr])) : null,
           paiement: tp ? {compte: p[0] / tp, cartes: p[1] / tp, amex: p[2] / tp} : {compte: 1, cartes: 0, amex: 0}, profil: prof, jour: jr});
         if (!ligne) budget.lignes.push(l);
         enregistrer("budgets", budget); return true;
