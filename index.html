@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ANjUob4P59KAwYJCSp4RhmbPLa4VERp0aThoanZLY7Y=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Ru8MK6p+6ZvOFXMdZ8t0YsPu6vm6lyMZJ6TzH2TTfG8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -350,7 +350,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-24.1407";
+const VERSION_APP = "2026-10-24.1411";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -922,6 +922,11 @@ function parcourirCategories(f, sansEnregistrer){
   return n;
 }
 /* Nombre d'enregistrements rattachés à une catégorie (statistiques des fournisseurs non comprises). */
+function sousCategoriesEmployees(){
+  const r = new Map();
+  parcourirCategories((y, c) => { if (c && y.sousCategorie != null && String(y.sousCategorie) !== "") r.set(c + "|" + String(y.sousCategorie), [c, String(y.sousCategorie)]); return false; }, true);
+  return r;
+}
 function usagesCategorie(cat){ return parcourirCategories((y, c) => c === cat, true); }
 /* Déplace une sous-catégorie partout, vers la même catégorie (renommage) ou une autre : liste des catégories,
    opérations (et leurs ventilations), règles, lignes de budget, échéances (et leurs rattachements), fiches
@@ -933,7 +938,10 @@ function deplacerSousCategorie(cat, ancien, cible, nouveau){
   const cats = LIVRE.parametres.categories;
   // Comparaison en texte : la liste déroulante rend « true » là où le livre a pu garder le booléen true.
   const meme = s => s != null && String(s) === String(ancien);
-  if (!cat || !ancien || !cible || !nouveau || (cible === cat && nouveau === String(ancien)) || !(cats[cat] || []).some(meme)) return 0;
+  if (!cat || !ancien || !cible || !nouveau || (cible === cat && nouveau === String(ancien))) return 0;
+  // Sous-catégorie absente de la liste des réglages mais employée (ligne de budget importée…) : traitée aussi
+  if (!(cats[cat] || []).some(meme) && !sousCategoriesEmployees().has(cat + "|" + String(ancien))) return 0;
+  if (!cats[cat]) cats[cat] = [];
   const n = parcourirCategories((y, c) => {
     let touche = false;
     if (c === cat && meme(y.sousCategorie)){ y.categorie = cible; y.sousCategorie = nouveau; touche = true; }
@@ -5766,7 +5774,11 @@ function reglagesCategories(c){
       h("button", {class: "mini discret", onclick: () => dialogueDeplacerSousCategorie()}, "Déplacer une sous-catégorie…"),
       h("button", {class: "mini discret", onclick: () => dialogueSupprimerCategorie()}, "Supprimer une catégorie vide…"))));
 }
-const optionsSousCategories = () => Object.entries(LIVRE.parametres.categories).flatMap(([c, ss]) => ss.map(s => [c + "|" + s, c + " › " + s]));
+const optionsSousCategories = () => {
+  const m = new Map(Object.entries(LIVRE.parametres.categories).flatMap(([c, ss]) => ss.map(s => [c + "|" + s, c + " › " + s])));
+  for (const [k, [c, s]] of sousCategoriesEmployees()) if (!m.has(k)) m.set(k, c + " › " + s);
+  return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], "fr"));
+};
 async function dialogueDeplacerSousCategorie(){
   const options = optionsSousCategories();
   const choix = selection(options, options[0]?.[0] || "");
@@ -6610,6 +6622,14 @@ async function autotest(){
           const td = tableauBudget(bd, 2027, 4, 4, "").filter(x => x.categorie === "Énergie essai");
           v("budget : deux lignes de même nom réunies, réalisé compté une fois", [td.length, td[0].budget, td[0].realise], [1, 300, 100]);
           supprimer("operations", od.id);
+        }
+        {
+          const be = enregistrer("budgets", {annee: 2031, nom: "Essai emplois", lignes: [{id: "lb-essai-e", categorie: "Énergie essai 2", sousCategorie: "Électricité – Ville", nature: "Courante", annuel: 100}]});
+          const absente = !(LIVRE.parametres.categories["Énergie essai 2"] || []).includes("Électricité – Ville");
+          const vue = sousCategoriesEmployees().has("Énergie essai 2|Électricité – Ville");
+          renommerSousCategorie("Énergie essai 2", "Électricité – Ville", "Électricité et gaz – Ville");
+          v("catégories : sous-catégorie employée mais absente des réglages, proposée et renommée", [absente, vue, obtenir("budgets", be.id).lignes[0].sousCategorie], [true, true, "Électricité et gaz – Ville"]);
+          supprimer("budgets", be.id); delete LIVRE.parametres.categories["Énergie essai 2"];
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);

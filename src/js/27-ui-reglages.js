@@ -111,7 +111,11 @@ function reglagesCategories(c){
       h("button", {class: "mini discret", onclick: () => dialogueDeplacerSousCategorie()}, "Déplacer une sous-catégorie…"),
       h("button", {class: "mini discret", onclick: () => dialogueSupprimerCategorie()}, "Supprimer une catégorie vide…"))));
 }
-const optionsSousCategories = () => Object.entries(LIVRE.parametres.categories).flatMap(([c, ss]) => ss.map(s => [c + "|" + s, c + " › " + s]));
+const optionsSousCategories = () => {
+  const m = new Map(Object.entries(LIVRE.parametres.categories).flatMap(([c, ss]) => ss.map(s => [c + "|" + s, c + " › " + s])));
+  for (const [k, [c, s]] of sousCategoriesEmployees()) if (!m.has(k)) m.set(k, c + " › " + s);
+  return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], "fr"));
+};
 async function dialogueDeplacerSousCategorie(){
   const options = optionsSousCategories();
   const choix = selection(options, options[0]?.[0] || "");

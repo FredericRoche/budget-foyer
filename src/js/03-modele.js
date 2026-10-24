@@ -151,6 +151,11 @@ function parcourirCategories(f, sansEnregistrer){
   return n;
 }
 /* Nombre d'enregistrements rattachés à une catégorie (statistiques des fournisseurs non comprises). */
+function sousCategoriesEmployees(){
+  const r = new Map();
+  parcourirCategories((y, c) => { if (c && y.sousCategorie != null && String(y.sousCategorie) !== "") r.set(c + "|" + String(y.sousCategorie), [c, String(y.sousCategorie)]); return false; }, true);
+  return r;
+}
 function usagesCategorie(cat){ return parcourirCategories((y, c) => c === cat, true); }
 /* Déplace une sous-catégorie partout, vers la même catégorie (renommage) ou une autre : liste des catégories,
    opérations (et leurs ventilations), règles, lignes de budget, échéances (et leurs rattachements), fiches
@@ -162,7 +167,10 @@ function deplacerSousCategorie(cat, ancien, cible, nouveau){
   const cats = LIVRE.parametres.categories;
   // Comparaison en texte : la liste déroulante rend « true » là où le livre a pu garder le booléen true.
   const meme = s => s != null && String(s) === String(ancien);
-  if (!cat || !ancien || !cible || !nouveau || (cible === cat && nouveau === String(ancien)) || !(cats[cat] || []).some(meme)) return 0;
+  if (!cat || !ancien || !cible || !nouveau || (cible === cat && nouveau === String(ancien))) return 0;
+  // Sous-catégorie absente de la liste des réglages mais employée (ligne de budget importée…) : traitée aussi
+  if (!(cats[cat] || []).some(meme) && !sousCategoriesEmployees().has(cat + "|" + String(ancien))) return 0;
+  if (!cats[cat]) cats[cat] = [];
   const n = parcourirCategories((y, c) => {
     let touche = false;
     if (c === cat && meme(y.sousCategorie)){ y.categorie = cible; y.sousCategorie = nouveau; touche = true; }

@@ -225,6 +225,14 @@ async function autotest(){
           v("budget : deux lignes de même nom réunies, réalisé compté une fois", [td.length, td[0].budget, td[0].realise], [1, 300, 100]);
           supprimer("operations", od.id);
         }
+        {
+          const be = enregistrer("budgets", {annee: 2031, nom: "Essai emplois", lignes: [{id: "lb-essai-e", categorie: "Énergie essai 2", sousCategorie: "Électricité – Ville", nature: "Courante", annuel: 100}]});
+          const absente = !(LIVRE.parametres.categories["Énergie essai 2"] || []).includes("Électricité – Ville");
+          const vue = sousCategoriesEmployees().has("Énergie essai 2|Électricité – Ville");
+          renommerSousCategorie("Énergie essai 2", "Électricité – Ville", "Électricité et gaz – Ville");
+          v("catégories : sous-catégorie employée mais absente des réglages, proposée et renommée", [absente, vue, obtenir("budgets", be.id).lignes[0].sousCategorie], [true, true, "Électricité et gaz – Ville"]);
+          supprimer("budgets", be.id); delete LIVRE.parametres.categories["Énergie essai 2"];
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }
