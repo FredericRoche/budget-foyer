@@ -234,6 +234,15 @@ async function autotest(){
           supprimer("budgets", be.id); delete LIVRE.parametres.categories["Énergie essai 2"];
         }
         v("synthèse par site : type de la ligne (choix, ancienne case, catégorie)", [typeSiteLigne({site: "site"}, "Voiture"), typeSiteLigne({logement: true}, "Assurances"), typeSiteLigne(null, "Logement"), typeSiteLigne({}, "Alimentation")], ["site", "logement", "logement", "foyer"]);
+        {
+          const avant = ETAT_ECRAN.budget; ETAT_ECRAN.budget = {mois: "2031-03", budget: "bx-essai-inexistant"};
+          const memeObjet = selectionBudget() === ETAT_ECRAN.budget;
+          v("coût par site : même mois et même budget que Budget et réalisé", [memeObjet, moisCourant(selectionBudget()), budgetChoisi(selectionBudget(), 2031)?.id || null], [true, "2031-03", budgetActif(2031)?.id || null]);
+          if (avant) ETAT_ECRAN.budget = avant; else delete ETAT_ECRAN.budget;
+        }
+        v("facturette : le commerçant suit la ligne « LE jj/mm », pas une lecture parasite en tête", [
+          extraireTicket("prete\nCARTE BANCAIRE\nCREDIT MUTUEL\nA0000000421010\nCB\nLE 17/10/26 A 15:20:37\nBIJOUTERIE ESSAI\nVille\n26400\n############7998\nMONTANT= 49,00 EUR\nDEBIT\nTICKET CLIENT\nA CONSERVER").enseigne,
+          extraireTicket("prete\nCARTE BANCAIRE\nFOURNIL ESSAI\nMONTANT 3,20 EUR\nTICKET CLIENT").enseigne], ["BIJOUTERIE ESSAI", "FOURNIL ESSAI"]);
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

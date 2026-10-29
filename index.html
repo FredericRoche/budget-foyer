@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-HvpvGdfeLFIG2OFHWLeXRtRUU5TT6VEeU6ifng9NOLE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-P0ttFqVVTyvqPHfe65q49JwbDlXiicQEGbNRgPHI6Fs=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-24.1435";
+const VERSION_APP = "2026-10-29.2305";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2969,9 +2969,19 @@ function extraireTicket(texte){
   }
   /* Raison sociale et enseigne : premières lignes significatives */
   const ignorer = /BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
-  const tete = lignes.slice(0, 8).filter((l, i) => /[A-Za-z]{3}/.test(l) && !ignorer.test(N[lignes.indexOf(l)]) && !estBanqueTerminal(l) && nomPlausible(l) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[lignes.indexOf(l)]) && !montantsDe(l).length && l.length <= 40);
+  const nomPossible = i => /[A-Za-z]{3}/.test(lignes[i]) && !ignorer.test(N[i]) && !estBanqueTerminal(lignes[i]) && nomPlausible(lignes[i]) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[i]) && !montantsDe(lignes[i]).length && lignes[i].length <= 40;
+  const tete = lignes.slice(0, 8).filter((l, i) => nomPossible(i));
+  /* Facturette CB : le commerçant suit la ligne « LE jj/mm/aa A hh:mm » ; ce qui précède (banque, AID, broderie
+     de la nappe lue avec le ticket) est écarté. À défaut de cette ligne, une ligne en capitales est préférée. */
+  let nomFacturette = "";
+  if (res.type === "facturette"){
+    const iLe = N.findIndex(l => /^LE \d{1,2} ?[\/.] ?\d{1,2}/.test(l));
+    if (iLe >= 0) for (let i = iLe + 1; i < Math.min(lignes.length, iLe + 4) && !nomFacturette; i++) if (nomPossible(i)) nomFacturette = lignes[i];
+    const capitales = l => { const x = (l.match(/[A-Za-z]/g) || []); return x.length && x.filter(ch => ch === ch.toUpperCase()).length / x.length >= 0.8; };
+    if (!nomFacturette) nomFacturette = tete.find(capitales) || "";
+  }
   const forme = lignes.find(l => /\b(SARL|SAS|SASU|EURL|SA|SNC|SCP|SELARL)\b/i.test(l));
-  res.enseigne = tete[0] || "";
+  res.enseigne = nomFacturette || tete[0] || "";
   res.raisonSociale = forme ? forme.replace(/\s+(CAPITAL|AU CAPITAL|RCS).*$/i, "").trim() : res.enseigne;
   res.confiance.commercant = forme ? "lu" : "à vérifier";
   return res;
@@ -5207,17 +5217,24 @@ async function fusionDialogue(){
 /* ================= Budget et réalisé ================= */
 // Dépassement : réalisé au-delà de 10 % et de 50 € d'une ligne de dépense ; une ligne de crédit (budget négatif : points, remboursements) n'est jamais en dépassement.
 function postesEnDepassement(lignes){ return lignes.filter(l => l.budget > 0 && l.realise > l.budget * 1.1 && l.realise - l.budget > 50); }
+/* Mois et budget choisis : communs à « Budget et réalisé » et à « Coût par site » (état de l'écran budget),
+   pour que la synthèse montre toujours le budget dont on modifie les lignes. */
+function selectionBudget(){ return ETAT_ECRAN.budget || (ETAT_ECRAN.budget = {}); }
+function budgetChoisi(sel, an){ return (sel.budget && obtenir("budgets", sel.budget)?.annee === an) ? obtenir("budgets", sel.budget) : budgetActif(an); }
+function selecteurBudget(sel, an, budget){
+  const budgets = vivants("budgets").filter(b => b.annee === an);
+  return budgets.length > 1 ? selection(budgets.map(b => [b.id, b.nom]), budget?.id, {onchange: e => { sel.budget = e.target.value; rafraichirEcran(); }}) : null;
+}
 declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
   const m = moisCourant(etat); const an = +m.slice(0, 4), mo = +m.slice(5, 7);
-  const budgets = vivants("budgets").filter(b => b.annee === an);
-  const budget = (etat.budget && obtenir("budgets", etat.budget)?.annee === an) ? obtenir("budgets", etat.budget) : budgetActif(an);
+  const budget = budgetChoisi(etat, an);
   const periode = etat.periode || "mois"; const lieu = etat.lieu || "";
   const [d1, d2] = periode === "mois" ? [mo, mo] : periode === "cumul" ? [1, mo] : [1, 12];
   c.appendChild(entete("Budget et réalisé", budget ? budget.nom + (budget.fige ? " · version figée" : "") + (budget.debut ? " · à partir du " + dateFr(budget.debut) : "") : "Aucun budget pour " + an, [
     segments([["", "Tous"], ...LIVRE.parametres.lieux.map(l => [l, l])], lieu, v => { etat.lieu = v; rafraichirEcran(); }),
     segments([["mois", MOIS_LONG[mo - 1]], ["cumul", "Cumul au " + dateCourte(finDeMois(m + "-01"))], ["annee", "Année " + an]], periode, v => { etat.periode = v; rafraichirEcran(); }),
     selecteurMois(etat, rafraichirEcran),
-    budgets.length > 1 ? selection(budgets.map(b => [b.id, b.nom]), budget?.id, {onchange: e => { etat.budget = e.target.value; rafraichirEcran(); }}) : null,
+    selecteurBudget(etat, an, budget),
     budget ? h("button", {class: "discret", onclick: () => exporterBudget(budget, an, lieu)}, "Exporter en Excel") : null,
     budget ? h("button", {class: "discret", onclick: () => imprimerBudget(budget, an, d1, d2, lieu, periode)}, "Version imprimable") : null,
     budget && !budget.fige ? h("button", {class: "discret", onclick: () => editerLigne(budget, null)}, "Ajouter une ligne") : null,
@@ -5306,13 +5323,14 @@ function libellePeriode(an, d1, d2, periode){
   return periode === "annee" || (d1 === 1 && d2 === 12) ? "année " + an : periode === "cumul" ? "du 1er janvier au " + dateFr(finDeMois(an + "-" + pad2(d2) + "-01")) : MOIS_LONG[d1 - 1] + " " + an;
 }
 declarerEcran("sites", {titre: "Coût par site", rendre(c, etat){
-  const m = moisCourant(etat); const an = +m.slice(0, 4), mo = +m.slice(5, 7);
-  const budget = (etat.budget && obtenir("budgets", etat.budget)?.annee === an) ? obtenir("budgets", etat.budget) : budgetActif(an);
+  const sel = selectionBudget();
+  const m = moisCourant(sel); const an = +m.slice(0, 4), mo = +m.slice(5, 7);
+  const budget = budgetChoisi(sel, an);
   const periode = etat.periode || "annee";
   const [d1, d2] = periode === "mois" ? [mo, mo] : periode === "cumul" ? [1, mo] : [1, 12];
   c.appendChild(entete("Coût par site", budget ? budget.nom + " · chaque lieu, poste par poste" : "Aucun budget pour " + an, [
     segments([["mois", MOIS_LONG[mo - 1]], ["cumul", "Cumul au " + dateCourte(finDeMois(m + "-01"))], ["annee", "Année " + an]], periode, v => { etat.periode = v; rafraichirEcran(); }),
-    selecteurMois(etat, rafraichirEcran)]));
+    selecteurMois(sel, rafraichirEcran), selecteurBudget(sel, an, budget)]));
   if (!budget){ c.appendChild(h("p", {class: "vide"}, "Aucun budget pour " + an + ".")); return; }
   vueParLieu(c, budget, an, d1, d2, periode);
 }});
@@ -5324,7 +5342,8 @@ function vueParLieu(c, budget, an, d1, d2, periode){
   c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("button", {class: "discret", onclick: () => imprimerCoutParSite(budget, an, d1, d2, periode)}, "Version imprimable")));
   c.appendChild(h("div", {class: "tableau"}, tableCoutParSite(t, false)));
   c.appendChild(h("p", {class: "note"}, "Budget et réalisé de la période (" + libellePeriode(an, d1, d2, periode) + "). Une dépense sans lieu précis suit la répartition de sa ligne de budget ; une dépense qui porte un lieu le garde. " +
-    "Chaque ligne de budget se range en coût du logement, autre coût propre au site ou dépense du foyer (Budget et réalisé › Modifier la ligne) ; seules les deux premières entrent dans la synthèse."));
+    "Chaque ligne de budget se range en coût du logement, autre coût propre au site ou dépense du foyer (Budget et réalisé › Modifier la ligne) ; seules les deux premières entrent dans la synthèse. " +
+    "Mois et budget sont les mêmes que dans Budget et réalisé : une ligne modifiée là apparaît ici."));
 }
 function imprimerCoutParSite(budget, an, d1, d2, periode){
   const t = tableauParLieu(budget, an, d1, d2);
@@ -5353,6 +5372,7 @@ async function editerLigne(budget, ligne){
   const habituel = cpt && l.categorie ? joursHabituels(cpt.id, aujourdhui()).get(cleLigne(l.categorie, l.sousCategorie)) : null;
   const jour = h("input", {type: "text", inputmode: "numeric", value: l.jour ? String(l.jour) : "", style: {width: "5rem"}, placeholder: habituel ? String(habituel) : "—"});
   const ok = await dialogue({titre: ligne ? "Modifier la ligne" : "Nouvelle ligne de budget", large: true, corps: h("div", null,
+    h("p", {class: "note", style: {marginTop: 0}}, "Budget modifié : " + budget.nom + " (" + budget.annee + ")" + (budgetActif(budget.annee)?.id === budget.id ? "" : " — ce n'est pas le budget actif de l'année")),
     h("div", {class: "grille-champs"}, champ("Catégorie", cat), champ("Nature", nat), champ("Montant annuel", annuel)),
     h("label", null, "Répartition par lieu (%)"), h("div", {class: "outils", style: {marginBottom: ".6rem"}}, lieux.map((lx, i) => h("span", null, lx + " ", reps[i]))),
     champ("Synthèse « Coût par site »", typeS, "Coût du logement ou autre coût propre au site : comptés par site. Dépense du foyer (alimentation, habillement…) : hors synthèse."),
@@ -6682,6 +6702,15 @@ async function autotest(){
           supprimer("budgets", be.id); delete LIVRE.parametres.categories["Énergie essai 2"];
         }
         v("synthèse par site : type de la ligne (choix, ancienne case, catégorie)", [typeSiteLigne({site: "site"}, "Voiture"), typeSiteLigne({logement: true}, "Assurances"), typeSiteLigne(null, "Logement"), typeSiteLigne({}, "Alimentation")], ["site", "logement", "logement", "foyer"]);
+        {
+          const avant = ETAT_ECRAN.budget; ETAT_ECRAN.budget = {mois: "2031-03", budget: "bx-essai-inexistant"};
+          const memeObjet = selectionBudget() === ETAT_ECRAN.budget;
+          v("coût par site : même mois et même budget que Budget et réalisé", [memeObjet, moisCourant(selectionBudget()), budgetChoisi(selectionBudget(), 2031)?.id || null], [true, "2031-03", budgetActif(2031)?.id || null]);
+          if (avant) ETAT_ECRAN.budget = avant; else delete ETAT_ECRAN.budget;
+        }
+        v("facturette : le commerçant suit la ligne « LE jj/mm », pas une lecture parasite en tête", [
+          extraireTicket("prete\nCARTE BANCAIRE\nCREDIT MUTUEL\nA0000000421010\nCB\nLE 17/10/26 A 15:20:37\nBIJOUTERIE ESSAI\nVille\n26400\n############7998\nMONTANT= 49,00 EUR\nDEBIT\nTICKET CLIENT\nA CONSERVER").enseigne,
+          extraireTicket("prete\nCARTE BANCAIRE\nFOURNIL ESSAI\nMONTANT 3,20 EUR\nTICKET CLIENT").enseigne], ["BIJOUTERIE ESSAI", "FOURNIL ESSAI"]);
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

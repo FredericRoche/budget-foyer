@@ -1,17 +1,24 @@
 /* ================= Budget et réalisé ================= */
 // Dépassement : réalisé au-delà de 10 % et de 50 € d'une ligne de dépense ; une ligne de crédit (budget négatif : points, remboursements) n'est jamais en dépassement.
 function postesEnDepassement(lignes){ return lignes.filter(l => l.budget > 0 && l.realise > l.budget * 1.1 && l.realise - l.budget > 50); }
+/* Mois et budget choisis : communs à « Budget et réalisé » et à « Coût par site » (état de l'écran budget),
+   pour que la synthèse montre toujours le budget dont on modifie les lignes. */
+function selectionBudget(){ return ETAT_ECRAN.budget || (ETAT_ECRAN.budget = {}); }
+function budgetChoisi(sel, an){ return (sel.budget && obtenir("budgets", sel.budget)?.annee === an) ? obtenir("budgets", sel.budget) : budgetActif(an); }
+function selecteurBudget(sel, an, budget){
+  const budgets = vivants("budgets").filter(b => b.annee === an);
+  return budgets.length > 1 ? selection(budgets.map(b => [b.id, b.nom]), budget?.id, {onchange: e => { sel.budget = e.target.value; rafraichirEcran(); }}) : null;
+}
 declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
   const m = moisCourant(etat); const an = +m.slice(0, 4), mo = +m.slice(5, 7);
-  const budgets = vivants("budgets").filter(b => b.annee === an);
-  const budget = (etat.budget && obtenir("budgets", etat.budget)?.annee === an) ? obtenir("budgets", etat.budget) : budgetActif(an);
+  const budget = budgetChoisi(etat, an);
   const periode = etat.periode || "mois"; const lieu = etat.lieu || "";
   const [d1, d2] = periode === "mois" ? [mo, mo] : periode === "cumul" ? [1, mo] : [1, 12];
   c.appendChild(entete("Budget et réalisé", budget ? budget.nom + (budget.fige ? " · version figée" : "") + (budget.debut ? " · à partir du " + dateFr(budget.debut) : "") : "Aucun budget pour " + an, [
     segments([["", "Tous"], ...LIVRE.parametres.lieux.map(l => [l, l])], lieu, v => { etat.lieu = v; rafraichirEcran(); }),
     segments([["mois", MOIS_LONG[mo - 1]], ["cumul", "Cumul au " + dateCourte(finDeMois(m + "-01"))], ["annee", "Année " + an]], periode, v => { etat.periode = v; rafraichirEcran(); }),
     selecteurMois(etat, rafraichirEcran),
-    budgets.length > 1 ? selection(budgets.map(b => [b.id, b.nom]), budget?.id, {onchange: e => { etat.budget = e.target.value; rafraichirEcran(); }}) : null,
+    selecteurBudget(etat, an, budget),
     budget ? h("button", {class: "discret", onclick: () => exporterBudget(budget, an, lieu)}, "Exporter en Excel") : null,
     budget ? h("button", {class: "discret", onclick: () => imprimerBudget(budget, an, d1, d2, lieu, periode)}, "Version imprimable") : null,
     budget && !budget.fige ? h("button", {class: "discret", onclick: () => editerLigne(budget, null)}, "Ajouter une ligne") : null,
@@ -100,13 +107,14 @@ function libellePeriode(an, d1, d2, periode){
   return periode === "annee" || (d1 === 1 && d2 === 12) ? "année " + an : periode === "cumul" ? "du 1er janvier au " + dateFr(finDeMois(an + "-" + pad2(d2) + "-01")) : MOIS_LONG[d1 - 1] + " " + an;
 }
 declarerEcran("sites", {titre: "Coût par site", rendre(c, etat){
-  const m = moisCourant(etat); const an = +m.slice(0, 4), mo = +m.slice(5, 7);
-  const budget = (etat.budget && obtenir("budgets", etat.budget)?.annee === an) ? obtenir("budgets", etat.budget) : budgetActif(an);
+  const sel = selectionBudget();
+  const m = moisCourant(sel); const an = +m.slice(0, 4), mo = +m.slice(5, 7);
+  const budget = budgetChoisi(sel, an);
   const periode = etat.periode || "annee";
   const [d1, d2] = periode === "mois" ? [mo, mo] : periode === "cumul" ? [1, mo] : [1, 12];
   c.appendChild(entete("Coût par site", budget ? budget.nom + " · chaque lieu, poste par poste" : "Aucun budget pour " + an, [
     segments([["mois", MOIS_LONG[mo - 1]], ["cumul", "Cumul au " + dateCourte(finDeMois(m + "-01"))], ["annee", "Année " + an]], periode, v => { etat.periode = v; rafraichirEcran(); }),
-    selecteurMois(etat, rafraichirEcran)]));
+    selecteurMois(sel, rafraichirEcran), selecteurBudget(sel, an, budget)]));
   if (!budget){ c.appendChild(h("p", {class: "vide"}, "Aucun budget pour " + an + ".")); return; }
   vueParLieu(c, budget, an, d1, d2, periode);
 }});
@@ -118,7 +126,8 @@ function vueParLieu(c, budget, an, d1, d2, periode){
   c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("button", {class: "discret", onclick: () => imprimerCoutParSite(budget, an, d1, d2, periode)}, "Version imprimable")));
   c.appendChild(h("div", {class: "tableau"}, tableCoutParSite(t, false)));
   c.appendChild(h("p", {class: "note"}, "Budget et réalisé de la période (" + libellePeriode(an, d1, d2, periode) + "). Une dépense sans lieu précis suit la répartition de sa ligne de budget ; une dépense qui porte un lieu le garde. " +
-    "Chaque ligne de budget se range en coût du logement, autre coût propre au site ou dépense du foyer (Budget et réalisé › Modifier la ligne) ; seules les deux premières entrent dans la synthèse."));
+    "Chaque ligne de budget se range en coût du logement, autre coût propre au site ou dépense du foyer (Budget et réalisé › Modifier la ligne) ; seules les deux premières entrent dans la synthèse. " +
+    "Mois et budget sont les mêmes que dans Budget et réalisé : une ligne modifiée là apparaît ici."));
 }
 function imprimerCoutParSite(budget, an, d1, d2, periode){
   const t = tableauParLieu(budget, an, d1, d2);
@@ -147,6 +156,7 @@ async function editerLigne(budget, ligne){
   const habituel = cpt && l.categorie ? joursHabituels(cpt.id, aujourdhui()).get(cleLigne(l.categorie, l.sousCategorie)) : null;
   const jour = h("input", {type: "text", inputmode: "numeric", value: l.jour ? String(l.jour) : "", style: {width: "5rem"}, placeholder: habituel ? String(habituel) : "—"});
   const ok = await dialogue({titre: ligne ? "Modifier la ligne" : "Nouvelle ligne de budget", large: true, corps: h("div", null,
+    h("p", {class: "note", style: {marginTop: 0}}, "Budget modifié : " + budget.nom + " (" + budget.annee + ")" + (budgetActif(budget.annee)?.id === budget.id ? "" : " — ce n'est pas le budget actif de l'année")),
     h("div", {class: "grille-champs"}, champ("Catégorie", cat), champ("Nature", nat), champ("Montant annuel", annuel)),
     h("label", null, "Répartition par lieu (%)"), h("div", {class: "outils", style: {marginBottom: ".6rem"}}, lieux.map((lx, i) => h("span", null, lx + " ", reps[i]))),
     champ("Synthèse « Coût par site »", typeS, "Coût du logement ou autre coût propre au site : comptés par site. Dépense du foyer (alimentation, habillement…) : hors synthèse."),
