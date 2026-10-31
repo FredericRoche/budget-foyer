@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-P0ttFqVVTyvqPHfe65q49JwbDlXiicQEGbNRgPHI6Fs=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qUETcdyvQinxWckz9fewAKX3lqupxUkEMgFT0X3dRYg=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-29.2305";
+const VERSION_APP = "2026-10-31.1439";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4630,8 +4630,22 @@ const FICHIERS_IGNORES = /^(desktop\.ini|thumbs\.db|\.ds_store)$|^~\$|^\./i;
 
 async function choisirDossierImport(quoi){
   const d = await window.showDirectoryPicker({id: "bf-" + quoi, mode: "readwrite", startIn: "documents"});
+  const autre = await reglage(DOSSIERS_IMPORT[quoi === "depot" ? "archives" : "depot"].cle, null);
+  const conflit = await conflitDossiers(quoi, d, autre);
+  if (conflit) throw new Error(conflit);
   await definirReglage(DOSSIERS_IMPORT[quoi].cle, d);
   return d;
+}
+/* Le dépôt est vidé à chaque rangement : il ne doit être ni le dossier des archives, ni dedans, ni le contenir. */
+async function conflitDossiers(quoi, d, autre){
+  if (!d || !autre) return "";
+  const nom = DOSSIERS_IMPORT[quoi === "depot" ? "archives" : "depot"].libelle.toLowerCase();
+  try {
+    if (await d.isSameEntry(autre)) return "« " + d.name + " » est déjà le " + nom + " : choisissez un autre dossier.";
+    if (await autre.resolve(d)) return "« " + d.name + " » est à l'intérieur du " + nom + " (« " + autre.name + " ») : choisissez un dossier à part.";
+    if (await d.resolve(autre)) return "« " + d.name + " » contient le " + nom + " (« " + autre.name + " ») : choisissez un dossier à part.";
+  } catch (e){ console.error(e); }
+  return "";
 }
 /* Poignée du dossier, autorisation redemandée si besoin (une fois par séance dans Chrome). */
 async function dossierImport(quoi, interactif){
@@ -4733,7 +4747,11 @@ async function importerDossierDepot(){
     if (!(await confirmer("Aucun dossier de dépôt n'est désigné sur cet appareil. Le choisir maintenant (par exemple « Budget foyer\\À importer » sur le disque externe) ?", "Choisir…"))) return;
     try { depot = await choisirDossierImport("depot"); } catch (e){ if (e.name !== "AbortError") message(e.message, true); return; }
   }
-  const archives = await dossierImport("archives", true);
+  let archives = await dossierImport("archives", true);
+  if (!archives && !(await reglage(DOSSIERS_IMPORT.archives.cle, null))
+    && await confirmer("Aucun dossier des archives n'est désigné sur cet appareil : sans lui, les fichiers enregistrés resteront au dépôt. Le choisir maintenant (par exemple « FROCHE\\02 Finances du foyer » sur le disque interne) ?", "Choisir…")){
+    try { archives = await choisirDossierImport("archives"); } catch (e){ if (e.name !== "AbortError") message(e.message, true); }
+  }
   INDEX_ARCHIVES = archives ? await indexerArchives(archives) : [];
   const trouves = [];
   const parcourir = async (d, prefixe) => {
@@ -6711,6 +6729,14 @@ async function autotest(){
         v("facturette : le commerçant suit la ligne « LE jj/mm », pas une lecture parasite en tête", [
           extraireTicket("prete\nCARTE BANCAIRE\nCREDIT MUTUEL\nA0000000421010\nCB\nLE 17/10/26 A 15:20:37\nBIJOUTERIE ESSAI\nVille\n26400\n############7998\nMONTANT= 49,00 EUR\nDEBIT\nTICKET CLIENT\nA CONSERVER").enseigne,
           extraireTicket("prete\nCARTE BANCAIRE\nFOURNIL ESSAI\nMONTANT 3,20 EUR\nTICKET CLIENT").enseigne], ["BIJOUTERIE ESSAI", "FOURNIL ESSAI"]);
+        {
+          const poignee = (name, chemin) => ({name, chemin, isSameEntry: async o => o.chemin === chemin, resolve: async o => o.chemin.startsWith(chemin + "/") ? o.chemin.slice(chemin.length + 1).split("/") : null});
+          const archivesT = poignee("02 Finances", "C/FROCHE/02 Finances"), depotT = poignee("À importer", "E/Budget/À importer");
+          const r = [await conflitDossiers("depot", poignee("02 Finances", "C/FROCHE/02 Finances"), archivesT), await conflitDossiers("depot", poignee("Banque", "C/FROCHE/02 Finances/Banque"), archivesT),
+            await conflitDossiers("archives", poignee("FROCHE", "C/FROCHE"), poignee("02 Finances", "C/FROCHE/02 Finances")), await conflitDossiers("depot", depotT, archivesT)];
+          v("dossiers d'import : dépôt et archives jamais confondus ni imbriqués", r.map(x => x ? x.split(" : ")[0].replace(/«[^»]*»/g, "«»") : ""),
+            ["«» est déjà le dossier des archives", "«» est à l'intérieur du dossier des archives («»)", "«» contient le dossier de dépôt («»)", ""]);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

@@ -12,8 +12,22 @@ const FICHIERS_IGNORES = /^(desktop\.ini|thumbs\.db|\.ds_store)$|^~\$|^\./i;
 
 async function choisirDossierImport(quoi){
   const d = await window.showDirectoryPicker({id: "bf-" + quoi, mode: "readwrite", startIn: "documents"});
+  const autre = await reglage(DOSSIERS_IMPORT[quoi === "depot" ? "archives" : "depot"].cle, null);
+  const conflit = await conflitDossiers(quoi, d, autre);
+  if (conflit) throw new Error(conflit);
   await definirReglage(DOSSIERS_IMPORT[quoi].cle, d);
   return d;
+}
+/* Le dépôt est vidé à chaque rangement : il ne doit être ni le dossier des archives, ni dedans, ni le contenir. */
+async function conflitDossiers(quoi, d, autre){
+  if (!d || !autre) return "";
+  const nom = DOSSIERS_IMPORT[quoi === "depot" ? "archives" : "depot"].libelle.toLowerCase();
+  try {
+    if (await d.isSameEntry(autre)) return "« " + d.name + " » est déjà le " + nom + " : choisissez un autre dossier.";
+    if (await autre.resolve(d)) return "« " + d.name + " » est à l'intérieur du " + nom + " (« " + autre.name + " ») : choisissez un dossier à part.";
+    if (await d.resolve(autre)) return "« " + d.name + " » contient le " + nom + " (« " + autre.name + " ») : choisissez un dossier à part.";
+  } catch (e){ console.error(e); }
+  return "";
 }
 /* Poignée du dossier, autorisation redemandée si besoin (une fois par séance dans Chrome). */
 async function dossierImport(quoi, interactif){
@@ -115,7 +129,11 @@ async function importerDossierDepot(){
     if (!(await confirmer("Aucun dossier de dépôt n'est désigné sur cet appareil. Le choisir maintenant (par exemple « Budget foyer\\À importer » sur le disque externe) ?", "Choisir…"))) return;
     try { depot = await choisirDossierImport("depot"); } catch (e){ if (e.name !== "AbortError") message(e.message, true); return; }
   }
-  const archives = await dossierImport("archives", true);
+  let archives = await dossierImport("archives", true);
+  if (!archives && !(await reglage(DOSSIERS_IMPORT.archives.cle, null))
+    && await confirmer("Aucun dossier des archives n'est désigné sur cet appareil : sans lui, les fichiers enregistrés resteront au dépôt. Le choisir maintenant (par exemple « FROCHE\\02 Finances du foyer » sur le disque interne) ?", "Choisir…")){
+    try { archives = await choisirDossierImport("archives"); } catch (e){ if (e.name !== "AbortError") message(e.message, true); }
+  }
   INDEX_ARCHIVES = archives ? await indexerArchives(archives) : [];
   const trouves = [];
   const parcourir = async (d, prefixe) => {

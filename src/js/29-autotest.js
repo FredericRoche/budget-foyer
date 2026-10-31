@@ -243,6 +243,14 @@ async function autotest(){
         v("facturette : le commerçant suit la ligne « LE jj/mm », pas une lecture parasite en tête", [
           extraireTicket("prete\nCARTE BANCAIRE\nCREDIT MUTUEL\nA0000000421010\nCB\nLE 17/10/26 A 15:20:37\nBIJOUTERIE ESSAI\nVille\n26400\n############7998\nMONTANT= 49,00 EUR\nDEBIT\nTICKET CLIENT\nA CONSERVER").enseigne,
           extraireTicket("prete\nCARTE BANCAIRE\nFOURNIL ESSAI\nMONTANT 3,20 EUR\nTICKET CLIENT").enseigne], ["BIJOUTERIE ESSAI", "FOURNIL ESSAI"]);
+        {
+          const poignee = (name, chemin) => ({name, chemin, isSameEntry: async o => o.chemin === chemin, resolve: async o => o.chemin.startsWith(chemin + "/") ? o.chemin.slice(chemin.length + 1).split("/") : null});
+          const archivesT = poignee("02 Finances", "C/FROCHE/02 Finances"), depotT = poignee("À importer", "E/Budget/À importer");
+          const r = [await conflitDossiers("depot", poignee("02 Finances", "C/FROCHE/02 Finances"), archivesT), await conflitDossiers("depot", poignee("Banque", "C/FROCHE/02 Finances/Banque"), archivesT),
+            await conflitDossiers("archives", poignee("FROCHE", "C/FROCHE"), poignee("02 Finances", "C/FROCHE/02 Finances")), await conflitDossiers("depot", depotT, archivesT)];
+          v("dossiers d'import : dépôt et archives jamais confondus ni imbriqués", r.map(x => x ? x.split(" : ")[0].replace(/«[^»]*»/g, "«»") : ""),
+            ["«» est déjà le dossier des archives", "«» est à l'intérieur du dossier des archives («»)", "«» contient le dossier de dépôt («»)", ""]);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }
