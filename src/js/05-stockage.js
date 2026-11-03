@@ -122,6 +122,8 @@ const adaptateurDossier = {
    « Applications/<nom de l'application> » du OneDrive. Comptes personnels (consumers). */
 const PORTEES_GRAPH = ["Files.ReadWrite.AppFolder"];
 // Identifiant de l'application « Budget foyer » inscrite chez Microsoft : public, ce n'est pas un secret.
+// Une copie autonome le remplace par celui de sa propre inscription (outils/preparer_copie.py le vide ;
+// vide, il est demandé à la première connexion).
 const CLIENT_GRAPH_DEFAUT = "7dbf8c43-0fb3-4a77-9128-579ae0c620e6";
 const GRAPH = "https://graph.microsoft.com/v1.0/me/drive/special/approot";
 const adaptateurGraph = {

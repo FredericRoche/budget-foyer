@@ -38,6 +38,7 @@ Déposez tous les fichiers d'un coup ; chacun est reconnu.
 | Export Amex (CSV ou Excel) | Amex, relevés › Télécharger |
 | Autre compte courant (CSV) | LCL, comme le compte joint |
 | Relevés PDF (livrets, PEA, assurances-vie, retraite) | À leur arrivée ; un PDF protégé demande son mot de passe, jamais conservé |
+| Relevé d'une autre banque (CSV ou PDF) | CSV : colonnes décrites une fois, puis reconnu seul ; PDF : lignes lues puis vérifiées avant import |
 
 L'application dédoublonne (rien n'est importé deux fois), classe, rapproche les justificatifs et contrôle le solde du compte joint, factures de cartes comprises.
 

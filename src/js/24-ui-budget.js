@@ -27,7 +27,14 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
       const b = enregistrer("budgets", {annee: an + 1, nom: "Budget " + (an + 1) + " (copie de " + an + ")", fige: false, actif: true, lignes: JSON.parse(JSON.stringify(budget.lignes)).map(l => Object.assign(l, {id: "lb-" + idAleatoire(8)}))});
       etat.mois = (an + 1) + "-01"; etat.budget = b.id; rafraichirEcran();
     }}, "Copier pour " + (an + 1)) : null]));
-  if (!budget){ c.appendChild(h("p", {class: "vide"}, "Reprenez le budget depuis le classeur d'inventaire (écran Importer), ou copiez celui d'une autre année (Réglages).")); return; }
+  if (!budget){
+    const avecOps = vivants("operations").length > 0;
+    c.appendChild(h("section", {class: "carte"}, h("h2", null, "Aucun budget pour " + an),
+      h("div", {class: "outils"}, avecOps ? h("button", {class: "primaire", onclick: () => creerBudgetAnnee(etat, an, true)}, "Créer le budget " + an + " d'après les dépenses des 12 derniers mois") : null,
+        h("button", {class: avecOps ? "discret" : "primaire", onclick: () => creerBudgetAnnee(etat, an, false)}, "Créer un budget " + an + " vide")),
+      h("p", {class: "note"}, "Chaque ligne s'ajuste ensuite par « Modifier », et « Ajouter une ligne » en crée d'autres. Un budget peut aussi venir d'un plan ou d'un classeur d'inventaire (écran Importer).")));
+    return;
+  }
   const lignes = tableauBudget(budget, an, d1, d2, lieu);
   const lb = lignes.filter(l => l.ligne);
   const tb = somme(lb, l => l.budget), tr = somme(lignes, l => l.realise);
@@ -141,6 +148,24 @@ function imprimerCoutParSite(budget, an, d1, d2, periode){
   const finImp = () => { vider(z); window.removeEventListener("afterprint", finImp); };
   window.addEventListener("afterprint", finImp);
   window.print();
+}
+/* Budget d'une année créé à la main : vide, ou d'après les dépenses classées des 12 derniers mois
+   (ramenées à l'année si l'historique est plus court ; hors revenus, transferts, « Hors budget » et « À préciser »). */
+function lignesDepuisRealise(){
+  const fin = aujourdhui(), debut = isoDe(new Date(dateDe(fin).getFullYear() - 1, dateDe(fin).getMonth(), dateDe(fin).getDate() + 1));
+  const parts = partsPeriode(debut, fin, p => !horsResultat(p) && p.nature !== "Revenu" && p.categorie && !["Transfert", "À préciser"].includes(p.categorie));
+  const mois = new Set(vivants("operations").filter(o => o.date >= debut && o.date <= fin).map(o => o.date.slice(0, 7))).size || 1;
+  const m = new Map();
+  for (const p of parts){ const k = p.categorie + "|" + (p.sousCategorie || ""); const x = m.get(k) || {categorie: p.categorie, sousCategorie: p.sousCategorie || "", nature: p.nature || "Courante", total: 0}; x.total -= p.montant; m.set(k, x); }
+  return [...m.values()].map(x => ({id: "lb-" + idAleatoire(8), nature: x.nature, categorie: x.categorie, sousCategorie: x.sousCategorie, annuel: Math.round(x.total / mois * 12 / 10) * 10,
+    paiement: {compte: 1, cartes: 0, amex: 0}})).filter(l => l.annuel > 0);
+}
+async function creerBudgetAnnee(etat, an, depuisRealise){
+  const lignes = depuisRealise ? lignesDepuisRealise() : [];
+  if (depuisRealise && !lignes.length) return message("Aucune dépense classée sur les 12 derniers mois : classez d'abord les opérations (À traiter), ou créez un budget vide.", true);
+  if (!(await confirmer("Créer le budget " + an + (depuisRealise ? " avec " + lignes.length + " ligne(s) tirée(s) des dépenses des 12 derniers mois (" + euros(somme(lignes, l => l.annuel), 0) + " sur l'année)" : ", vide") + " ? Vous l'ajusterez ensuite ligne par ligne.", "Créer"))) return;
+  const b = enregistrer("budgets", {annee: an, nom: "Budget " + an, fige: false, actif: true, lignes});
+  etat.budget = b.id; rafraichirEcran();
 }
 async function editerLigne(budget, ligne){
   const l = ligne || {id: "lb-" + idAleatoire(8), nature: "Courante", categorie: "", sousCategorie: "", annuel: 0, paiement: {compte: 1, cartes: 0, amex: 0}};

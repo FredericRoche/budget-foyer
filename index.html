@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qUETcdyvQinxWckz9fewAKX3lqupxUkEMgFT0X3dRYg=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-BDNJhzcOP9+PRy5Qvt9uqsGUDql6SRxtZ4VM8aX0btk=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-31.1439";
+const VERSION_APP = "2026-11-03.1829";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1281,6 +1281,8 @@ const adaptateurDossier = {
    « Applications/<nom de l'application> » du OneDrive. Comptes personnels (consumers). */
 const PORTEES_GRAPH = ["Files.ReadWrite.AppFolder"];
 // Identifiant de l'application « Budget foyer » inscrite chez Microsoft : public, ce n'est pas un secret.
+// Une copie autonome le remplace par celui de sa propre inscription (outils/preparer_copie.py le vide ;
+// vide, il est demandé à la première connexion).
 const CLIENT_GRAPH_DEFAUT = "7dbf8c43-0fb3-4a77-9128-579ae0c620e6";
 const GRAPH = "https://graph.microsoft.com/v1.0/me/drive/special/approot";
 const adaptateurGraph = {
@@ -1910,7 +1912,10 @@ async function lireFichier(fichier, motDePasse){
     let texte;
     try { texte = await textePdf(octets, motDePasse); }
     catch (e){ if (e && (e.name === "PasswordException" || /password/i.test(e.message))) throw new PdfProtege(); throw e; }
-    return reconnaitrePdf(nom, texte, octets);
+    const r = reconnaitrePdf(nom, texte, octets);
+    // Relevé d'une banque sans lecteur dédié : lecture générale, vérifiée avant import (08b-lecture-libre.js)
+    if (r.genre === "justificatif_pdf" && ressembleReleve(texte)) return lireReleveLibrePdf(nom, octets, motDePasse, texte);
+    return r;
   }
   if (/^(jpe?g|png|heic|webp)$/.test(ext)) return {genre: "image", nom, octets, mime: fichier.type || "image/jpeg"};
   return {genre: "inconnu", nom, raison: "format non reconnu (." + ext + ")"};
@@ -1923,7 +1928,8 @@ function lireCsv(nom, texte){
   const tete = lignes[0].map(x => norm(x).trim());
   if (tete[0] === "date" && tete[1] === "description" && tete[2] === "montant") return lireAmexCsv(nom, lignes);
   if (lignes[0].length <= 5 && /^\d{2}\/\d{2}\/\d{4}$/.test(lignes[0][0]) && /\d{5} \d{6}[A-Z]/.test(lignes[0][3] || "")) return lireLcl(nom, lignes);
-  return {genre: "inconnu", nom, raison: "CSV non reconnu (ni export LCL, ni export Amex)"};
+  // Autre banque : colonnes à décrire une fois (08b-lecture-libre.js)
+  return lireCsvLibre(nom, texte);
 }
 
 /* Export LCL : 1re ligne « date ; solde ; ; n° de compte », dernière ligne idem,
@@ -2085,6 +2091,279 @@ function reconnaitrePdf(nom, texte, octets){
   return Object.assign(base, {genre: "justificatif_pdf"});
 }
 
+/* ===== 08b-lecture-libre.js ===== */
+/* ================= Relevés d'une banque sans lecteur dédié (CSV et PDF) =================
+   CSV : l'utilisateur désigne une fois les colonnes (date, libellé, montant ou débit et crédit,
+   solde facultatif) et le compte concerné. Ce « modèle » est retenu dans les paramètres du livre
+   et reconnu ensuite par la ligne d'en-tête du fichier.
+   PDF : lecture générale des lignes « date … montant », présentée pour vérification avant import.
+   Dans les deux cas, le résultat est un relevé ordinaire (genre « compte », marqué « libre »),
+   dédoublonné et classé comme les autres. Les lecteurs dédiés (LCL, Amex…) passent avant. */
+
+const RE_DATE_CELLULE = /^\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}|\d{4}-\d{2}-\d{2})\b/;
+const estDateCellule = v => RE_DATE_CELLULE.test(String(v ?? ""));
+const estMontantTexte = t => /\d[,.]\d{2}\s*(€|EUR)?\s*[-−–]?$/i.test(String(t).trim()) && /^[-−–+]?\s*[\d\s  .,']+[-−–]?\s*(€|EUR)?$/i.test(String(t).trim()) && !isNaN(lireMontant(t));
+
+/* ---------- CSV ---------- */
+function separateurProbable(texte){
+  const l = texte.split(/\r?\n/).slice(0, 15);
+  const max = c => Math.max(0, ...l.map(x => x.split(c).length - 1));
+  // Le point-virgule d'abord : la virgule sert aussi de séparateur décimal dans les fichiers français.
+  return max(";") >= 2 ? ";" : max("\t") >= 2 ? "\t" : ",";
+}
+const signatureCsv = (entete, nbCol) => entete ? "entete:" + entete.map(x => norm(x).trim()).join("|") : "colonnes:" + nbCol;
+
+function lireCsvLibre(nom, texte){
+  const lignes = analyserCSV(texte, separateurProbable(texte)).filter(l => l.some(x => String(x ?? "").trim()));
+  // Première ligne de données : la première qui porte une date ; l'en-tête, s'il existe, la précède.
+  const iDonnees = lignes.findIndex(l => l.some(estDateCellule));
+  if (iDonnees < 0) return {genre: "inconnu", nom, raison: "CSV non reconnu : aucune date trouvée"};
+  const entete = iDonnees > 0 && !lignes[iDonnees - 1].some(estDateCellule) ? lignes[iDonnees - 1].map(x => propre(x)) : null;
+  const donnees = lignes.slice(iDonnees);
+  const nbCol = Math.max(...donnees.slice(0, 20).map(l => l.length));
+  return {genre: "csv_libre", nom, entete, donnees, nbCol, signature: signatureCsv(entete, nbCol)};
+}
+function modeleCsvPour(lu){ return (LIVRE.parametres.modelesCsv || []).find(m => m.signature === lu.signature) || null; }
+const colonneChoisie = i => i !== null && i !== undefined && i !== "";
+
+/* Lignes d'un CSV lues selon un modèle : [{date, montant, libelle, solde}] dans l'ordre du fichier. */
+function lignesModeleCsv(lu, m){
+  const ops = [];
+  for (const l of lu.donnees){
+    const date = lireDate(l[m.date], m.ordre);
+    if (!date) continue;
+    let montant;
+    if (colonneChoisie(m.montant)) montant = lireMontant(l[m.montant]) * (m.inverser ? -1 : 1);
+    else {
+      const d = colonneChoisie(m.debit) ? lireMontant(l[m.debit]) : NaN, c = colonneChoisie(m.credit) ? lireMontant(l[m.credit]) : NaN;
+      montant = isNaN(d) && isNaN(c) ? NaN : (isNaN(c) ? 0 : Math.abs(c)) - (isNaN(d) ? 0 : Math.abs(d));
+    }
+    if (isNaN(montant) || !montant) continue;
+    const libelle = (m.libelle || []).filter(colonneChoisie).map(i => propre(l[i] || "")).filter(Boolean).join(" ");
+    ops.push({date, montant: Math.round(montant * 100) / 100, libelle: libelle || "(sans libellé)", solde: colonneChoisie(m.solde) ? lireMontant(l[m.solde]) : NaN});
+  }
+  return ops;
+}
+/* Relevé ordinaire tiré d'un CSV et de son modèle. */
+function releveDepuisModele(lu, m){
+  const ops = lignesModeleCsv(lu, m);
+  if (!ops.length) return {genre: "inconnu", nom: lu.nom, raison: "aucune opération lue avec le modèle « " + m.nom + " »"};
+  const dates = ops.map(o => o.date).sort();
+  const r = {genre: "compte", banque: m.nom, nom: lu.nom, numero: "", periode: {debut: dates[0], fin: dates[dates.length - 1]}, libre: true, compteId: m.compte,
+    lignes: ops.map(o => ({date: o.date, montant: o.montant, libelle: o.libelle}))};
+  // Solde : celui de la ligne la plus récente, que le fichier soit rangé du plus ancien au plus récent ou l'inverse.
+  const avecSolde = ops.filter(o => !isNaN(o.solde));
+  if (avecSolde.length){
+    const recentDabord = ops[0].date > ops[ops.length - 1].date;
+    const dernier = (recentDabord ? avecSolde[0] : avecSolde[avecSolde.length - 1]).solde;
+    r.soldeFin = dernier;
+    r.soldeDebut = (versCentimes(dernier) - somme(ops, o => versCentimes(o.montant))) / 100;
+  }
+  return r;
+}
+/* Colonnes proposées à la première rencontre d'un format. */
+function devinerModeleCsv(lu){
+  const t = (lu.entete || []).map(x => norm(x));
+  const cherche = (re, sauf) => { const i = t.findIndex((x, k) => k !== sauf && re.test(x)); return i >= 0 ? i : ""; };
+  const ex = lu.donnees[0] || [];
+  let date = cherche(/date/); if (date === "") date = ex.findIndex(estDateCellule);
+  let libelle = cherche(/libell|description|intitul/, date); if (libelle === "") libelle = cherche(/operation|detail|nature/, date);
+  if (libelle === "") { let lg = -1; ex.forEach((v, i) => { if (i !== date && String(v || "").length > lg && isNaN(lireMontant(v))){ lg = String(v || "").length; libelle = i; } }); }
+  // Ordre des dates : jour/mois sauf si un premier nombre dépasse 12 ailleurs qu'en jour
+  const premiers = lu.donnees.slice(0, 60).map(l => String(l[date] || "").match(/^(\d{1,2})[\/.\-](\d{1,2})/)).filter(Boolean);
+  const ordre = premiers.some(x => +x[2] > 12) && !premiers.some(x => +x[1] > 12) ? "mj" : "jm";
+  return {nom: "", date: String(date), libelle: [String(libelle), ""], montant: String(cherche(/montant|amount|somme/)), debit: String(cherche(/debit/)), credit: String(cherche(/credit/)),
+    solde: String(cherche(/solde|balance/)), ordre, inverser: false, compte: ""};
+}
+
+/* ---------- PDF ---------- */
+/* Un PDF ressemble à un relevé s'il compte au moins cinq lignes « date … montant ». */
+function ressembleReleve(texte){
+  return String(texte).split("\n").filter(l => /^\s*\d{1,2}[\/.]\d{1,2}([\/.]\d{2,4})?\b.*\d[,.]\d{2}\s*(€|EUR)?\s*$/i.test(l)).length >= 5;
+}
+/* Lignes d'un PDF avec la position horizontale de chaque fragment (centre), pour distinguer débit et crédit. */
+async function lignesPositionneesPdf(octets, motDePasse){
+  const pdfjs = await chargerPdfjs();
+  const doc = await pdfjs.getDocument({data: octets.slice(), password: motDePasse || undefined, isEvalSupported: false, disableFontFace: true}).promise;
+  const toutes = [];
+  for (let p = 1; p <= doc.numPages; p++){
+    const contenu = await (await doc.getPage(p)).getTextContent();
+    const lignes = new Map();
+    for (const it of contenu.items){
+      if (!it.str || !it.str.trim()) continue;
+      const y = Math.round(it.transform[5] / 2);
+      if (!lignes.has(y)) lignes.set(y, []);
+      lignes.get(y).push({x: it.transform[4] + (it.width || 0) / 2, t: propre(it.str)});
+    }
+    for (const [, l] of [...lignes.entries()].sort((a, b) => b[0] - a[0])) toutes.push(l.sort((a, b) => a.x - b.x));
+  }
+  await doc.destroy();
+  return toutes;
+}
+async function lireReleveLibrePdf(nom, octets, motDePasse, texte){
+  const lignes = await lignesPositionneesPdf(octets, motDePasse);
+  const r = analyserReleveLibre(lignes, texte);
+  return Object.assign(r, {genre: r.lignes.length ? "releve_pdf_libre" : "justificatif_pdf", nom, texte, octets});
+}
+/* Analyse pure (sans pdf.js) : testée par la suite de contrôle. lignes = [[{x, t}]] */
+function analyserReleveLibre(lignes, texte){
+  const res = {lignes: [], soldeDebut: null, soldeFin: null};
+  // Année de référence : la plus récente date complète du document (relevé de décembre lu en janvier : mois > mois de référence → année précédente)
+  const completes = [...String(texte).matchAll(/\b(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})\b/g)].map(m => m[3] + "-" + pad2(+m[2]) + "-" + pad2(+m[1])).filter(d => +d.slice(5, 7) >= 1 && +d.slice(5, 7) <= 12).sort();
+  const reference = completes[completes.length - 1] || aujourdhui();
+  const dateCourteVersIso = (j, m, a) => {
+    if (a) return lireDate(j + "/" + m + "/" + a);
+    let an = +reference.slice(0, 4); if (+m > +reference.slice(5, 7)) an--;
+    return lireDate(j + "/" + m + "/" + an);
+  };
+  let colDebit = null, colCredit = null, colSolde = null, courante = null;
+  const sensMontant = (frag) => {
+    if (/^[-−–]|[-−–]$/.test(frag.t)) return -1;
+    if (/^\+/.test(frag.t)) return 1;
+    if (colDebit !== null && colCredit !== null) return Math.abs(frag.x - colDebit) <= Math.abs(frag.x - colCredit) ? -1 : 1;
+    return 0;   // inconnu : à vérifier
+  };
+  for (const l of lignes){
+    const txt = l.map(x => x.t).join(" "), n = norm(txt);
+    // En-tête de colonnes : retenir la position de « Débit », « Crédit », « Solde »
+    const fd = l.find(x => /^debits?\b|^debit\s*\(|^montant debit/.test(norm(x.t))), fc = l.find(x => /^credits?\b|^credit\s*\(|^montant credit/.test(norm(x.t)));
+    if (fd && fc){ colDebit = fd.x; colCredit = fc.x; const fs = l.find(x => /^solde/.test(norm(x.t))); colSolde = fs ? fs.x : null; courante = null; continue; }
+    const montants = l.filter(x => estMontantTexte(x.t) && !(colSolde !== null && Math.abs(x.x - colSolde) < Math.min(Math.abs(x.x - (colDebit ?? -1e9)), Math.abs(x.x - (colCredit ?? -1e9)))));
+    if (/\b(ancien solde|solde precedent|solde initial|solde au debut|solde debut)/.test(n) && montants.length){
+      if (res.soldeDebut === null){ const f = montants[montants.length - 1]; res.soldeDebut = Math.abs(lireMontant(f.t)) * (/debiteur/.test(n) || sensMontant(f) < 0 ? -1 : 1); }
+      courante = null; continue;
+    }
+    if (/\b(nouveau solde|solde final|solde a reporter|solde en fin|solde au \d)/.test(n) && montants.length){
+      const f = montants[montants.length - 1]; res.soldeFin = Math.abs(lireMontant(f.t)) * (/debiteur/.test(n) || sensMontant(f) < 0 ? -1 : 1);
+      courante = null; continue;
+    }
+    const md = txt.match(/^\s*(\d{1,2})[\/.](\d{1,2})(?:[\/.](\d{2,4}))?\b/);
+    if (md && montants.length && !/^\s*\S+\s+(total|sous-total|report|solde)/.test(n)){
+      const date = dateCourteVersIso(md[1], md[2], md[3]);
+      if (!date){ courante = null; continue; }
+      const f = montants[montants.length - 1];
+      const sens = sensMontant(f);
+      const libelle = l.filter(x => !montants.includes(x)).map(x => x.t).join(" ")
+        .replace(/^\s*(\d{1,2}[\/.]\d{1,2}([\/.]\d{2,4})?\s*)+/, "").trim();
+      courante = {date, libelle: libelle || "(sans libellé)", montant: Math.abs(lireMontant(f.t)) * (sens || -1), sur: sens !== 0, suite: 0};
+      res.lignes.push(courante);
+      continue;
+    }
+    // Ligne de suite du libellé (sans date ni montant), deux au plus
+    if (courante && !montants.length && !md && courante.suite < 2 && !/total|solde|report|page \d/.test(n) && txt.trim().length > 1){ courante.libelle += " " + txt.trim(); courante.suite++; }
+    else if (montants.length || md) courante = null;
+  }
+  for (const x of res.lignes){ x.montant = Math.round(x.montant * 100) / 100; delete x.suite; }
+  return res;
+}
+
+/* ---------- Choix du compte d'un relevé libre ---------- */
+function choixCompteLibre(defaut){
+  const comptes = vivants("comptes").filter(c => ["courant", "livret"].includes(c.type) && c.actif !== false);
+  const sel = selection([...comptes.map(c => [c.id, c.nom]), ["__nouveau", "Nouveau compte…"]], defaut && obtenir("comptes", defaut) ? defaut : (comptes[0]?.id || "__nouveau"));
+  const nom = h("input", {type: "text", placeholder: "ex. Compte courant"});
+  const type = selection([["courant", "Compte courant"], ["livret", "Livret d'épargne"]], "courant");
+  const zone = h("div", {class: "grille-champs"}, champ("Nom du nouveau compte", nom), champ("Type", type));
+  const maj = () => { zone.hidden = sel.value !== "__nouveau"; };
+  sel.addEventListener("change", maj); maj();
+  return {elements: [champ("Compte concerné", sel), zone],
+    valide(){ if (sel.value === "__nouveau" && !nom.value.trim()){ message("Nommez le nouveau compte.", true); return false; } return true; },
+    resoudre(banque){
+      if (sel.value !== "__nouveau") return obtenir("comptes", sel.value);
+      const c = enregistrer("comptes", {nom: nom.value.trim(), type: type.value, banque: banque || "", actif: true});
+      if (c.type === "courant" && !LIVRE.parametres.compteTresorerie) modifierParametres({compteTresorerie: c.id});
+      return c;
+    }};
+}
+
+/* ---------- Fenêtre « Décrire les colonnes » (CSV) ---------- */
+async function dialogueModeleCsv(f){
+  const lu = f.brut;
+  const m0 = modeleCsvPour(lu) || devinerModeleCsv(lu);
+  const ex = lu.donnees[0] || [];
+  const options = [["", "—"], ...[...Array(lu.nbCol).keys()].map(i => [String(i), (lu.entete?.[i] || "Colonne " + (i + 1)) + (ex[i] ? " (ex. « " + String(ex[i]).slice(0, 30) + " »)" : "")])];
+  const s = cle => selection(options, String(m0[cle] ?? ""));
+  const date = s("date"), lib1 = selection(options, String(m0.libelle?.[0] ?? "")), lib2 = selection(options, String(m0.libelle?.[1] ?? ""));
+  const montant = s("montant"), debit = s("debit"), credit = s("credit"), solde = s("solde");
+  const ordre = selection([["jm", "jour/mois/année"], ["mj", "mois/jour/année"]], m0.ordre || "jm");
+  const inverser = h("input", {type: "checkbox", id: "csv-inv", checked: !!m0.inverser});
+  const banque = h("input", {type: "text", value: m0.nom || "", placeholder: "ex. Banque X, compte courant"});
+  const choix = choixCompteLibre(m0.compte);
+  const apercu = h("div", {class: "tableau"});
+  const modele = () => ({nom: banque.value.trim() || "Banque", date: date.value, libelle: [lib1.value, lib2.value], montant: montant.value, debit: debit.value, credit: credit.value,
+    solde: solde.value, ordre: ordre.value, inverser: inverser.checked});
+  const majApercu = () => {
+    const ops = colonneChoisie(date.value) ? lignesModeleCsv(lu, modele()) : [];
+    vider(apercu).appendChild(tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}], ops.slice(0, 6), {classe: "serre",
+      vide: "Aucune ligne lue : vérifiez la colonne de la date et celle du montant.", ligne: o => h("tr", null, h("td", null, dateFr(o.date)), h("td", null, o.libelle), montantCellule(o.montant))}));
+    apercu.appendChild(h("p", {class: "note"}, ops.length + " opération(s) lue(s). Les dépenses doivent apparaître en négatif."));
+  };
+  for (const el of [date, lib1, lib2, montant, debit, credit, solde, ordre, inverser]) el.addEventListener("change", majApercu);
+  majApercu();
+  const r = await dialogue({titre: "Relevé d'une autre banque : décrire les colonnes", large: true, corps: h("div", null,
+    h("p", null, "Ce fichier ne vient pas d'une banque connue de l'application. Indiquez une fois à quoi sert chaque colonne : les prochains fichiers de même forme seront reconnus d'eux-mêmes."),
+    h("div", {class: "grille-champs"}, champ("Nom de la banque ou du relevé", banque), ...choix.elements, champ("Date de l'opération", date), champ("Format des dates", ordre),
+      champ("Libellé", lib1), champ("Libellé complémentaire (facultatif)", lib2), champ("Montant (une seule colonne)", montant), champ("… ou Débit", debit), champ("… et Crédit", credit),
+      champ("Solde après l'opération (facultatif)", solde)),
+    h("div", {class: "case"}, inverser, h("label", {for: "csv-inv"}, "Les dépenses figurent en positif dans ce fichier (inverser les signes)")),
+    h("h3", null, "Aperçu"), apercu),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: null}, {libelle: "Retenir ce modèle", classe: "primaire", action: () => {
+      const m = modele();
+      if (!colonneChoisie(m.date) || !colonneChoisie(m.libelle[0]) || !(colonneChoisie(m.montant) || colonneChoisie(m.debit) || colonneChoisie(m.credit))){ message("Indiquez au moins la date, le libellé et le montant (ou débit et crédit).", true); return false; }
+      if (!lignesModeleCsv(lu, m).length){ message("Aucune opération lue avec ces colonnes.", true); return false; }
+      return choix.valide() ? m : false;
+    }}]});
+  if (!r) return;
+  const compte = choix.resoudre(r.nom);
+  const m = Object.assign({id: m0.id || "mod-" + idAleatoire(6), signature: lu.signature}, r, {compte: compte.id});
+  modifierParametres({modelesCsv: [...(LIVRE.parametres.modelesCsv || []).filter(x => x.signature !== m.signature), m]});
+  for (const autre of FICHIERS_EN_COURS.filter(x => x.brut?.genre === "csv_libre" && x.brut.signature === m.signature && x.statut !== "fait")){ autre.lu = autre.brut; preparerFichier(autre); }
+  rafraichirEcran();
+}
+
+/* ---------- Fenêtre « Vérifier les lignes » (PDF) ---------- */
+async function dialogueReleveLibrePdf(f){
+  const lu = f.brut;
+  const banque = h("input", {type: "text", placeholder: "ex. Banque X"});
+  const choix = choixCompteLibre("");
+  const lignes = lu.lignes.map(l => ({l, garde: h("input", {type: "checkbox", checked: true}), montant: h("input", {type: "text", inputmode: "decimal", value: nombre(l.montant, 2), style: {width: "7rem", textAlign: "right"}}),
+    libelle: h("input", {type: "text", value: l.libelle, style: {width: "100%"}})}));
+  const bilan = h("p", {class: "note"});
+  const majBilan = () => {
+    const ok = lignes.filter(x => x.garde.checked), total = somme(ok, x => versCentimes(lireMontant(x.montant.value) || 0));
+    let t = ok.length + " ligne(s) retenue(s), solde des mouvements " + euros(total / 100) + ".";
+    if (lu.soldeDebut !== null && lu.soldeFin !== null){
+      const ecart = versCentimes(lu.soldeFin) - versCentimes(lu.soldeDebut) - total;
+      t += Math.abs(ecart) < 2 ? " ✓ Cohérent avec les soldes du relevé (" + euros(lu.soldeDebut) + " → " + euros(lu.soldeFin) + ")." : " ⚠ Écart de " + euros(ecart / 100) + " avec les soldes du relevé (" + euros(lu.soldeDebut) + " → " + euros(lu.soldeFin) + ") : une ligne manque ou un signe est inversé.";
+      bilan.className = "note" + (Math.abs(ecart) < 2 ? "" : " neg");
+    }
+    bilan.textContent = t;
+  };
+  for (const x of lignes){ x.garde.addEventListener("change", majBilan); x.montant.addEventListener("input", majBilan); }
+  majBilan();
+  const table = h("table", {class: "serre"}, h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "Date"), h("th", null, "Libellé"), h("th", {class: "num"}, "Montant"))),
+    h("tbody", null, lignes.map(x => h("tr", {class: x.l.sur ? "" : "neg", title: x.l.sur ? "" : "Sens non déterminé : vérifiez le signe"}, h("td", null, x.garde), h("td", null, dateFr(x.l.date)), h("td", null, x.libelle), h("td", {class: "num"}, x.montant)))));
+  const r = await dialogue({titre: "Relevé PDF : vérifier les lignes lues", large: true, corps: h("div", null,
+    h("p", null, "Lecture générale d'un relevé dont la banque n'a pas de lecteur dédié. Vérifiez chaque ligne : décochez ce qui n'est pas une opération, corrigez un montant ou un signe (dépense en négatif). Les lignes en rouge ont un sens incertain."),
+    h("div", {class: "grille-champs"}, champ("Banque", banque), ...choix.elements), bilan, h("div", {class: "tableau"}, table)),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: null}, {libelle: "Importer ces lignes", classe: "primaire", action: () => {
+      const ok = lignes.filter(x => x.garde.checked).map(x => ({date: x.l.date, libelle: propre(x.libelle.value) || "(sans libellé)", montant: Math.round(lireMontant(x.montant.value) * 100) / 100}));
+      if (ok.some(o => isNaN(o.montant))){ message("Un montant est illisible.", true); return false; }
+      if (!ok.length){ message("Aucune ligne retenue.", true); return false; }
+      return choix.valide() ? ok : false;
+    }}]});
+  if (!r) return;
+  const nomBanque = banque.value.trim() || "Relevé PDF";
+  const compte = choix.resoudre(nomBanque);
+  const dates = r.map(o => o.date).sort();
+  const total = somme(r, o => versCentimes(o.montant));
+  const coherent = lu.soldeDebut !== null && lu.soldeFin !== null && Math.abs(versCentimes(lu.soldeFin) - versCentimes(lu.soldeDebut) - total) < 2;
+  f.lu = Object.assign({genre: "compte", banque: nomBanque, nom: lu.nom, numero: "", periode: {debut: dates[0], fin: dates[dates.length - 1]}, libre: true, compteId: compte.id, lignes: r},
+    coherent ? {soldeDebut: lu.soldeDebut, soldeFin: lu.soldeFin} : {});
+  preparerFichier(f);
+  rafraichirEcran();
+}
+
 /* ===== 09-import.js ===== */
 /* ================= Intégration des fichiers lus dans le livre =================
    preparer…() calcule un aperçu (nouvelles lignes, doublons écartés, contrôles)
@@ -2171,6 +2450,8 @@ function preparerReleve(lu, compte){
       : "écart de " + euros(ecart / 100) + " sur le solde : facture de cartes à importer ?"});
   }
   if (lu.genre === "carte" && lu.controle) res.controles.push(lu.controle);
+  if (lu.libre) res.controles.push(typeof lu.soldeFin === "number" && !isNaN(lu.soldeFin) ? {ok: true, texte: "solde " + euros(lu.soldeFin) + " au " + dateFr(lu.periode.fin)}
+    : {ok: true, texte: "relevé sans solde : le saisir dans Bilan et résultat (clic sur le compte)"});
   const cid = compte ? compte.id : "?";
   const emp = empreintes(cid, lignes);
   // Pour un export par carte : une ligne déjà venue de l'export du compte (compte « sans titulaire ») est réattribuée.
@@ -2211,7 +2492,7 @@ function appliquerReleve(prep){
     const emp = empreintes(nv.id, prep.cartesSansTitulaire);
     prep.cartesSansTitulaire.forEach((l, i) => { if (!idx.has(emp[i])) creerOperation(nv, Object.assign({}, l, {empreinte: emp[i]}), imp.id); });
   }
-  if (prep.lu.genre === "compte"){
+  if (prep.lu.genre === "compte" && typeof prep.lu.soldeFin === "number" && !isNaN(prep.lu.soldeFin)){
     enregistrer("soldes", {compte: prep.compte.id, date: prep.lu.periode.debut, solde: prep.lu.soldeDebut, source: prep.lu.nom, debut: true});
     enregistrer("soldes", {compte: prep.compte.id, date: prep.lu.periode.fin, solde: prep.lu.soldeFin, source: prep.lu.nom});
   }
@@ -3692,7 +3973,7 @@ function construireNavigation(){
     h("div", {class: "rubrique"}, "Comptes"), lien("operations", "Opérations"), lien("import", "Importer"),
     lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(j => j.statut === "a_rapprocher").length || null),
     lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Fournisseurs"),
-    h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), lien("sites", "Coût par site"), lien("patrimoine", "Bilan et résultat"),
+    h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), LIVRE.parametres.lieux.length > 1 ? lien("sites", "Coût par site") : null, lien("patrimoine", "Bilan et résultat"),
     lien("tresorerie", "Trésorerie", ana?.premierBas ? "!" : null, true),
     lien("epargne", "Épargne"), lien("projets", "Projets"),
     h("div", {class: "rubrique"}, "Appareil"), lien("reglages", "Réglages"),
@@ -3807,6 +4088,8 @@ function ecranChoixStockage(boite){
   const liste = h("div", {class: "choix-stockage"});
   liste.appendChild(h("button", {class: "recommande", onclick: async () => {
     const v = await reglage("graph_client", CLIENT_GRAPH_DEFAUT) || CLIENT_GRAPH_DEFAUT;
+    // Copie sans identifiant intégré (voir kit/) : le demander d'abord
+    if (!v) return ecranGraph(vider(boite));
     await definirReglage("graph_client", v); await definirReglage("adaptateur", "graph");
     try { await adaptateurGraph.initialiser(v); await adaptateurGraph.connecter(); } catch (e){ message(e.message, true); }
   }}, "OneDrive en ligne — recommandé", h("small", null, "Le livre du foyer, partagé entre les PC et le téléphone. Connexion avec le compte Microsoft du foyer.")));
@@ -4438,7 +4721,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
      h("button", {onclick: async () => { const f = await choisirFichier(".csv,.xlsx,.pdf,.json,image/*", true); if (f && f.length) await deposerFichiers(f); }}, "Choisir des fichiers…"),
      FICHIERS_EN_COURS.length ? h("button", {class: "discret", onclick: () => { FICHIERS_EN_COURS = []; rafraichirEcran(); }}, "Vider la liste") : null]));
   const depot = h("div", {class: "depot"}, h("strong", null, "Déposez ici tous les fichiers du mois d'un coup"), " (CSV, Excel, PDF) : chacun est reconnu.",
-    h("div", {class: "note"}, "Exports CSV du compte et des cartes LCL (encours), export Amex, facture des cartes LCL (PDF), relevés de livrets, PEA, assurance-vie et retraite (PDF), classeur d'inventaire, fichier de règles, photos ou PDF de justificatifs."));
+    h("div", {class: "note"}, "Exports CSV du compte et des cartes LCL (encours), export Amex, relevés CSV ou PDF d'une autre banque (colonnes décrites une fois, ou lignes vérifiées), facture des cartes LCL (PDF), relevés de livrets, PEA, assurance-vie et retraite (PDF), classeur d'inventaire, fichier de règles, photos ou PDF de justificatifs."));
   depot.addEventListener("click", async () => { const f = await choisirFichier(".csv,.xlsx,.pdf,.json,image/*", true); if (f && f.length) await deposerFichiers(f); });
   depot.addEventListener("dragover", e => { e.preventDefault(); depot.classList.add("survol"); });
   depot.addEventListener("dragleave", () => depot.classList.remove("survol"));
@@ -4454,10 +4737,13 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
         reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+        csv_libre: "CSV d'une autre banque", releve_pdf_libre: "Relevé PDF (lecture générale)",
         document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
       const controle = f.erreur ? h("span", {class: "neg"}, f.erreur) : lu.genre === "inconnu" ? h("span", {class: "neg"}, lu.raison)
+        : f.statut === "modele" ? h("span", null, "colonnes à décrire une fois")
+        : f.statut === "verifier" ? h("span", null, lu.lignes.length + " ligne(s) lue(s), à vérifier")
         : p?.controles?.length ? p.controles.map(x => h("div", {class: x.ok ? "" : "neg"}, (x.ok ? "✓ " : "⚠ ") + x.texte))
         : lu.genre === "facture_cb" && p ? h("span", {class: Math.abs(p.ecart) < 0.01 ? "" : "neg"}, (Math.abs(p.ecart) < 0.01 ? "✓ " : "⚠ écart " + euros(p.ecart) + " · ") + euros(lu.montant) + " débité le " + dateFr(lu.dateDebit))
         : lu.genre === "valorisation" ? h("span", null, euros(lu.valeur) + (f.compte ? " → " + f.compte.nom : " → compte à créer"))
@@ -4466,7 +4752,9 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       return h("tr", {class: f.statut === "fait" ? "" : ""}, h("td", {class: "petit"}, lu.nom), h("td", null, genre, f.compte ? h("span", {class: "libbanque"}, f.compte.nom) : null),
         h("td", null, periode), h("td", {class: "num"}, String(nouvelles)), h("td", {class: "petit"}, controle),
         h("td", null, f.statut === "fait" ? h("span", {class: "pos"}, "✓ enregistré") : f.statut === "pret" ? h("button", {class: "mini", onclick: () => enregistrerFichier(f)}, "Enregistrer") :
-          f.statut === "compte" ? h("button", {class: "mini primaire", onclick: () => creerCompteImport(f)}, "Créer le compte…") : ""),
+          f.statut === "compte" ? h("button", {class: "mini primaire", onclick: () => creerCompteImport(f)}, "Créer le compte…") :
+          f.statut === "modele" ? h("button", {class: "mini primaire", onclick: () => dialogueModeleCsv(f)}, "Décrire les colonnes…") :
+          f.statut === "verifier" ? h("button", {class: "mini primaire", onclick: () => dialogueReleveLibrePdf(f)}, "Vérifier les lignes…") : ""),
         avecDepot ? h("td", {class: "petit"}, celluleRangement(f)) : null);
     }}));
     const prets = FICHIERS_EN_COURS.filter(f => f.statut === "pret");
@@ -4546,8 +4834,18 @@ async function lireEtPreparer(f, motDePasse){
 function preparerFichier(f){
   const lu = f.lu;
   try {
+    // Banque sans lecteur dédié : CSV lu selon le modèle retenu, PDF à vérifier ligne à ligne
+    if (lu.genre === "csv_libre"){
+      f.brut = lu;
+      const m = modeleCsvPour(lu);
+      if (!m || !obtenir("comptes", m.compte)){ f.statut = "modele"; return; }
+      f.lu = releveDepuisModele(lu, m);
+      if (f.lu.genre === "inconnu"){ f.statut = "erreur"; return; }
+      return preparerFichier(f);
+    }
+    if (lu.genre === "releve_pdf_libre"){ f.brut = lu; f.statut = "verifier"; return; }
     if (["compte", "carte", "valorisation", "facture_cb"].includes(lu.genre)){
-      f.compte = compteDuFichier(lu);
+      f.compte = lu.compteId ? obtenir("comptes", lu.compteId) : compteDuFichier(lu);
       if (!f.compte){ f.statut = "compte"; return; }
       if (lu.genre === "facture_cb") f.prep = preparerFacture(lu, f.compte);
       else if (lu.genre !== "valorisation") f.prep = preparerReleve(lu, f.compte);
@@ -5261,7 +5559,14 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
       const b = enregistrer("budgets", {annee: an + 1, nom: "Budget " + (an + 1) + " (copie de " + an + ")", fige: false, actif: true, lignes: JSON.parse(JSON.stringify(budget.lignes)).map(l => Object.assign(l, {id: "lb-" + idAleatoire(8)}))});
       etat.mois = (an + 1) + "-01"; etat.budget = b.id; rafraichirEcran();
     }}, "Copier pour " + (an + 1)) : null]));
-  if (!budget){ c.appendChild(h("p", {class: "vide"}, "Reprenez le budget depuis le classeur d'inventaire (écran Importer), ou copiez celui d'une autre année (Réglages).")); return; }
+  if (!budget){
+    const avecOps = vivants("operations").length > 0;
+    c.appendChild(h("section", {class: "carte"}, h("h2", null, "Aucun budget pour " + an),
+      h("div", {class: "outils"}, avecOps ? h("button", {class: "primaire", onclick: () => creerBudgetAnnee(etat, an, true)}, "Créer le budget " + an + " d'après les dépenses des 12 derniers mois") : null,
+        h("button", {class: avecOps ? "discret" : "primaire", onclick: () => creerBudgetAnnee(etat, an, false)}, "Créer un budget " + an + " vide")),
+      h("p", {class: "note"}, "Chaque ligne s'ajuste ensuite par « Modifier », et « Ajouter une ligne » en crée d'autres. Un budget peut aussi venir d'un plan ou d'un classeur d'inventaire (écran Importer).")));
+    return;
+  }
   const lignes = tableauBudget(budget, an, d1, d2, lieu);
   const lb = lignes.filter(l => l.ligne);
   const tb = somme(lb, l => l.budget), tr = somme(lignes, l => l.realise);
@@ -5375,6 +5680,24 @@ function imprimerCoutParSite(budget, an, d1, d2, periode){
   const finImp = () => { vider(z); window.removeEventListener("afterprint", finImp); };
   window.addEventListener("afterprint", finImp);
   window.print();
+}
+/* Budget d'une année créé à la main : vide, ou d'après les dépenses classées des 12 derniers mois
+   (ramenées à l'année si l'historique est plus court ; hors revenus, transferts, « Hors budget » et « À préciser »). */
+function lignesDepuisRealise(){
+  const fin = aujourdhui(), debut = isoDe(new Date(dateDe(fin).getFullYear() - 1, dateDe(fin).getMonth(), dateDe(fin).getDate() + 1));
+  const parts = partsPeriode(debut, fin, p => !horsResultat(p) && p.nature !== "Revenu" && p.categorie && !["Transfert", "À préciser"].includes(p.categorie));
+  const mois = new Set(vivants("operations").filter(o => o.date >= debut && o.date <= fin).map(o => o.date.slice(0, 7))).size || 1;
+  const m = new Map();
+  for (const p of parts){ const k = p.categorie + "|" + (p.sousCategorie || ""); const x = m.get(k) || {categorie: p.categorie, sousCategorie: p.sousCategorie || "", nature: p.nature || "Courante", total: 0}; x.total -= p.montant; m.set(k, x); }
+  return [...m.values()].map(x => ({id: "lb-" + idAleatoire(8), nature: x.nature, categorie: x.categorie, sousCategorie: x.sousCategorie, annuel: Math.round(x.total / mois * 12 / 10) * 10,
+    paiement: {compte: 1, cartes: 0, amex: 0}})).filter(l => l.annuel > 0);
+}
+async function creerBudgetAnnee(etat, an, depuisRealise){
+  const lignes = depuisRealise ? lignesDepuisRealise() : [];
+  if (depuisRealise && !lignes.length) return message("Aucune dépense classée sur les 12 derniers mois : classez d'abord les opérations (À traiter), ou créez un budget vide.", true);
+  if (!(await confirmer("Créer le budget " + an + (depuisRealise ? " avec " + lignes.length + " ligne(s) tirée(s) des dépenses des 12 derniers mois (" + euros(somme(lignes, l => l.annuel), 0) + " sur l'année)" : ", vide") + " ? Vous l'ajusterez ensuite ligne par ligne.", "Créer"))) return;
+  const b = enregistrer("budgets", {annee: an, nom: "Budget " + an, fige: false, actif: true, lignes});
+  etat.budget = b.id; rafraichirEcran();
 }
 async function editerLigne(budget, ligne){
   const l = ligne || {id: "lb-" + idAleatoire(8), nature: "Courante", categorie: "", sousCategorie: "", annuel: 0, paiement: {compte: 1, cartes: 0, amex: 0}};
@@ -5625,7 +5948,20 @@ async function saisirValorisation(compte){
   const date = champDate({value: aujourdhui()});
   const valeur = h("input", {type: "text", placeholder: "ex. 612 400"});
   const corps = h("div");
-  if (compte && ["courant", "carte", "especes"].includes(compte.type)){ corps.appendChild(h("p", null, "Le solde de « " + compte.nom + " » vient des relevés importés.")); await dialogue({titre: compte.nom, corps}); return; }
+  if (compte && compte.type === "carte"){ corps.appendChild(h("p", null, "Le solde de « " + compte.nom + " » vient des relevés importés.")); await dialogue({titre: compte.nom, corps}); return; }
+  // Compte courant ou espèces : le solde vient des relevés ; s'ils n'en portent pas (banque sans lecteur dédié), il se saisit ici.
+  if (compte){
+    const soldeLu = h("input", {type: "text", placeholder: "ex. 1 250,00"});
+    const ok = await dialogue({titre: "Solde de « " + compte.nom + " »", corps: h("div", null, h("p", null, "Le solde vient d'ordinaire des relevés importés. Si les vôtres n'en portent pas, saisissez celui du relevé, en fin de journée, à une date donnée."),
+      h("div", {class: "grille-champs"}, champ("Date", date), champ("Solde en fin de journée", soldeLu))),
+      actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
+        const v = lireMontant(soldeLu.value); if (isNaN(v)){ message("Solde illisible.", true); return false; }
+        if (!dateSaisieOk(date, "Date du solde")) return false;
+        enregistrer("soldes", {compte: compte.id, date: date.value, solde: v, source: "saisie"}); return true;
+      }}]});
+    if (ok) rafraichirEcran();
+    return;
+  }
   corps.append(comptes.length ? null : h("p", {class: "neg"}, "Créez d'abord le compte (Réglages › Comptes)."), h("div", {class: "grille-champs"}, champ("Compte", sel), champ("Date", date), champ("Valeur", valeur)),
     h("p", {class: "note"}, "Plus simple : déposez le relevé PDF dans « Importer », la valeur et la date y sont lues."));
   const ok = await dialogue({titre: "Saisir une valorisation", corps, actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
@@ -5762,17 +6098,22 @@ declarerEcran("reglages", {titre: "Réglages", rendre(c, etat){
 
 function reglagesDemarrage(c){
   const fait = x => h("span", {class: x ? "pos" : "discret"}, x ? "✓ fait" : "à faire");
+  const reprise = vivants("imports").some(i => i.genre === "reprise_v7");
+  // Étapes communes à tout livre, puis étapes facultatives : affichées seulement si elles servent déjà à ce livre
   const etapes = [
     ["Choisir le stockage partagé (dossier OneDrive de ce PC ou OneDrive en ligne)", SESSION.adaptateur && SESSION.adaptateur.nom !== "local", "stockage"],
-    ["Importer les règles initiales (fichier JSON préparé hors du dépôt)", vivants("regles").length > 0, "import"],
-    ["Reprendre le classeur d'inventaire v7 (historique, budget, hypothèses)", vivants("budgets").length > 0, "import"],
-    ["Importer les relevés du mois (compte, cartes, Amex, facture des cartes)", vivants("imports").some(i => i.genre !== "reprise_v7"), "import"],
-    ["Vérifier les comptes, titulaires et le compte de trésorerie", !!LIVRE.parametres.compteTresorerie, "reglages"],
-    ["Importer les relevés de placements (livrets, PEA, assurances-vie, retraite)", vivants("valorisations").length > 0, "import"],
-    ["Confirmer les échéances proposées (pensions, loyer, travaux, voiture, cessions)", !vivants("echeances").some(e => e.aConfirmer) && vivants("echeances").length > 0, "tresorerie"],
-    ["Appairer le téléphone en saisie seule (onglet « Téléphones »)", !!LIVRE.parametres.appairageFait, "reglages"]];
+    ["Importer les relevés du mois (CSV ou PDF de la banque, écran Importer)", vivants("imports").some(i => i.genre !== "reprise_v7"), "import"],
+    ["Vérifier les comptes et le compte de trésorerie", !!LIVRE.parametres.compteTresorerie, "reglages"],
+    ["Classer les opérations proposées (écran À traiter)", vivants("operations").length > 0 && !vivants("operations").some(o => !o.verrou), "traiter"],
+    ["Établir le budget de l'année (Budget et réalisé › Créer le budget)", vivants("budgets").length > 0, "budget"],
+    vivants("regles").length ? ["Importer les règles initiales (fichier JSON préparé hors du dépôt)", true, "import"] : null,
+    reprise ? ["Reprendre le classeur d'inventaire v7 (historique, budget, hypothèses)", true, "import"] : null,
+    comptesDeType("livret", "assurance_vie", "retraite", "prevoyance", "pea", "titres").length ? ["Importer les relevés de placements (livrets, PEA, assurances-vie, retraite)", vivants("valorisations").length > 0, "import"] : null,
+    vivants("echeances").length ? ["Confirmer les échéances proposées", !vivants("echeances").some(e => e.aConfirmer), "tresorerie"] : null,
+    ["Appairer le téléphone en saisie seule, si besoin (onglet « Téléphones »)", !!LIVRE.parametres.appairageFait, "reglages"]].filter(Boolean);
   c.appendChild(h("section", {class: "carte"}, h("h2", null, "Mise en route"), h("ul", {class: "liste-traiter"},
-    etapes.map(([t, ok, ecran]) => h("li", null, h("span", null, t), h("span", null, fait(ok), " ", h("button", {class: "mini discret", onclick: () => ecran === "reglages" ? null : aller(ecran)}, "Aller")))))));
+    etapes.map(([t, ok, ecran]) => h("li", null, h("span", null, t), h("span", null, fait(ok), " ", h("button", {class: "mini discret", onclick: () => ecran === "reglages" ? null : aller(ecran)}, "Aller"))))),
+    h("p", {class: "note"}, "Les fournisseurs se découvrent au fil des imports : chaque correction de catégorie est retenue et s'applique ensuite d'elle-même. Un fichier de règles, un plan ou un classeur d'inventaire peuvent aussi être déposés dans « Importer », mais rien de cela n'est nécessaire.")));
 }
 
 function reglagesComptes(c){
@@ -5785,6 +6126,13 @@ function reglagesComptes(c){
       h("td", null, x.titulaire || ""), h("td", null, x.carte || ""), h("td", null, x.compteDebit ? libelleCompte(x.compteDebit) : ""), h("td", {class: "num"}, String(ops.get(x.id) || 0)),
       h("td", null, h("button", {class: "mini discret", onclick: () => editerCompte(x)}, "Modifier")))}));
   c.appendChild(h("p", {class: "note"}, "Les comptes sont créés à l'import du premier relevé. Indiquez le titulaire de chaque carte : il sert au rapprochement des facturettes et au suivi par personne."));
+  const modeles = LIVRE.parametres.modelesCsv || [];
+  if (modeles.length){
+    c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Relevés CSV d'autres banques"));
+    c.appendChild(tableau([{titre: "Banque"}, {titre: "Compte"}, {titre: "Colonnes"}, {titre: ""}], modeles, {classe: "serre", ligne: m => h("tr", null, h("td", null, m.nom), h("td", null, libelleCompte(m.compte)),
+      h("td", {class: "petit"}, m.signature.startsWith("entete:") ? m.signature.slice(7).split("|").join(" · ") : "sans en-tête, " + m.signature.slice(9) + " colonnes"),
+      h("td", null, h("button", {class: "mini discret", onclick: async () => { if (await confirmer("Oublier le modèle « " + m.nom + " » ? Le prochain fichier de cette forme demandera à nouveau ses colonnes. Les opérations déjà importées restent.", "Oublier")){ modifierParametres({modelesCsv: modeles.filter(x => x !== m)}); rafraichirEcran(); } }}, "Oublier")))}));
+  }
 }
 async function editerCompte(x){
   const cpt = x || {nom: "", type: "courant", actif: true};
@@ -6541,6 +6889,45 @@ async function autotest(){
     /* --- Amex CSV --- */
     const amex = lireCsv("activity.csv", 'Date,Description,Montant\n03/14/2027,RESTAURANT TEST PARIS,"84,50"\n03/20/2027,PRELEVEMENT AUTOMATIQUE,"-84,50"\n');
     v("Amex : date mm/jj et signe", [amex.lignes[0].date, amex.lignes[0].montant, amex.lignes[1].montant], ["2027-03-14", -84.5, 84.5]);
+
+    /* --- Banque sans lecteur dédié : CSV décrit une fois, PDF en lecture générale --- */
+    {
+      const csvL = ["Banque Exemple;Compte 0001;", "Relevé du 01/04/2027 au 30/04/2027;;", "", "Date opération;Libellé;Débit;Crédit;Solde",
+        "02/04/2027;PRLV EAU EXEMPLE;45,20;;954,80", "05/04/2027;VIR SALAIRE EXEMPLE;;1 500,00;2 454,80", "06/04/2027;CB BOULANGERIE TEST;3,90;;2 450,90"].join("\r\n");
+      const lb = lireCsv("releve-avril.csv", csvL);
+      v("CSV libre : reconnu, en-tête après le préambule", [lb.genre, lb.entete?.[1], lb.donnees.length], ["csv_libre", "Libellé", 3]);
+      const dv = devinerModeleCsv(lb);
+      v("CSV libre : colonnes devinées", [dv.date, dv.libelle[0], dv.debit, dv.credit, dv.solde, dv.ordre], ["0", "1", "2", "3", "4", "jm"]);
+      const cl = enregistrer("comptes", {nom: "Compte libre essai", type: "courant", banque: "Exemple", actif: true});
+      modifierParametres({modelesCsv: [Object.assign({id: "mod-essai", signature: lb.signature, nom: "Banque Exemple", compte: cl.id}, dv)]});
+      const rl = releveDepuisModele(lb, modeleCsvPour(lb));
+      v("CSV libre : montants signés (débit négatif)", rl.lignes.map(l => l.montant), [-45.2, 1500, -3.9]);
+      v("CSV libre : soldes déduits", [rl.soldeDebut, rl.soldeFin, rl.periode.fin], [1000, 2450.9, "2027-04-06"]);
+      const pl = preparerReleve(rl, cl); appliquerReleve(pl);
+      v("CSV libre : réimport sans doublon", preparerReleve(releveDepuisModele(lireCsv("x.csv", csvL), modeleCsvPour(lb)), cl).nouvelles.length, 0);
+      const inverse = lireCsv("carte.csv", "Date,Description,Amount\n04/15/2027,LIBRAIRIE TEST,12.50\n04/18/2027,CAFE TEST,3.20\n");
+      v("CSV libre : dates mois/jour devinées", devinerModeleCsv(inverse).ordre, "mj");
+      v("CSV libre : sans date → non reconnu", lireCsv("a.csv", "a;b;c\n1;2;3\n").genre, "inconnu");
+      // PDF : lignes positionnées (x = centre du fragment) comme les rend lignesPositionneesPdf
+      const L = (...xs) => xs.map(([x, t]) => ({x, t}));
+      const lignesPdf = [L([50, "RELEVÉ DE COMPTE au 30/04/2027"]), L([50, "Date"], [150, "Libellé"], [400, "Débit"], [480, "Crédit"]),
+        L([50, "ANCIEN SOLDE AU 31/03/2027"], [480, "1 000,00"]),
+        L([50, "02/04"], [150, "PRLV EAU EXEMPLE"], [400, "45,20"]), L([150, "REF 123"]),
+        L([50, "05/04"], [150, "VIR SALAIRE EXEMPLE"], [480, "1 500,00"]),
+        L([50, "06/04"], [150, "CB BOULANGERIE TEST"], [400, "3,90"]),
+        L([50, "NOUVEAU SOLDE AU 30/04/2027"], [480, "2 450,90"])];
+      const ap = analyserReleveLibre(lignesPdf, lignesPdf.map(l => l.map(x => x.t).join(" ")).join("\n"));
+      v("PDF libre : lignes, signes et suite du libellé", ap.lignes.map(l => [l.date, l.montant, l.libelle]),
+        [["2027-04-02", -45.2, "PRLV EAU EXEMPLE REF 123"], ["2027-04-05", 1500, "VIR SALAIRE EXEMPLE"], ["2027-04-06", -3.9, "CB BOULANGERIE TEST"]]);
+      v("PDF libre : soldes du relevé", [ap.soldeDebut, ap.soldeFin], [1000, 2450.9]);
+      vrai("PDF libre : ressemble à un relevé", ressembleReleve(["02/04 A 1,00", "03/04 B 2,00", "04/04 C 3,00", "05/04 D 4,00", "06/04 E 5,00"].join("\n")));
+      vrai("ticket ordinaire : pas un relevé", !ressembleReleve("BOULANGERIE TEST\n06/04/2027 10:12\nTOTAL 3,90"));
+      // Budget d'après le réalisé : seules les dépenses classées comptent
+      for (const op of vivants("operations").filter(o => o.compte === cl.id)) Object.assign(op, {categorie: /EAU/.test(op.libelle) ? "Logement" : /BOULANG/.test(op.libelle) ? "Alimentation" : "Revenus",
+        sousCategorie: /EAU/.test(op.libelle) ? "Eau" : /BOULANG/.test(op.libelle) ? "Courses" : "Rémunération", nature: /SALAIRE/.test(op.libelle) ? "Revenu" : "Courante", date: aujourdhui()});
+      const lbud = lignesDepuisRealise().filter(l => ["Eau", "Courses"].includes(l.sousCategorie));
+      vrai("budget d'après le réalisé : lignes de dépenses, sans les revenus", lbud.length === 2 && !lignesDepuisRealise().some(l => l.categorie === "Revenus"), lbud);
+    }
 
     /* --- Fenêtre de dialogue : « Annuler » ferme et rend false --- */
     {

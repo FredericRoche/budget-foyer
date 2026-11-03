@@ -186,4 +186,26 @@ pro = wb.create_sheet("Projection épargne")
 for r in [["Projection (FICTIF)"], ["Hypothèses"], ["Pensions brutes annuelles du foyer (2026)", 72000], ["Prélèvements sociaux sur les pensions", 0.1],
           ["Voiture : solde à la livraison (2026)", 30000], ["Travaux de la maison (2026)", 40000], ["Loyer actuel, charges comprises (par an)", 38400]]: pro.append(r)
 wb.save(SORTIE / "Dépenses fictives - inventaire v7.xlsx")
+# ---------------------------------------------------------------- banque sans lecteur dédié (CSV et PDF « Banque Exemple »)
+# Pour éprouver la lecture générale : colonnes décrites une fois (CSV), lignes vérifiées avant import (PDF).
+libre = [(D("2026-10-02"), -45.20, "PRLV SEPA EAU EXEMPLE"), (D("2026-10-03"), -3.90, "CB BOULANGERIE DU PORT"), (D("2026-10-05"), 1850.00, "VIR SALAIRE EMPLOYEUR EXEMPLE"),
+         (D("2026-10-07"), -620.00, "PRLV LOYER STUDIO EXEMPLE"), (D("2026-10-12"), -38.70, "CB SUPERMARCHE EXEMPLE"), (D("2026-10-15"), -19.99, "PRLV FORFAIT MOBILE EXEMPLE"),
+         (D("2026-10-21"), -12.50, "CB CINEMA EXEMPLE"), (D("2026-10-28"), -54.30, "CB SUPERMARCHE EXEMPLE")]
+eur = lambda m: f"{m:,.2f}".replace(",", " ").replace(".", ",")
+solde_libre = 1240.00
+with open(SORTIE / "releve-banque-exemple-octobre-2026.csv", "w", encoding="utf-8-sig", newline="") as f:
+    f.write("Banque Exemple - Compte courant;;;;\r\nPériode du 01/10/2026 au 31/10/2026;;;;\r\n\r\nDate opération;Libellé;Débit;Crédit;Solde\r\n")
+    s_ = solde_libre
+    for d, m, lib in libre:
+        s_ += m; f.write(f"{d.strftime('%d/%m/%Y')};{lib};{eur(-m) if m < 0 else ''};{eur(m) if m > 0 else ''};{eur(s_)}\r\n")
+c = canvas.Canvas(str(SORTIE / "RELEVE_BANQUE_EXEMPLE_2026-10.pdf"), pagesize=A4)
+c.setFont("Helvetica", 10); y = 800
+c.drawString(50, y, "BANQUE EXEMPLE - RELEVÉ DE COMPTE au 31/10/2026"); y -= 30
+for x, t in [(50, "Date"), (110, "Libellé"), (400, "Débit"), (480, "Crédit")]: c.drawString(x, y, t)
+y -= 18; c.drawString(50, y, "ANCIEN SOLDE AU 30/09/2026"); c.drawRightString(520, y, eur(solde_libre)); y -= 16
+for d, m, lib in libre:
+    c.drawString(50, y, d.strftime("%d/%m")); c.drawString(110, y, lib); c.drawRightString(440 if m < 0 else 520, y, eur(abs(m))); y -= 16
+c.drawString(50, y, "NOUVEAU SOLDE AU 31/10/2026"); c.drawRightString(520, y, eur(solde_libre + sum(m for _, m, _ in libre)))
+c.save()
+
 print("Jeu fictif écrit dans", SORTIE, "· facture des cartes de septembre :", facture_sept, "· solde final :", solde1)

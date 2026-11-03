@@ -77,7 +77,20 @@ async function saisirValorisation(compte){
   const date = champDate({value: aujourdhui()});
   const valeur = h("input", {type: "text", placeholder: "ex. 612 400"});
   const corps = h("div");
-  if (compte && ["courant", "carte", "especes"].includes(compte.type)){ corps.appendChild(h("p", null, "Le solde de « " + compte.nom + " » vient des relevés importés.")); await dialogue({titre: compte.nom, corps}); return; }
+  if (compte && compte.type === "carte"){ corps.appendChild(h("p", null, "Le solde de « " + compte.nom + " » vient des relevés importés.")); await dialogue({titre: compte.nom, corps}); return; }
+  // Compte courant ou espèces : le solde vient des relevés ; s'ils n'en portent pas (banque sans lecteur dédié), il se saisit ici.
+  if (compte){
+    const soldeLu = h("input", {type: "text", placeholder: "ex. 1 250,00"});
+    const ok = await dialogue({titre: "Solde de « " + compte.nom + " »", corps: h("div", null, h("p", null, "Le solde vient d'ordinaire des relevés importés. Si les vôtres n'en portent pas, saisissez celui du relevé, en fin de journée, à une date donnée."),
+      h("div", {class: "grille-champs"}, champ("Date", date), champ("Solde en fin de journée", soldeLu))),
+      actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
+        const v = lireMontant(soldeLu.value); if (isNaN(v)){ message("Solde illisible.", true); return false; }
+        if (!dateSaisieOk(date, "Date du solde")) return false;
+        enregistrer("soldes", {compte: compte.id, date: date.value, solde: v, source: "saisie"}); return true;
+      }}]});
+    if (ok) rafraichirEcran();
+    return;
+  }
   corps.append(comptes.length ? null : h("p", {class: "neg"}, "Créez d'abord le compte (Réglages › Comptes)."), h("div", {class: "grille-champs"}, champ("Compte", sel), champ("Date", date), champ("Valeur", valeur)),
     h("p", {class: "note"}, "Plus simple : déposez le relevé PDF dans « Importer », la valeur et la date y sont lues."));
   const ok = await dialogue({titre: "Saisir une valorisation", corps, actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {

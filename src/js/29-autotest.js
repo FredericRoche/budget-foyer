@@ -56,6 +56,45 @@ async function autotest(){
     const amex = lireCsv("activity.csv", 'Date,Description,Montant\n03/14/2027,RESTAURANT TEST PARIS,"84,50"\n03/20/2027,PRELEVEMENT AUTOMATIQUE,"-84,50"\n');
     v("Amex : date mm/jj et signe", [amex.lignes[0].date, amex.lignes[0].montant, amex.lignes[1].montant], ["2027-03-14", -84.5, 84.5]);
 
+    /* --- Banque sans lecteur dédié : CSV décrit une fois, PDF en lecture générale --- */
+    {
+      const csvL = ["Banque Exemple;Compte 0001;", "Relevé du 01/04/2027 au 30/04/2027;;", "", "Date opération;Libellé;Débit;Crédit;Solde",
+        "02/04/2027;PRLV EAU EXEMPLE;45,20;;954,80", "05/04/2027;VIR SALAIRE EXEMPLE;;1 500,00;2 454,80", "06/04/2027;CB BOULANGERIE TEST;3,90;;2 450,90"].join("\r\n");
+      const lb = lireCsv("releve-avril.csv", csvL);
+      v("CSV libre : reconnu, en-tête après le préambule", [lb.genre, lb.entete?.[1], lb.donnees.length], ["csv_libre", "Libellé", 3]);
+      const dv = devinerModeleCsv(lb);
+      v("CSV libre : colonnes devinées", [dv.date, dv.libelle[0], dv.debit, dv.credit, dv.solde, dv.ordre], ["0", "1", "2", "3", "4", "jm"]);
+      const cl = enregistrer("comptes", {nom: "Compte libre essai", type: "courant", banque: "Exemple", actif: true});
+      modifierParametres({modelesCsv: [Object.assign({id: "mod-essai", signature: lb.signature, nom: "Banque Exemple", compte: cl.id}, dv)]});
+      const rl = releveDepuisModele(lb, modeleCsvPour(lb));
+      v("CSV libre : montants signés (débit négatif)", rl.lignes.map(l => l.montant), [-45.2, 1500, -3.9]);
+      v("CSV libre : soldes déduits", [rl.soldeDebut, rl.soldeFin, rl.periode.fin], [1000, 2450.9, "2027-04-06"]);
+      const pl = preparerReleve(rl, cl); appliquerReleve(pl);
+      v("CSV libre : réimport sans doublon", preparerReleve(releveDepuisModele(lireCsv("x.csv", csvL), modeleCsvPour(lb)), cl).nouvelles.length, 0);
+      const inverse = lireCsv("carte.csv", "Date,Description,Amount\n04/15/2027,LIBRAIRIE TEST,12.50\n04/18/2027,CAFE TEST,3.20\n");
+      v("CSV libre : dates mois/jour devinées", devinerModeleCsv(inverse).ordre, "mj");
+      v("CSV libre : sans date → non reconnu", lireCsv("a.csv", "a;b;c\n1;2;3\n").genre, "inconnu");
+      // PDF : lignes positionnées (x = centre du fragment) comme les rend lignesPositionneesPdf
+      const L = (...xs) => xs.map(([x, t]) => ({x, t}));
+      const lignesPdf = [L([50, "RELEVÉ DE COMPTE au 30/04/2027"]), L([50, "Date"], [150, "Libellé"], [400, "Débit"], [480, "Crédit"]),
+        L([50, "ANCIEN SOLDE AU 31/03/2027"], [480, "1 000,00"]),
+        L([50, "02/04"], [150, "PRLV EAU EXEMPLE"], [400, "45,20"]), L([150, "REF 123"]),
+        L([50, "05/04"], [150, "VIR SALAIRE EXEMPLE"], [480, "1 500,00"]),
+        L([50, "06/04"], [150, "CB BOULANGERIE TEST"], [400, "3,90"]),
+        L([50, "NOUVEAU SOLDE AU 30/04/2027"], [480, "2 450,90"])];
+      const ap = analyserReleveLibre(lignesPdf, lignesPdf.map(l => l.map(x => x.t).join(" ")).join("\n"));
+      v("PDF libre : lignes, signes et suite du libellé", ap.lignes.map(l => [l.date, l.montant, l.libelle]),
+        [["2027-04-02", -45.2, "PRLV EAU EXEMPLE REF 123"], ["2027-04-05", 1500, "VIR SALAIRE EXEMPLE"], ["2027-04-06", -3.9, "CB BOULANGERIE TEST"]]);
+      v("PDF libre : soldes du relevé", [ap.soldeDebut, ap.soldeFin], [1000, 2450.9]);
+      vrai("PDF libre : ressemble à un relevé", ressembleReleve(["02/04 A 1,00", "03/04 B 2,00", "04/04 C 3,00", "05/04 D 4,00", "06/04 E 5,00"].join("\n")));
+      vrai("ticket ordinaire : pas un relevé", !ressembleReleve("BOULANGERIE TEST\n06/04/2027 10:12\nTOTAL 3,90"));
+      // Budget d'après le réalisé : seules les dépenses classées comptent
+      for (const op of vivants("operations").filter(o => o.compte === cl.id)) Object.assign(op, {categorie: /EAU/.test(op.libelle) ? "Logement" : /BOULANG/.test(op.libelle) ? "Alimentation" : "Revenus",
+        sousCategorie: /EAU/.test(op.libelle) ? "Eau" : /BOULANG/.test(op.libelle) ? "Courses" : "Rémunération", nature: /SALAIRE/.test(op.libelle) ? "Revenu" : "Courante", date: aujourdhui()});
+      const lbud = lignesDepuisRealise().filter(l => ["Eau", "Courses"].includes(l.sousCategorie));
+      vrai("budget d'après le réalisé : lignes de dépenses, sans les revenus", lbud.length === 2 && !lignesDepuisRealise().some(l => l.categorie === "Revenus"), lbud);
+    }
+
     /* --- Fenêtre de dialogue : « Annuler » ferme et rend false --- */
     {
       const pr = dialogue({titre: "essai", corps: h("p", null, "x"), actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "OK", classe: "primaire", valeur: true}]});

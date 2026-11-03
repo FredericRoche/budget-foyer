@@ -46,7 +46,10 @@ async function lireFichier(fichier, motDePasse){
     let texte;
     try { texte = await textePdf(octets, motDePasse); }
     catch (e){ if (e && (e.name === "PasswordException" || /password/i.test(e.message))) throw new PdfProtege(); throw e; }
-    return reconnaitrePdf(nom, texte, octets);
+    const r = reconnaitrePdf(nom, texte, octets);
+    // Relevé d'une banque sans lecteur dédié : lecture générale, vérifiée avant import (08b-lecture-libre.js)
+    if (r.genre === "justificatif_pdf" && ressembleReleve(texte)) return lireReleveLibrePdf(nom, octets, motDePasse, texte);
+    return r;
   }
   if (/^(jpe?g|png|heic|webp)$/.test(ext)) return {genre: "image", nom, octets, mime: fichier.type || "image/jpeg"};
   return {genre: "inconnu", nom, raison: "format non reconnu (." + ext + ")"};
@@ -59,7 +62,8 @@ function lireCsv(nom, texte){
   const tete = lignes[0].map(x => norm(x).trim());
   if (tete[0] === "date" && tete[1] === "description" && tete[2] === "montant") return lireAmexCsv(nom, lignes);
   if (lignes[0].length <= 5 && /^\d{2}\/\d{2}\/\d{4}$/.test(lignes[0][0]) && /\d{5} \d{6}[A-Z]/.test(lignes[0][3] || "")) return lireLcl(nom, lignes);
-  return {genre: "inconnu", nom, raison: "CSV non reconnu (ni export LCL, ni export Amex)"};
+  // Autre banque : colonnes à décrire une fois (08b-lecture-libre.js)
+  return lireCsvLibre(nom, texte);
 }
 
 /* Export LCL : 1re ligne « date ; solde ; ; n° de compte », dernière ligne idem,

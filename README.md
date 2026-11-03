@@ -19,5 +19,6 @@ Documentation : [MODE-EMPLOI.md](MODE-EMPLOI.md) · [PROCEDURE-AZURE-ET-PUBLICAT
 - Jeu fictif : `python outils/donnees_fictives.py`.
 - Captures : `python outils/captures.py URL dossier [largeur]`.
 - Contrôle avant publication : `python outils/verifier_donnees.py --tout`.
+- Copie autonome pour un proche (sans données, sans historique, sans identifiant Microsoft) : voir [kit/README.md](kit/README.md).
 
 Bibliothèques embarquées dans `vendor/` : voir [vendor/LICENCES.md](vendor/LICENCES.md).

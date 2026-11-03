@@ -11,17 +11,22 @@ declarerEcran("reglages", {titre: "Réglages", rendre(c, etat){
 
 function reglagesDemarrage(c){
   const fait = x => h("span", {class: x ? "pos" : "discret"}, x ? "✓ fait" : "à faire");
+  const reprise = vivants("imports").some(i => i.genre === "reprise_v7");
+  // Étapes communes à tout livre, puis étapes facultatives : affichées seulement si elles servent déjà à ce livre
   const etapes = [
     ["Choisir le stockage partagé (dossier OneDrive de ce PC ou OneDrive en ligne)", SESSION.adaptateur && SESSION.adaptateur.nom !== "local", "stockage"],
-    ["Importer les règles initiales (fichier JSON préparé hors du dépôt)", vivants("regles").length > 0, "import"],
-    ["Reprendre le classeur d'inventaire v7 (historique, budget, hypothèses)", vivants("budgets").length > 0, "import"],
-    ["Importer les relevés du mois (compte, cartes, Amex, facture des cartes)", vivants("imports").some(i => i.genre !== "reprise_v7"), "import"],
-    ["Vérifier les comptes, titulaires et le compte de trésorerie", !!LIVRE.parametres.compteTresorerie, "reglages"],
-    ["Importer les relevés de placements (livrets, PEA, assurances-vie, retraite)", vivants("valorisations").length > 0, "import"],
-    ["Confirmer les échéances proposées (pensions, loyer, travaux, voiture, cessions)", !vivants("echeances").some(e => e.aConfirmer) && vivants("echeances").length > 0, "tresorerie"],
-    ["Appairer le téléphone en saisie seule (onglet « Téléphones »)", !!LIVRE.parametres.appairageFait, "reglages"]];
+    ["Importer les relevés du mois (CSV ou PDF de la banque, écran Importer)", vivants("imports").some(i => i.genre !== "reprise_v7"), "import"],
+    ["Vérifier les comptes et le compte de trésorerie", !!LIVRE.parametres.compteTresorerie, "reglages"],
+    ["Classer les opérations proposées (écran À traiter)", vivants("operations").length > 0 && !vivants("operations").some(o => !o.verrou), "traiter"],
+    ["Établir le budget de l'année (Budget et réalisé › Créer le budget)", vivants("budgets").length > 0, "budget"],
+    vivants("regles").length ? ["Importer les règles initiales (fichier JSON préparé hors du dépôt)", true, "import"] : null,
+    reprise ? ["Reprendre le classeur d'inventaire v7 (historique, budget, hypothèses)", true, "import"] : null,
+    comptesDeType("livret", "assurance_vie", "retraite", "prevoyance", "pea", "titres").length ? ["Importer les relevés de placements (livrets, PEA, assurances-vie, retraite)", vivants("valorisations").length > 0, "import"] : null,
+    vivants("echeances").length ? ["Confirmer les échéances proposées", !vivants("echeances").some(e => e.aConfirmer), "tresorerie"] : null,
+    ["Appairer le téléphone en saisie seule, si besoin (onglet « Téléphones »)", !!LIVRE.parametres.appairageFait, "reglages"]].filter(Boolean);
   c.appendChild(h("section", {class: "carte"}, h("h2", null, "Mise en route"), h("ul", {class: "liste-traiter"},
-    etapes.map(([t, ok, ecran]) => h("li", null, h("span", null, t), h("span", null, fait(ok), " ", h("button", {class: "mini discret", onclick: () => ecran === "reglages" ? null : aller(ecran)}, "Aller")))))));
+    etapes.map(([t, ok, ecran]) => h("li", null, h("span", null, t), h("span", null, fait(ok), " ", h("button", {class: "mini discret", onclick: () => ecran === "reglages" ? null : aller(ecran)}, "Aller"))))),
+    h("p", {class: "note"}, "Les fournisseurs se découvrent au fil des imports : chaque correction de catégorie est retenue et s'applique ensuite d'elle-même. Un fichier de règles, un plan ou un classeur d'inventaire peuvent aussi être déposés dans « Importer », mais rien de cela n'est nécessaire.")));
 }
 
 function reglagesComptes(c){
@@ -34,6 +39,13 @@ function reglagesComptes(c){
       h("td", null, x.titulaire || ""), h("td", null, x.carte || ""), h("td", null, x.compteDebit ? libelleCompte(x.compteDebit) : ""), h("td", {class: "num"}, String(ops.get(x.id) || 0)),
       h("td", null, h("button", {class: "mini discret", onclick: () => editerCompte(x)}, "Modifier")))}));
   c.appendChild(h("p", {class: "note"}, "Les comptes sont créés à l'import du premier relevé. Indiquez le titulaire de chaque carte : il sert au rapprochement des facturettes et au suivi par personne."));
+  const modeles = LIVRE.parametres.modelesCsv || [];
+  if (modeles.length){
+    c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Relevés CSV d'autres banques"));
+    c.appendChild(tableau([{titre: "Banque"}, {titre: "Compte"}, {titre: "Colonnes"}, {titre: ""}], modeles, {classe: "serre", ligne: m => h("tr", null, h("td", null, m.nom), h("td", null, libelleCompte(m.compte)),
+      h("td", {class: "petit"}, m.signature.startsWith("entete:") ? m.signature.slice(7).split("|").join(" · ") : "sans en-tête, " + m.signature.slice(9) + " colonnes"),
+      h("td", null, h("button", {class: "mini discret", onclick: async () => { if (await confirmer("Oublier le modèle « " + m.nom + " » ? Le prochain fichier de cette forme demandera à nouveau ses colonnes. Les opérations déjà importées restent.", "Oublier")){ modifierParametres({modelesCsv: modeles.filter(x => x !== m)}); rafraichirEcran(); } }}, "Oublier")))}));
+  }
 }
 async function editerCompte(x){
   const cpt = x || {nom: "", type: "courant", actif: true};

@@ -67,6 +67,8 @@ function ecranChoixStockage(boite){
   const liste = h("div", {class: "choix-stockage"});
   liste.appendChild(h("button", {class: "recommande", onclick: async () => {
     const v = await reglage("graph_client", CLIENT_GRAPH_DEFAUT) || CLIENT_GRAPH_DEFAUT;
+    // Copie sans identifiant intégré (voir kit/) : le demander d'abord
+    if (!v) return ecranGraph(vider(boite));
     await definirReglage("graph_client", v); await definirReglage("adaptateur", "graph");
     try { await adaptateurGraph.initialiser(v); await adaptateurGraph.connecter(); } catch (e){ message(e.message, true); }
   }}, "OneDrive en ligne — recommandé", h("small", null, "Le livre du foyer, partagé entre les PC et le téléphone. Connexion avec le compte Microsoft du foyer.")));

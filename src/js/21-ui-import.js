@@ -7,7 +7,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
      h("button", {onclick: async () => { const f = await choisirFichier(".csv,.xlsx,.pdf,.json,image/*", true); if (f && f.length) await deposerFichiers(f); }}, "Choisir des fichiers…"),
      FICHIERS_EN_COURS.length ? h("button", {class: "discret", onclick: () => { FICHIERS_EN_COURS = []; rafraichirEcran(); }}, "Vider la liste") : null]));
   const depot = h("div", {class: "depot"}, h("strong", null, "Déposez ici tous les fichiers du mois d'un coup"), " (CSV, Excel, PDF) : chacun est reconnu.",
-    h("div", {class: "note"}, "Exports CSV du compte et des cartes LCL (encours), export Amex, facture des cartes LCL (PDF), relevés de livrets, PEA, assurance-vie et retraite (PDF), classeur d'inventaire, fichier de règles, photos ou PDF de justificatifs."));
+    h("div", {class: "note"}, "Exports CSV du compte et des cartes LCL (encours), export Amex, relevés CSV ou PDF d'une autre banque (colonnes décrites une fois, ou lignes vérifiées), facture des cartes LCL (PDF), relevés de livrets, PEA, assurance-vie et retraite (PDF), classeur d'inventaire, fichier de règles, photos ou PDF de justificatifs."));
   depot.addEventListener("click", async () => { const f = await choisirFichier(".csv,.xlsx,.pdf,.json,image/*", true); if (f && f.length) await deposerFichiers(f); });
   depot.addEventListener("dragover", e => { e.preventDefault(); depot.classList.add("survol"); });
   depot.addEventListener("dragleave", () => depot.classList.remove("survol"));
@@ -23,10 +23,13 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
         reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+        csv_libre: "CSV d'une autre banque", releve_pdf_libre: "Relevé PDF (lecture générale)",
         document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
       const controle = f.erreur ? h("span", {class: "neg"}, f.erreur) : lu.genre === "inconnu" ? h("span", {class: "neg"}, lu.raison)
+        : f.statut === "modele" ? h("span", null, "colonnes à décrire une fois")
+        : f.statut === "verifier" ? h("span", null, lu.lignes.length + " ligne(s) lue(s), à vérifier")
         : p?.controles?.length ? p.controles.map(x => h("div", {class: x.ok ? "" : "neg"}, (x.ok ? "✓ " : "⚠ ") + x.texte))
         : lu.genre === "facture_cb" && p ? h("span", {class: Math.abs(p.ecart) < 0.01 ? "" : "neg"}, (Math.abs(p.ecart) < 0.01 ? "✓ " : "⚠ écart " + euros(p.ecart) + " · ") + euros(lu.montant) + " débité le " + dateFr(lu.dateDebit))
         : lu.genre === "valorisation" ? h("span", null, euros(lu.valeur) + (f.compte ? " → " + f.compte.nom : " → compte à créer"))
@@ -35,7 +38,9 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       return h("tr", {class: f.statut === "fait" ? "" : ""}, h("td", {class: "petit"}, lu.nom), h("td", null, genre, f.compte ? h("span", {class: "libbanque"}, f.compte.nom) : null),
         h("td", null, periode), h("td", {class: "num"}, String(nouvelles)), h("td", {class: "petit"}, controle),
         h("td", null, f.statut === "fait" ? h("span", {class: "pos"}, "✓ enregistré") : f.statut === "pret" ? h("button", {class: "mini", onclick: () => enregistrerFichier(f)}, "Enregistrer") :
-          f.statut === "compte" ? h("button", {class: "mini primaire", onclick: () => creerCompteImport(f)}, "Créer le compte…") : ""),
+          f.statut === "compte" ? h("button", {class: "mini primaire", onclick: () => creerCompteImport(f)}, "Créer le compte…") :
+          f.statut === "modele" ? h("button", {class: "mini primaire", onclick: () => dialogueModeleCsv(f)}, "Décrire les colonnes…") :
+          f.statut === "verifier" ? h("button", {class: "mini primaire", onclick: () => dialogueReleveLibrePdf(f)}, "Vérifier les lignes…") : ""),
         avecDepot ? h("td", {class: "petit"}, celluleRangement(f)) : null);
     }}));
     const prets = FICHIERS_EN_COURS.filter(f => f.statut === "pret");
@@ -115,8 +120,18 @@ async function lireEtPreparer(f, motDePasse){
 function preparerFichier(f){
   const lu = f.lu;
   try {
+    // Banque sans lecteur dédié : CSV lu selon le modèle retenu, PDF à vérifier ligne à ligne
+    if (lu.genre === "csv_libre"){
+      f.brut = lu;
+      const m = modeleCsvPour(lu);
+      if (!m || !obtenir("comptes", m.compte)){ f.statut = "modele"; return; }
+      f.lu = releveDepuisModele(lu, m);
+      if (f.lu.genre === "inconnu"){ f.statut = "erreur"; return; }
+      return preparerFichier(f);
+    }
+    if (lu.genre === "releve_pdf_libre"){ f.brut = lu; f.statut = "verifier"; return; }
     if (["compte", "carte", "valorisation", "facture_cb"].includes(lu.genre)){
-      f.compte = compteDuFichier(lu);
+      f.compte = lu.compteId ? obtenir("comptes", lu.compteId) : compteDuFichier(lu);
       if (!f.compte){ f.statut = "compte"; return; }
       if (lu.genre === "facture_cb") f.prep = preparerFacture(lu, f.compte);
       else if (lu.genre !== "valorisation") f.prep = preparerReleve(lu, f.compte);

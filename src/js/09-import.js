@@ -83,6 +83,8 @@ function preparerReleve(lu, compte){
       : "écart de " + euros(ecart / 100) + " sur le solde : facture de cartes à importer ?"});
   }
   if (lu.genre === "carte" && lu.controle) res.controles.push(lu.controle);
+  if (lu.libre) res.controles.push(typeof lu.soldeFin === "number" && !isNaN(lu.soldeFin) ? {ok: true, texte: "solde " + euros(lu.soldeFin) + " au " + dateFr(lu.periode.fin)}
+    : {ok: true, texte: "relevé sans solde : le saisir dans Bilan et résultat (clic sur le compte)"});
   const cid = compte ? compte.id : "?";
   const emp = empreintes(cid, lignes);
   // Pour un export par carte : une ligne déjà venue de l'export du compte (compte « sans titulaire ») est réattribuée.
@@ -123,7 +125,7 @@ function appliquerReleve(prep){
     const emp = empreintes(nv.id, prep.cartesSansTitulaire);
     prep.cartesSansTitulaire.forEach((l, i) => { if (!idx.has(emp[i])) creerOperation(nv, Object.assign({}, l, {empreinte: emp[i]}), imp.id); });
   }
-  if (prep.lu.genre === "compte"){
+  if (prep.lu.genre === "compte" && typeof prep.lu.soldeFin === "number" && !isNaN(prep.lu.soldeFin)){
     enregistrer("soldes", {compte: prep.compte.id, date: prep.lu.periode.debut, solde: prep.lu.soldeDebut, source: prep.lu.nom, debut: true});
     enregistrer("soldes", {compte: prep.compte.id, date: prep.lu.periode.fin, solde: prep.lu.soldeFin, source: prep.lu.nom});
   }
