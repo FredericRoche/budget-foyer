@@ -8,6 +8,8 @@ Ce dépôt est la copie autonome d'une application de budget personnel, donnée 
 
 Le propriétaire n'est pas forcément développeur. Expliquez simplement, en français, et faites-lui valider toute publication (`git push`).
 
+Si le propriétaire a déjà sa propre application et veut seulement y reprendre des fonctionnalités, lisez plutôt `FONCTIONNALITES.md`.
+
 ## 1. Règle absolue : aucune donnée réelle dans le dépôt
 
 Le dépôt est public, car GitHub Pages le publie.

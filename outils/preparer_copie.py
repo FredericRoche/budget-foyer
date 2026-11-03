@@ -7,7 +7,7 @@ aucun fichier ignoré, aucun historique (ni messages ni auteur). Elle ne garde a
 ni avec l'inscription Microsoft de son auteur :
   - l'identifiant d'application Microsoft est vidé (src/js/05-stockage.js) ; le destinataire y mettra le sien ;
   - kit/MISE-EN-ROUTE.md devient MISE-EN-ROUTE.md, kit/GUIDE-POUR-CLAUDE.md devient CLAUDE.md
-    (lu d'office par Claude Code dans ce dossier) ; le dossier kit/ n'est pas copié ;
+    (lu d'office par Claude Code dans ce dossier), kit/FONCTIONNALITES.md devient FONCTIONNALITES.md ; le dossier kit/ n'est pas copié ;
   - index.html est reconstruit, puis le contrôle des données personnelles est passé sur la copie.
 Rien n'est publié : le destinataire crée lui-même son dépôt, sa publication et son inscription.
 """
@@ -29,7 +29,7 @@ def main():
         for m in t.getmembers():
             if m.name == "kit" or m.name.startswith("kit/"): continue
             t.extract(m, sortie, filter="data")
-    for source, cible in [("kit/MISE-EN-ROUTE.md", "MISE-EN-ROUTE.md"), ("kit/GUIDE-POUR-CLAUDE.md", "CLAUDE.md")]:
+    for source, cible in [("kit/MISE-EN-ROUTE.md", "MISE-EN-ROUTE.md"), ("kit/GUIDE-POUR-CLAUDE.md", "CLAUDE.md"), ("kit/FONCTIONNALITES.md", "FONCTIONNALITES.md")]:
         (sortie / cible).write_bytes(subprocess.run(["git", "show", "HEAD:" + source], cwd=RACINE, capture_output=True, check=True).stdout)
 
     # Identifiant Microsoft de l'auteur : vidé (le destinataire inscrit sa propre application)
