@@ -222,6 +222,19 @@ async function autotest(){
             v("note de frais : paiement du justificatif ventilé (3 trajets avec la note, le reste au foyer)", (obtenir("operations", deb.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-99 Transfert", "-99 Transfert", "-99 Transports"]);
             declasserDepensesNdf(j5);
             supprimer("operations", deb.id); supprimer("justificatifs", j5.id); for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && d.transaction === "0099")) supprimer("documents", d.id);
+            // Achats relevés dans les e-mails (JSON) : reconnus, dédoublonnés par référence ; deux commandes du jour payées ensemble
+            const js = JSON.stringify({format: "budget-foyer-achats-sncf", source: "e-mails", achats: [
+              {date: "2025-05-12", montant: 128, references: ["RRR001"], trajets: [{sens: "Aller", date: "2025-05-15", voyageurs: ["Jean Essai", "Marie Essai"]}]},
+              {date: "2025-05-12", montant: 95, references: ["RRR002"], trajets: [{sens: "Aller", date: "2025-05-29", voyageurs: ["Jean Essai"]}]},
+              {date: "2025-05-12", montant: 95, references: ["RRR002"], trajets: [{sens: "Aller", date: "2025-05-29", voyageurs: ["Jean Essai"]}]}]});
+            const lj = lireJson("achats.json", js);
+            const nj = enregistrerAchatsSncf(lj);
+            const dj = enregistrer("operations", {compte: cc.id, date: "2025-05-13", montant: -223, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const t7 = ["NDF #1700 : Mai 2025, déclarée le 31/05/2025", " Déclarant : ESSAI Jean", "1 15/05/2025 Train 0,00 € 64,00 €", "2 29/05/2025 Train 0,00 € 95,00 €", "Total 159,00 €"].join(L);
+            const j7 = enregistrer("justificatifs", {type: "notefrais", date: "2025-05-31", montant: 159, texteOCR: t7, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            v("achats des e-mails : reconnus, doublon écarté, deux commandes du jour sur un seul débit", [lj.sousGenre, nj, rapprochementLignesNdf(j7).map(r => r.op === dj ? "J" : "-").join("")], ["achat_sncf", 2, "JJ"]);
+            supprimer("operations", dj.id); supprimer("justificatifs", j7.id);
+            for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && (d.references || []).some(r => /^RRR/.test(r)))) supprimer("documents", d.id);
             // Deux paiements avec un trajet le même jour (97 € seul ; 88 € + 26,20 €) : chaque ligne va au bon paiement
             const achat = (tx, mt, heures) => ["Justificatif d'achat", "SNCF Connect", "Date de transaction : 01/07/2026 à 11:00:00"].concat(heures.flatMap(hh => ["Aller 09/07/2026 à " + hh + ":00", "Voyageur 1 : JEAN ESSAI - Carte Liberté"]),
               ["Montant de la transaction (TTC) : " + mt + " €", "Transaction n° " + tx]).join(L);

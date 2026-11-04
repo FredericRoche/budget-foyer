@@ -82,9 +82,13 @@ function debitPrisAilleurs(op, j){ return op.ndf && op.ndf.justificatif !== j.id
 function enregistrerAchatsSncf(lu){
   let n = 0;
   const cle = a => a.transaction || (a.date + "|" + a.montant + "|" + (a.references || []).join(","));
-  const deja = new Set(vivants("documents").filter(d => d.genre === "achat_sncf").map(cle));
+  const existants = vivants("documents").filter(d => d.genre === "achat_sncf");
+  const deja = new Set(existants.map(cle));
+  // Une commande déjà connue par une autre source (PDF puis e-mail) : même référence de commande
+  const refs = new Set(existants.flatMap(d => d.references || []));
   for (const a of lu.achats || []){
-    if (deja.has(cle(a))) continue;
+    if (deja.has(cle(a)) || (a.references || []).some(r => refs.has(r))) continue;
+    (a.references || []).forEach(r => refs.add(r));
     enregistrer("documents", Object.assign({genre: "achat_sncf", fichier: lu.nom, titre: a.trajets.length + " trajet(s)"}, a)); deja.add(cle(a)); n++;
   }
   return n;
@@ -109,6 +113,15 @@ function debitsDesAchats(j){
   paires.sort((x, y) => y.score - x.score);
   const res = new Map(), pris = new Set();
   for (const p of paires){ if (res.has(p.a.id) || pris.has(p.op.id)) continue; res.set(p.a.id, p.op); pris.add(p.op.id); }
+  // Commandes passées le même jour et payées en une fois (relevées une par une dans les e-mails) : leur somme
+  const restants = regrouper(achatsSncf().filter(a => !res.has(a.id)), a => a.date);
+  for (const [jour, liste] of restants){
+    if (liste.length < 2) continue;
+    const total = somme(liste, a => a.montant);
+    const op = ops.filter(o => !pris.has(o.id) && ecartJours(jour, o.date) >= -1 && ecartJours(jour, o.date) <= 4 && Math.abs(-o.montant - total) <= Math.max(1, total * 0.01))
+      .sort((x, y) => Math.abs(-x.montant - total) - Math.abs(-y.montant - total) || Math.abs(ecartJours(jour, x.date)) - Math.abs(ecartJours(jour, y.date)))[0];
+    if (op){ for (const a of liste) res.set(a.id, op); pris.add(op.id); }
+  }
   return res;
 }
 function debitUtilisable(op, j){ return op && !op.supprime && op.montant < 0 && !debitPrisAilleurs(op, j) && (!op.ventilation || op.ndf?.justificatif === j.id); }

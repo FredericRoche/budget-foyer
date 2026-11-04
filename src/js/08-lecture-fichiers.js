@@ -172,6 +172,15 @@ function lireJson(nom, texte){
   let o; try { o = JSON.parse(texte); } catch (e) { return {genre: "inconnu", nom, raison: "JSON illisible"}; }
   if (o.format === "budget-foyer-regles") return {genre: "regles", nom, contenu: o};
   if (o.format === "budget-foyer-plan") return {genre: "plan", nom, contenu: o};
+  // Achats SNCF Connect relevés dans les e-mails de confirmation (quand le site ne remonte plus assez loin)
+  if (o.format === "budget-foyer-achats-sncf"){
+    const achats = (o.achats || []).filter(a => a && /^\d{4}-\d{2}-\d{2}$/.test(a.date || "") && a.montant > 0 && (a.trajets || []).length)
+      .map(a => ({date: a.date, montant: +a.montant, transaction: a.transaction || "", carte4: a.carte4 || "", references: a.references || [], source: o.source || "",
+        trajets: a.trajets.map(t => ({sens: t.sens || "Aller", date: t.date, heure: t.heure || "", voyageurs: t.voyageurs || []}))}));
+    if (!achats.length) return {genre: "inconnu", nom, raison: "aucun achat lisible"};
+    const dates = achats.map(a => a.date).sort();
+    return {genre: "document", sousGenre: "achat_sncf", nom, achats, periode: {debut: dates[0], fin: dates[dates.length - 1]}, date: dates[dates.length - 1], titre: achats.length + " paiement(s), " + (o.source || "relevé")};
+  }
   return {genre: "inconnu", nom, raison: "JSON non reconnu"};
 }
 
