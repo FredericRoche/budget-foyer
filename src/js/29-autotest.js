@@ -202,7 +202,23 @@ async function autotest(){
           v("note de frais : paiement groupé ventilé (deux parts avec la note, le reste au foyer)", (obtenir("operations", o5.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-99 Transfert", "-198 Transports"]);
           v("note de frais : groupe repris tel quel une fois classé", rapprochementLignesNdf(j2).map(r => r.op ? r.op.id : null), [o5.id, o5.id, null]);
           declasserDepensesNdf(j2);
-          for (const o of [o5, o6]) supprimer("operations", o.id); supprimer("justificatifs", j2.id);
+          // Choix à la main : paiement mêlant d'autres billets (247 €), puis ligne ajoutée au même débit
+          const o7 = enregistrer("operations", {compte: cc.id, date: "2026-11-25", montant: -247, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          choisirDebitNdf(j2, 1, null); choisirDebitNdf(j2, 2, null);
+          v("note de frais : débit d'un autre prix proposé au choix à la main", debitsPossiblesNdf(j2, lignesNoteFrais(j2)[0]).map(o => o.id).includes(o7.id), true);
+          choisirDebitNdf(j2, 1, o7.id);
+          classerDepensesNdf(j2, rapprochementLignesNdf(j2));
+          v("note de frais : choix à la main ventilé (part de la note, reste au foyer)", (obtenir("operations", o7.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-148 Transports"]);
+          choisirDebitNdf(j2, 2, o7.id);
+          v("note de frais : autre ligne ajoutée au même débit, reventilé", [classerDepensesNdf(j2, rapprochementLignesNdf(j2)), (obtenir("operations", o7.id).ventilation || []).map(x => x.montant + " " + x.categorie)], [1, ["-99 Transfert", "-99 Transfert", "-49 Transports"]]);
+          declasserDepensesNdf(j2);
+          const j3 = enregistrer("justificatifs", {type: "notefrais", date: "2026-12-05", montant: 228, texteOCR: texte2, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: [], ndfManuel: {1: o7.id, 2: o7.id}});
+          const o8 = enregistrer("operations", {compte: cc.id, date: "2026-11-26", montant: -100, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          choisirDebitNdf(j3, 1, o8.id); choisirDebitNdf(j3, 2, o8.id);
+          v("note de frais : lignes au-delà du débit refusées", [classerDepensesNdf(j3, rapprochementLignesNdf(j3)), !!obtenir("operations", o8.id).ventilation, debitsPossiblesNdf(j3, lignesNoteFrais(j3)[1]).some(o => o.id === o8.id)], [0, false, false]);
+          supprimer("operations", o8.id); supprimer("justificatifs", j3.id);
+          v("note de frais : rétabli après reventilation", [obtenir("operations", o7.id).categorie, !!obtenir("operations", o7.id).ventilation], ["Transports", false]);
+          for (const o of [o5, o6, o7]) supprimer("operations", o.id); supprimer("justificatifs", j2.id);
           for (const o of [o1, o2, o3, o4]) supprimer("operations", o.id); supprimer("justificatifs", jn.id); supprimer("comptes", cc.id);
         }
         v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
