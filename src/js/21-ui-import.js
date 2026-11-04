@@ -23,7 +23,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
         reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
-        document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
+        document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : lu.sousGenre === "achat_sncf" ? "Justificatif SNCF Connect · " + lu.titre : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
       const controle = f.erreur ? h("span", {class: "neg"}, f.erreur) : lu.genre === "inconnu" ? h("span", {class: "neg"}, lu.raison)
@@ -159,6 +159,7 @@ async function enregistrerFichier(f, enLot){
     else if (lu.genre === "regles"){ const n = appliquerRegles(lu.contenu); message(n + " règle(s) importée(s).");
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
     else if (lu.genre === "justificatif_pdf" || lu.genre === "image") await importerJustificatifPc(lu, !!f.source);
+    else if (lu.genre === "document" && lu.sousGenre === "achat_sncf"){ const n = enregistrerAchatsSncf(lu); f.resultat = n + " paiement(s) nouveau(x)"; message(n + " justificatif(s) SNCF Connect enregistré(s) : ils serviront au rapprochement des notes de frais."); }
     else if (lu.genre === "document") enregistrer("documents", {genre: lu.sousGenre, fichier: lu.nom, date: lu.date, titre: lu.titre, quantite: lu.quantite, montant: lu.montant, sens: lu.sens, isin: lu.isin});
     f.statut = "fait";
     if (f.source) await rangerFichier(f);

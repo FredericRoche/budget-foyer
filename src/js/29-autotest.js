@@ -189,6 +189,48 @@ async function autotest(){
           declasserDepensesNdf(jn);
           v("note de frais : classement d'avant rétabli", [obtenir("operations", o3.id).categorie, obtenir("operations", o3.id).sousCategorie, !!obtenir("operations", o1.id).ndf], ["Voyages", "Hôtels", false]);
           // Deux billets payés ensemble, un seul sur la note : débit ventilé, l'autre moitié garde son classement
+          {
+            // Deux commandes de 198 € le même jour : chacune est un aller-retour seul (99 + 99), pas un billet « à deux »
+            const t3 = ["NDF #2701 : Septembre 2026, déclarée le 30/09/2026", "1 07/09/2026 Train 0,00 € 99,00 €", "2 09/09/2026 Train 0,00 € 99,00 €", "3 14/09/2026 Train 0,00 € 99,00 €", "4 19/09/2026 Train 0,00 € 99,00 €", "Total 396,00 €"].join(L);
+            const a1 = enregistrer("operations", {compte: cc.id, date: "2026-08-27", montant: -198, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const a2 = enregistrer("operations", {compte: cc.id, date: "2026-08-27", montant: -198, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const j4 = enregistrer("justificatifs", {type: "notefrais", date: "2026-09-30", montant: 396, texteOCR: t3, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            const rr = rapprochementLignesNdf(j4);
+            v("note de frais : allers-retours payés en une fois préférés au billet « à deux »", [rr.every(r => r.op && r.facteur === 1 && r.groupe && r.groupe.length === 2), rr[0].op === rr[1].op, rr[2].op === rr[3].op, rr[0].op !== rr[2].op], [true, true, true, true]);
+            supprimer("operations", a1.id); supprimer("operations", a2.id); supprimer("justificatifs", j4.id);
+          }
+          {
+            // Justificatif d'achat SNCF Connect : un paiement, plusieurs trajets et voyageurs ; la ligne du déclarant s'y rattache
+            const pdf = ["Justificatif d'achat", "Résumé de la commande", "Montant total (TTC) : 396,00 €", "Société SNCF Connect", "Détail des transactions", "Date de transaction : 10/05/2026 à 11:01:27",
+              "Aller 01/06/2026 à 10:05:00", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "Voyageur 2 : MARIE ESSAI - Carte Liberté", "198,00 €", "Réf: AAA111",
+              "Aller 15/06/2026 à 10:05:00", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "Retour 18/06/2026 à 16:56:00", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "198,00 €", "Réf: BBB222",
+              "Montant de la transaction (TTC) : 396,00 €", "Transaction n° 0099", "Référence commande AAA111, BBB222", "Numéro de carte : #######1234"].join(L);
+            const ach = extraireAchatSncf(pdf);
+            v("justificatif SNCF Connect lu (paiement, trajets, voyageurs)", [ach.date, ach.montant, ach.trajets.length, ach.trajets[0].voyageurs.join("/"), ach.trajets[2].sens, ach.carte4], ["2026-05-10", 396, 3, "JEAN ESSAI/MARIE ESSAI", "Retour", "1234"]);
+            v("justificatif SNCF Connect reconnu à l'import", reconnaitrePdf("x.pdf", pdf, null).sousGenre, "achat_sncf");
+            const deb = enregistrer("operations", {compte: cc.id, date: "2026-05-11", montant: -396, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const nAch = enregistrerAchatsSncf({nom: "x.pdf", achats: [ach]}), nAch2 = enregistrerAchatsSncf({nom: "x.pdf", achats: [ach]});
+            const t5 = ["NDF #2702 : Juin 2026, déclarée le 30/06/2026", " Déclarant : ESSAI Jean", "1 01/06/2026 Train 0,00 € 99,00 €", "2 15/06/2026 Train 0,00 € 99,00 €", "3 18/06/2026 Train 0,00 € 99,00 €", "4 20/12/2026 Train 0,00 € 99,00 €", "Total 396,00 €"].join(L);
+            const j5 = enregistrer("justificatifs", {type: "notefrais", date: "2026-06-30", montant: 396, texteOCR: t5, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            const r5 = rapprochementLignesNdf(j5);
+            v("note de frais : lignes rattachées par le justificatif d'achat (doublon ignoré)", [nAch, nAch2, r5.map(r => r.op ? (r.op.id === deb.id ? "J" : "autre") : "-").join("")], [1, 0, "JJJ-"]);
+            classerDepensesNdf(j5, r5);
+            v("note de frais : paiement du justificatif ventilé (3 trajets avec la note, le reste au foyer)", (obtenir("operations", deb.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-99 Transfert", "-99 Transfert", "-99 Transports"]);
+            declasserDepensesNdf(j5);
+            supprimer("operations", deb.id); supprimer("justificatifs", j5.id); for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && d.transaction === "0099")) supprimer("documents", d.id);
+            // Deux paiements avec un trajet le même jour (97 € seul ; 88 € + 26,20 €) : chaque ligne va au bon paiement
+            const achat = (tx, mt, heures) => ["Justificatif d'achat", "SNCF Connect", "Date de transaction : 01/07/2026 à 11:00:00"].concat(heures.flatMap(hh => ["Aller 09/07/2026 à " + hh + ":00", "Voyageur 1 : JEAN ESSAI - Carte Liberté"]),
+              ["Montant de la transaction (TTC) : " + mt + " €", "Transaction n° " + tx]).join(L);
+            enregistrerAchatsSncf({nom: "a.pdf", achats: [extraireAchatSncf(achat("0201", "97,00", ["07:08"])), extraireAchatSncf(achat("0202", "114,20", ["19:00", "21:12"]))]});
+            const d97 = enregistrer("operations", {compte: cc.id, date: "2026-07-01", montant: -97, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const d114 = enregistrer("operations", {compte: cc.id, date: "2026-07-01", montant: -114.2, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const t6 = ["NDF #2703 : Juillet 2026, déclarée le 31/07/2026", " Déclarant : ESSAI Jean", "1 09/07/2026 Train 0,00 € 88,00 €", "2 09/07/2026 Train 0,00 € 97,00 €", "3 09/07/2026 Train 0,00 € 26,20 €", "Total 211,20 €"].join(L);
+            const j6 = enregistrer("justificatifs", {type: "notefrais", date: "2026-07-31", montant: 211.2, texteOCR: t6, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            v("note de frais : même jour, deux paiements : chaque ligne au bon justificatif", rapprochementLignesNdf(j6).map(r => r.op === d97 ? "97" : r.op === d114 ? "114" : "-"), ["114", "97", "114"]);
+            supprimer("operations", d97.id); supprimer("operations", d114.id); supprimer("justificatifs", j6.id);
+            for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && ["0201", "0202"].includes(d.transaction))) supprimer("documents", d.id);
+          }
+          v("note de frais : un parking de gare n'est pas un billet de train", [libelleColleNature("Train", {libelle: "EFFIA VALENCE TGV"}), libelleColleNature("Train", {libelle: "SNCF-VOYAGEURS PARIS"})], [false, true]);
           const o4 = enregistrer("operations", {compte: cc.id, date: "2026-09-01", montant: -12.4, libelle: "TUNNEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});
           const r4 = rapprochementLignesNdf(jn).find(r => r.ligne.n === 4);
           classerDepensesNdf(jn, [r4]);

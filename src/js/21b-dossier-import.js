@@ -44,6 +44,7 @@ function reglesRangement(){ return LIVRE.parametres.rangement || {}; }
 function cleRangement(lu, compte){
   if (["compte", "carte", "valorisation"].includes(lu.genre)) return compte ? "compte:" + compte.id : null;
   if (lu.genre === "facture_cb") return "factures_cb";
+  if (lu.genre === "document" && lu.sousGenre === "achat_sncf") return "justificatifs";
   if (lu.genre === "document") return lu.sousGenre === "avis_impot" ? "avis_impot" : "avis_opere";
   if (lu.genre === "justificatif_pdf" || lu.genre === "image") return "justificatifs";
   if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "plans";
@@ -84,6 +85,7 @@ function proposerRangement(lu, compte, index){
     return enfant(b, /relev[ée]s? et [ée]valuations?/i) || b;
   }
   if (lu.genre === "facture_cb"){ const b = courant(); const e = enfant(b, /avis d[ée]bit diff[ée]r[ée]/i); return e || (b ? b + "/Avis débit différé cartes" : "Factures des cartes LCL"); }
+  if (lu.genre === "document" && lu.sousGenre === "achat_sncf") return parNom(/^justificatifs$/i) || "Justificatifs";
   if (lu.genre === "document" && lu.sousGenre === "avis_impot") return parNom(/^imp[ôo]ts?$/i) || "Impôts";
   if (lu.genre === "document") return parNom(/^avis d.op[ée]r[ée]$/i) || "Avis d'opéré";
   if (lu.genre === "justificatif_pdf" || lu.genre === "image") return parNom(/^justificatifs$/i) || "Justificatifs";

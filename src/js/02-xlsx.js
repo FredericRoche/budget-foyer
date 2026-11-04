@@ -59,6 +59,16 @@ function extraireZip(buffer){
   }
   return {donnees, dv, entrees};
 }
+/* Octets d'une entrée d'archive (PDF d'un ZIP de justificatifs). */
+async function octetsDuZip(zip, nom){
+  const e = zip.entrees[nom]; if (!e) return null;
+  const tailleNom = zip.dv.getUint16(e.decalage + 26, true), tailleExtra = zip.dv.getUint16(e.decalage + 28, true);
+  const debut = e.decalage + 30 + tailleNom + tailleExtra;
+  const brut = zip.donnees.subarray(debut, debut + e.tailleComp);
+  if (e.methode === 0) return brut.slice();
+  if (e.methode === 8) return new Uint8Array(await new Response(new Blob([brut]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+  throw new Error("compression " + e.methode + " non gérée");
+}
 async function lireDuZip(zip, nom){
   const e = zip.entrees[nom]; if (!e) return null;
   const tailleNom = zip.dv.getUint16(e.decalage + 26, true), tailleExtra = zip.dv.getUint16(e.decalage + 28, true);

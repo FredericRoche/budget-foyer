@@ -49,6 +49,7 @@ async function lireFichier(fichier, motDePasse){
     return reconnaitrePdf(nom, texte, octets);
   }
   if (/^(jpe?g|png|heic|webp)$/.test(ext)) return {genre: "image", nom, octets, mime: fichier.type || "image/jpeg"};
+  if (ext === "zip") return lireZipJustificatifs(nom, buffer);
   return {genre: "inconnu", nom, raison: "format non reconnu (." + ext + ")"};
 }
 
@@ -95,6 +96,46 @@ function lireAmexCsv(nom, lignes){
     .filter(o => o.date && !isNaN(o.montant));
   const dates = ops.map(o => o.date).sort();
   return {genre: "carte", banque: "Amex", nom, numero: "", carte: "AMEX", periode: {debut: dates[0], fin: dates[dates.length - 1]}, lignes: ops};
+}
+
+/* ---------- Justificatifs d'achat SNCF Connect ----------
+   Un PDF par paiement : date de la transaction, montant, carte, et pour chaque trajet sa date, son heure
+   et ses voyageurs. Les trajets d'une même commande (aller et retour) partagent un prix de bloc. */
+function extraireAchatSncf(texte){
+  const T = String(texte || "").replace(/[\u00a0\u202f\u2009]/g, " ").replace(/\ufb01/g, "fi");
+  if (!/Justificatif d.achat/i.test(T) || !/SNCF ?Connect/i.test(T)) return null;
+  const tx = T.match(/Date de transaction\s*:\s*(\d{2}\/\d{2}\/\d{4})/);
+  if (!tx) return null;
+  const montants = [...T.matchAll(/Montant (?:de la transaction|total) \(TTC\)\s*:\s*([\d .]+,\d{2})\s*€/g)].map(m => lireMontant(m[1]));
+  const lignes = T.split(/\n/).map(l => l.trim());
+  const trajets = [];
+  for (let i = 0; i < lignes.length; i++){
+    const m = lignes[i].match(/(Aller|Retour)\s+(\d{2}\/\d{2}\/\d{4})\s+à\s+(\d{2}:\d{2})/);
+    if (!m) continue;
+    const voyageurs = [];
+    // Voyageurs sur la même ligne (texte fusionné) ou les suivantes
+    const reste = [lignes[i].slice(m.index + m[0].length)].concat(lignes.slice(i + 1, i + 12));
+    for (const l of reste){
+      const vs = [...l.matchAll(/Voyageur\s*\d+\s*:\s*([^-\n]+?)\s*(?:-|$)/g)].map(x => x[1].trim());
+      if (vs.length) voyageurs.push(...vs);
+      else if (voyageurs.length || /^(Aller|Retour)\b/.test(l)) break;
+    }
+    trajets.push({sens: m[1], date: lireDate(m[2]), heure: m[3], voyageurs});
+  }
+  if (!trajets.length) return null;
+  return {date: lireDate(tx[1]), montant: montants.length ? Math.max(...montants) : 0, transaction: ((T.match(/Transaction n°\s*(\d+)/) || [])[1] || ""),
+    carte4: ((T.match(/Numéro de carte\s*:\s*#*(\d{4})/) || [])[1] || ""), references: ((T.match(/Référence commande\s*([A-Z0-9, ]+)/) || [])[1] || "").split(/[ ,]+/).filter(Boolean), trajets};
+}
+/* ZIP de justificatifs (« JustificatifAchat_SNCFCONNECT.zip ») : chaque PDF est lu. */
+async function lireZipJustificatifs(nom, buffer){
+  const zip = extraireZip(buffer);
+  const achats = [];
+  for (const n of Object.keys(zip.entrees).filter(x => /\.pdf$/i.test(x)).sort()){
+    try { const a = extraireAchatSncf(await textePdf(await octetsDuZip(zip, n))); if (a) achats.push(a); } catch (e){ console.error(n, e); }
+  }
+  if (!achats.length) return {genre: "inconnu", nom, raison: "archive sans justificatif d'achat SNCF Connect"};
+  const dates = achats.map(a => a.date).sort();
+  return {genre: "document", sousGenre: "achat_sncf", nom, achats, periode: {debut: dates[0], fin: dates[dates.length - 1]}, date: dates[dates.length - 1], titre: achats.length + " paiement(s)"};
 }
 
 /* ---------- Classeurs ---------- */
@@ -225,6 +266,9 @@ function reconnaitrePdf(nom, texte, octets){
     return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : ""), date: an ? an + "-12-31" : null});
   }
   if (/^COMPTEDEDEPOTS_/.test(nom)) return Object.assign(base, {genre: "inconnu", raison: "relevé de compte PDF : importez plutôt l'export CSV du compte (plus complet)"});
+  // Justificatif d'achat SNCF Connect : paiement et trajets (sert au rapprochement des notes de frais)
+  const achat = extraireAchatSncf(T);
+  if (achat) return Object.assign(base, {genre: "document", sousGenre: "achat_sncf", achats: [achat], date: achat.date, montant: achat.montant, titre: achat.trajets.length + " trajet(s)"});
   // Pièce justificative (facture, ticket, note de frais détaillée)
   const ndf = extraireNoteFrais(T);
   return Object.assign(base, {genre: "justificatif_pdf"}, ndf ? {noteFrais: ndf, date: ndf.declaree} : {});
