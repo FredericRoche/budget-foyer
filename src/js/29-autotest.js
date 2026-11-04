@@ -293,7 +293,7 @@ async function autotest(){
               {type: "fusionnerFiches", garder: "Doublon Essai A", absorber: ["Doublon Essai B", "Inconnue Essai"]},
               {type: "reclasser", fournisseur: "Doublon Essai A", de: ["Culture et loisirs", "Livres, presse, sorties, jeux"], vers: ["Abonnements", "Abonnements numériques"], ficheParDefaut: true}]}));
             const ap = preparerCorrections(lot);
-            v("lot de corrections : aperçu sans effet", [lot.genre, ap.lignes.length, obtenir("commercants", fa.id).nom, !!obtenir("commercants", fc2.id)], ["corrections", 4, "Etude Essai", true]);
+            v("lot de corrections : aperçu sans effet, actions enchaînées (renommage puis recréation)", [lot.genre, ap.lignes.length, obtenir("commercants", fa.id).nom, !!obtenir("commercants", fc2.id), ap.lignes[1].ok, ap.lignes[1].n], ["corrections", 4, "Etude Essai", true, true, 1]);
             appliquerCorrections(lot);
             const etude = ficheNommee("Etude Essai");
             v("lot de corrections : renommage, fiche recréée avec son devis, fusion, reclassement", [obtenir("commercants", fa.id).nom, obtenir("justificatifs", jd.id).commercant === etude?.id, obtenir("operations", o1.id).commercant === fa.id,
