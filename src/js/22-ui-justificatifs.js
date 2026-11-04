@@ -104,7 +104,7 @@ function ecranRapprochement(j, etat, attente){
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
       ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque);
-    champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte, cheque, num});
+    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num});
   });
   const enregistrerSaisie = () => {
     for (const f of champsParJ){
@@ -114,10 +114,14 @@ function ecranRapprochement(j, etat, attente){
         lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
       // Le fournisseur est créé (ou rattaché) à la validation, y compris un nom resté provisoire
-      if (f.x.commercantNom && (f.x.commercantNom !== ancienNom || !f.x.commercant)){
-        let fiche = vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom)) || (f.x.commercant ? obtenir("commercants", f.x.commercant) : null);
+      // Fiche choisie dans la liste : prise telle quelle. « Nouveau fournisseur… » : fiche de ce nom, sinon une
+      // fiche NEUVE ; jamais le renommage de la fiche attachée jusque-là (le 04/11, une fiche proposée à tort pour
+      // une note de frais avait ainsi pris le nom de l'employeur). Renommer une fiche se fait dans Fournisseurs.
+      const choisie = f.selF.value && f.selF.value !== "__nouveau__" ? obtenir("commercants", f.selF.value) : null;
+      if (choisie){ f.x.commercantNom = choisie.nom; }
+      if (f.x.commercantNom && (f.x.commercantNom !== ancienNom || !f.x.commercant || (choisie && choisie.id !== f.x.commercant) || f.selF.value === "__nouveau__")){
+        let fiche = choisie || vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom));
         if (!fiche) fiche = enregistrer("commercants", {nom: f.x.commercantNom, alias: [], stats: {}, natures: {}});
-        else if (norm(fiche.nom) !== norm(f.x.commercantNom) && f.x.commercant === fiche.id) { fiche.nom = f.x.commercantNom; enregistrer("commercants", fiche); }
         if (f.x.raisonSociale && nomPlausible(f.x.raisonSociale) && ajouterAlias(fiche, f.x.raisonSociale)) message("Mémorisé : « " + f.x.raisonSociale + " » = " + fiche.nom + ".");
         f.x.commercant = fiche.id; invaliderIndex();
       }
