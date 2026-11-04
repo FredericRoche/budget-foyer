@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-urbg2EkWI5vxiq8sfMmfEycy91e0QWQKoKAJE8/SOsE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-cltgdMzWGotNgvd9eyPlH9oqmxpNroTeDbwyigMMxnE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-04.1800";
+const VERSION_APP = "2026-11-04.1808";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2952,7 +2952,8 @@ function extraireNoteFrais(texte){
   }
   const total = lireMontant((T.match(/Total\s+(\d[\d .]*,\d{2})\s*€/) || [])[1] || "");
   const declarant = ((T.match(/D[ée]clarant\s*:\s*([^\n]+?)\s*(?:Etat|État|\n|$)/i) || [])[1] || "").trim();
-  const entite = ((T.match(/Entit[ée] l[ée]gale\s*:\s*(.+)/i) || [])[1] || "").trim();
+  // Le lecteur PDF met parfois « Contrôlé : Oui » sur la même ligne que l'entité : on s'arrête avant
+  const entite = ((T.match(/Entit[ée] l[ée]gale\s*:\s*(.+?)\s*(?:Contr[ôo]l[ée]\s*:.*)?$/im) || [])[1] || "").trim();
   return {numero: tete[1], periode: tete[2].trim(), declaree: lireDate(tete[3]), entite, declarant, lignes, total: total || somme(lignes, l => l.montant)};
 }
 /* Lignes d'une note : enregistrées à l'import, sinon relues dans le texte de la pièce. */
@@ -7194,7 +7195,7 @@ async function autotest(){
         {
           // Note de frais détaillée : lecture des lignes, nom de rangement, débits retrouvés (un débit par ligne), classement réversible
           const L = String.fromCharCode(10);
-          const texte = ["NDF #2681 : Novembre 2026, déclarée le 02/11/2026 Imprimé le 02/11/2026 à 16:44", " Entité légale : EMPLOYEUR ESSAI", "N° Date Nature TVA Montant TTC",
+          const texte = ["NDF #2681 : Novembre 2026, déclarée le 02/11/2026 Imprimé le 02/11/2026 à 16:44", " Entité légale : EMPLOYEUR ESSAI Contrôlé : Oui", "N° Date Nature TVA Montant TTC",
             "1 28/05/2026 Train 0,00 € 99,00 €", "2 01/06/2026 Train 0,00 € 99,00 €", "3 17/06/2026 Hôtel 0,00 € 25,01 €", "4 08/09/2026 Péages 0,00 € 6,20 €", "Total 229,21 €"].join(L);
           const x = extraireNoteFrais(texte);
           v("note de frais détaillée : numéro, date, lignes, total", [x.numero, x.declaree, x.lignes.length, x.lignes[2].nature, x.total, x.entite], ["2681", "2026-11-02", 4, "Hôtel", 229.21, "EMPLOYEUR ESSAI"]);

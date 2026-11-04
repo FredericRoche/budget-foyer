@@ -172,7 +172,7 @@ async function autotest(){
         {
           // Note de frais détaillée : lecture des lignes, nom de rangement, débits retrouvés (un débit par ligne), classement réversible
           const L = String.fromCharCode(10);
-          const texte = ["NDF #2681 : Novembre 2026, déclarée le 02/11/2026 Imprimé le 02/11/2026 à 16:44", " Entité légale : EMPLOYEUR ESSAI", "N° Date Nature TVA Montant TTC",
+          const texte = ["NDF #2681 : Novembre 2026, déclarée le 02/11/2026 Imprimé le 02/11/2026 à 16:44", " Entité légale : EMPLOYEUR ESSAI Contrôlé : Oui", "N° Date Nature TVA Montant TTC",
             "1 28/05/2026 Train 0,00 € 99,00 €", "2 01/06/2026 Train 0,00 € 99,00 €", "3 17/06/2026 Hôtel 0,00 € 25,01 €", "4 08/09/2026 Péages 0,00 € 6,20 €", "Total 229,21 €"].join(L);
           const x = extraireNoteFrais(texte);
           v("note de frais détaillée : numéro, date, lignes, total", [x.numero, x.declaree, x.lignes.length, x.lignes[2].nature, x.total, x.entite], ["2681", "2026-11-02", 4, "Hôtel", 229.21, "EMPLOYEUR ESSAI"]);

@@ -30,7 +30,8 @@ function extraireNoteFrais(texte){
   }
   const total = lireMontant((T.match(/Total\s+(\d[\d .]*,\d{2})\s*€/) || [])[1] || "");
   const declarant = ((T.match(/D[ée]clarant\s*:\s*([^\n]+?)\s*(?:Etat|État|\n|$)/i) || [])[1] || "").trim();
-  const entite = ((T.match(/Entit[ée] l[ée]gale\s*:\s*(.+)/i) || [])[1] || "").trim();
+  // Le lecteur PDF met parfois « Contrôlé : Oui » sur la même ligne que l'entité : on s'arrête avant
+  const entite = ((T.match(/Entit[ée] l[ée]gale\s*:\s*(.+?)\s*(?:Contr[ôo]l[ée]\s*:.*)?$/im) || [])[1] || "").trim();
   return {numero: tete[1], periode: tete[2].trim(), declaree: lireDate(tete[3]), entite, declarant, lignes, total: total || somme(lignes, l => l.montant)};
 }
 /* Lignes d'une note : enregistrées à l'import, sinon relues dans le texte de la pièce. */
