@@ -40,7 +40,12 @@ async function autotest(){
     /* --- Export « encours » d'une carte, puis facture --- */
     const csvCarte = ["28/02/2027;45,40;;09999 000099Z", "03/03/2027;-33,10;Carte;;LIBRAIRIE TEST PARIS;;5942;Loisirs/culture", "05/03/2027;-12,30;Carte;;CAFE TEST PARIS;;5812;Alimentation:Restaurant", "27/03/2027;0;;09999 000099Z"].join("\n");
     const luc = lireCsv("T_cpte_09999_000099Z_carte_Carte_Premier_X333_du_28-02-2027_au_27-03-2027.csv", csvCarte);
-    v("export carte reconnu", [luc.genre, luc.carte, luc.controle.ok], ["carte", "X333", true]);
+    {
+      // Export CSV Amex enregistré dans Excel : une seule colonne contenant les lignes CSV
+      const ux = amexCsvDansFeuille("amex.xlsx", [["Date,Description,Montant"], ["10/31/2026,RELAIS ESSAI,\"87,00\""], ["10/19/2026,AVOIR ESSAI,\"-6,99\""], [null]]);
+      v("export Amex CSV enregistré en Excel reconnu", [ux?.genre, ux?.carte, ux?.lignes.length, ux?.lignes[0].date, ux?.lignes[0].montant, ux?.lignes[1].montant], ["carte", "AMEX", 2, "2026-10-31", -87, 6.99]);
+    }
+    v("export carte reconnu",[luc.genre, luc.carte, luc.controle.ok], ["carte", "X333", true]);
     const carte = enregistrer("comptes", {nom: "Carte X333", type: "carte", banque: "LCL", carte: "X333", compteDebit: cj.id});
     const pc = preparerReleve(luc, carte);
     v("ligne déjà venue du compte : réattribuée", pc.reattribuees.length, 1);

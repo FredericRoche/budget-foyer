@@ -98,11 +98,19 @@ function lireAmexCsv(nom, lignes){
 }
 
 /* ---------- Classeurs ---------- */
+/* Export CSV Amex ouvert puis enregistré dans Excel : chaque ligne CSV tient dans la première cellule. */
+function amexCsvDansFeuille(nom, m){
+  const lignes = (m || []).filter(l => l && l[0] !== null && l[0] !== undefined && String(l[0]).trim());
+  if (!lignes.length || !/^date,description,montant/.test(norm(String(lignes[0][0])).replace(/\s/g, ""))) return null;
+  return lireCsv(nom, lignes.map(l => String(l[0])).join("\n"));
+}
 async function lireXlsx(nom, buffer){
   const c = await lireClasseur(buffer);
   if (c.feuilles["Opérations"] && c.feuilles["Synthèse"]) return {genre: "reprise_v7", nom, classeur: c};
   for (const n of c.noms){
     const m = c.feuilles[n];
+    const enCsv = amexCsvDansFeuille(nom, m);
+    if (enCsv) return enCsv;
     const iTete = m.findIndex(l => l && norm(l[0]) === "date" && norm(l[1]) === "description" && /montant/.test(norm(l[2])));
     if (iTete >= 0){
       const t = m[iTete].map(x => norm(x));
