@@ -147,6 +147,15 @@ async function autotest(){
       const tk = extraireTicket("Jean Dupont, architecte essai\nFacture\nn° Date\n2 6 – 0 7 – 10 2 12 / 10 /202 6\nMontant à régler TTC\n980 €");
       v("facture : date fragmentée et fournisseur nommé dans le texte", [tk.date, commercantPourTicket(tk)?.id === fp.id], ["2026-10-12", true]);
       {
+        // L'adresse du client (« avenue de Valence, Paris ») ne doit pas faire reconnaître une boutique dont l'alias n'est fait que de lieux
+        const fc = enregistrer("commercants", {nom: "Traiteur essai (place essai)", alias: ["RPG ST VALENCE PARIS"], stats: {}, natures: {}, categorie: "Alimentation"});
+        const fh = extraireTicket("Hebergeur Essai Network SA\nFacture N° 12345\nClient : Jean Dupont\n10 avenue de Valence\n75005 Paris\nTotal TTC 13,68 €");
+        const fh2 = Object.assign({}, fh, {raisonSociale: "Hebergeur Essai Network SA", enseigne: "Hebergeur Essai Network SA"});
+        v("fournisseur : reconnaissance sûre (alias) distinguée de la supposition (texte)", [commercantSur({raisonSociale: "RPG ST VALENCE PARIS"}, [fc])?.id === fc.id, commercantSur({raisonSociale: "Autre nom"}, [fc])], [true, null]);
+        v("facture : l'adresse du client ne désigne pas un commerçant", [commercantDansTexte(fh.texte, [fc]), commercantPourTicket(fh2, [fc])], [null, null]);
+        supprimer("commercants", fc.id);
+      }
+      {
         const nb0 = vivants("commercants").length;
         const jm = await creerJustificatif({type: "ticket", date: "2027-03-10", montant: 12, commercantNom: "Boulangrie Nouvele", origine: "mobile"});
         v("téléphone : fournisseur inconnu laissé provisoire, aucune fiche créée", [vivants("commercants").length - nb0, jm.fournisseurProvisoire], [0, true]);
@@ -438,10 +447,20 @@ async function autotest(){
     const opCafe = vivants("operations").find(o => /CAFE/.test(o.libelle) && o.compte === carte.id);
     const j1 = enregistrer("justificatifs", {type: "facturette", date: "2027-03-04", montant: 12.3, carte: "X333", carte4: "0333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
-    v("facturette rapprochée d'office (−1 jour, carte ****0333)", [obtenir("justificatifs", j1.id).statut, obtenir("justificatifs", j1.id).operations[0]], ["rapproche", opCafe.id]);
+    // Pièce sans fournisseur ni catégorie à imposer : rapprochée d'office
+    v("facturette rapprochée d'office (−1 jour, carte ****0333, rien ne change)", [obtenir("justificatifs", j1.id).statut, obtenir("justificatifs", j1.id).operations[0]], ["rapproche", opCafe.id]);
     const j2 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-04", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
     v("ticket du même achat : rattaché à la même opération", obtenir("justificatifs", j2.id).operations[0], opCafe.id);
+    {
+      // Pièce qui changerait la catégorie de l'opération : seulement proposée
+      const opX = enregistrer("operations", {compte: carte.id, date: "2027-03-20", montant: -44.4, libelle: "LIBRAIRIE CHANGE", categorie: "Culture et loisirs", sousCategorie: "Livres, presse, sorties, jeux", statut: "classe"});
+      const jx = enregistrer("justificatifs", {type: "ticket", date: "2027-03-20", montant: 44.4, carte: "X333", categorie: "Maison", sousCategorie: "Bricolage et jardin", statut: "a_rapprocher", operations: []});
+      rapprocherTout();
+      const px = obtenir("justificatifs", jx.id);
+      v("rapprochement qui changerait la catégorie : proposé, pas appliqué", [px.statut, (px.propositions || [])[0]?.op, obtenir("operations", opX.id).categorie], ["a_rapprocher", opX.id, "Culture et loisirs"]);
+      supprimer("justificatifs", jx.id); supprimer("operations", opX.id);
+    }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
     v("hors tolérance (opération 5 jours avant le ticket) : pas de rapprochement d'office", obtenir("justificatifs", j3.id).statut, "a_rapprocher");

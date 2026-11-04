@@ -1,7 +1,8 @@
 /* ================= Justificatifs et rapprochement =================
    Un justificatif (ticket de caisse, facture, facturette CB) est rapproché de
    l'opération bancaire de même montant, dans une fenêtre de dates qui dépend de
-   son type. Un cas sans ambiguïté est appliqué d'office, réversible ; les autres
+   son type. Un cas sans ambiguïté qui ne change ni le fournisseur ni la catégorie de l'opération est rapproché
+   d'office (réversible) ; s'il les changerait, il est seulement proposé en tête, à confirmer d'un clic ; les autres
    attendent dans « À traiter ». Facture et facturette d'un même achat se
    rattachent à la même opération sans double compte. Plusieurs tickets réglés en
    un seul paiement forment un « achat groupé » et ventilent l'opération.
@@ -125,7 +126,18 @@ function delier(j){
   enregistrer("justificatifs", Object.assign(j, {operations: [], statut: "a_rapprocher", auto: false, rapprocheLe: null, refuse: true}));
 }
 
-/* Passe automatique, après chaque import ou fusion de la boîte. */
+/* Le rapprochement modifierait-il l'opération ? Fournisseur différent, catégorie différente, ou ventilation
+   (plusieurs pièces) : oui. Une pièce sans fournisseur ni catégorie, ou conforme à l'opération : non. */
+function rapprochementModifie(js, op){
+  if (js.length > 1) return true;
+  const j = js[0];
+  if (j.commercant && op.commercant && j.commercant !== op.commercant) return true;
+  if (j.categorie && j.categorie !== "À préciser" && (j.categorie !== op.categorie || (j.sousCategorie && j.sousCategorie !== op.sousCategorie))) return true;
+  return false;
+}
+/* Passe automatique, après chaque import ou fusion de la boîte. Décision de Frédéric (04/11/2026) : l'application
+   ne change rien d'elle-même sur une déduction. Un cas sûr qui ne modifie pas l'opération est rapproché d'office ;
+   sinon il est proposé en tête (« sur »), à confirmer. Renvoie le nombre de rapprochements faits d'office. */
 function rapprocherTout(){
   // Une saisie du téléphone n'est rapprochée qu'une fois validée sur le PC
   const libres = vivants("justificatifs").filter(j => (j.statut === "a_rapprocher" || !j.statut) && !j.aValider);
@@ -135,16 +147,17 @@ function rapprocherTout(){
   for (const js of groupes.values()){
     if (js.length < 2) continue;
     const c = candidats(js);
-    if (c.length === 1 && c[0].score >= 60 && !js.some(j => j.refuse)){ lier(js, c[0].op, true); auto++; }
-    else for (const j of js) enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map(x => ({op: x.op.id, score: x.score, groupe: js.map(y => y.id)}))}));
+    const sur = c.length === 1 && c[0].score >= 60 && !js.some(j => j.refuse);
+    if (sur && !rapprochementModifie(js, c[0].op)){ lier(js, c[0].op, true); auto++; continue; }
+    for (const j of js) enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map((x, i) => ({op: x.op.id, score: x.score, groupe: js.map(y => y.id), sur: sur && i === 0}))}));
   }
   // 2. Justificatifs seuls
   for (const j of libres.filter(j => !j.groupe || (groupes.get(j.groupe) || []).length < 2)){
     if (j.statut === "rapproche") continue;
     const c = candidats([j]);
     const sur = (c.length === 1 && c[0].score >= 60) || (c.length > 1 && c[0].score >= 85 && c[1].score < c[0].score - 25);
-    if (sur && !j.refuse){ lier([j], c[0].op, true); auto++; }
-    else enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map(x => ({op: x.op.id, score: x.score}))}));
+    if (sur && !j.refuse && !rapprochementModifie([j], c[0].op)){ lier([j], c[0].op, true); auto++; continue; }
+    enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map((x, i) => ({op: x.op.id, score: x.score, sur: sur && !j.refuse && i === 0}))}));
   }
   // 3. Achats groupés devinés (jamais appliqués d'office)
   const restants = vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && !(j.propositions || []).length);
@@ -188,14 +201,12 @@ async function creerJustificatif(donnees, piece){
   // qu'à la validation sur le PC (« Enregistrer la saisie »). Une saisie du téléphone ne modifie aucune fiche.
   if (j.commercantNom || j.raisonSociale){
     const mobile = j.origine === "mobile";
-    const c = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)))
-      || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    const sur = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)));
+    const c = sur || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    if (c && !sur && !commercantSur({raisonSociale: j.raisonSociale, enseigne: j.commercantNom})) j.fournisseurDevine = true;
     if (c){
-      if (!mobile){
-        if (j.raisonSociale && nomPlausible(j.raisonSociale)) ajouterAlias(c, j.raisonSociale);
-        if (j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; }
-        enregistrer("commercants", c); invaliderIndex();
-      }
+      // Aucune fiche n'est modifiée d'office (ni alias ni nature) : cela se fait à la validation, avec votre accord
+      if (!mobile && !j.fournisseurDevine && j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; enregistrer("commercants", c); invaliderIndex(); }
       Object.assign(j, {commercant: c.id, commercantNom: c.nom, fournisseurProvisoire: false});
       if (!j.categorie && c.categorie) Object.assign(j, {categorie: c.categorie, sousCategorie: c.sousCategorie || "", lieu: j.lieu || c.lieu || ""});
     } else j.fournisseurProvisoire = true;

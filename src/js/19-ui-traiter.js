@@ -3,7 +3,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
   const aClasser = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose").sort((a, b) => a.date < b.date ? 1 : -1);
   const surs = aClasser.filter(o => o.statut === "propose" && o.categorie !== "À préciser");
   etat.coches = etat.coches || new Set(surs.map(o => o.id));
-  c.appendChild(entete("À traiter", "Ce qui attend une décision. Les cas sans ambiguïté ont été appliqués d'office et restent réversibles (en bas de page).",
+  c.appendChild(entete("À traiter", "Ce qui attend une décision. Les cas sans ambiguïté qui ne changent rien sont appliqués d'office et restent réversibles (en bas de page) ; ceux qui changeraient fournisseur ou catégorie attendent votre clic.",
     surs.length ? h("button", {class: "primaire", onclick: () => {
       let n = 0; for (const o of aClasser) if (etat.coches.has(o.id) && o.categorie !== "À préciser"){ validerClassement(o, false); n++; }
       etat.coches = null; message(n + " classement(s) validé(s)."); rafraichirEcran();

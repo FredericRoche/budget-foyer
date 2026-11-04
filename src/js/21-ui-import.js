@@ -43,7 +43,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       for (const f of FICHIERS_EN_COURS.filter(x => x.statut === "pret")) await enregistrerFichier(f, true);
       if (FICHIERS_EN_COURS.some(f => f.source)) await nettoyerDepot();
       rafraichirEcran();
-    }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs s'appliqueront d'office.")));
+    }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs sans changement de fournisseur ni de catégorie s'appliqueront d'office, les autres seront proposés.")));
     const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.statut === "pret");
     if (detail){
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Aperçu : " + detail.lu.nom));
@@ -180,6 +180,8 @@ async function importerJustificatifPc(lu, depuisDepot){
   if (ndf) Object.assign(t, {type: "notefrais", montant: ndf.total, date: ndf.declaree, numero: "NDF " + ndf.numero, raisonSociale: ndf.entite || t.raisonSociale, enseigne: ndf.entite || t.enseigne});
   const precedente = ndf ? vivants("justificatifs").filter(x => estNoteFrais(x) && !x.aValider && x.id).sort((a, b) => a.date < b.date ? 1 : -1)[0] || null : null;
   const c = commercantPourTicket(t) || (precedente?.commercant ? obtenir("commercants", precedente.commercant) : null);
+  // Fournisseur trouvé autrement que par un alias ou un SIRET : simple supposition, affichée comme telle
+  const devine = !!c && !commercantSur(t) && !(ndf && precedente && c.id === precedente.commercant);
   // Même pièce déjà enregistrée (même montant, même date, même fournisseur) : on demande avant de l'ajouter
   const double = justificatifDejaLa({montant: t.montant, date: t.date, commercant: c?.id, raisonSociale: t.raisonSociale, numero: t.numero});
   if (double && !(await confirmer("Une pièce identique est déjà enregistrée : " + (double.commercantNom || double.raisonSociale || "fournisseur ?") + (double.numero ? ", facture n° " + double.numero : "") + ", " + euros(double.montant) + " du " + dateFr(double.date)
@@ -187,7 +189,7 @@ async function importerJustificatifPc(lu, depuisDepot){
   const j = await creerJustificatif({type: t.type, date: t.date || aujourdhui(), heure: t.heure, montant: t.montant || 0, raisonSociale: t.raisonSociale, commercantNom: c ? c.nom : nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")),
     commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
     categorie: precedente?.categorie || c?.categorie || "", sousCategorie: precedente ? precedente.sousCategorie || "" : c?.sousCategorie || "", lieu: precedente?.lieu || c?.lieu || "", aVerifier: true,
-    natureExacte: ndf ? "Note de frais n° " + ndf.numero + " (" + ndf.periode.toLowerCase() + ")" : "", lignesNdf: ndf ? ndf.lignes : undefined,
+    fournisseurDevine: devine, natureExacte: ndf ? "Note de frais n° " + ndf.numero + " (" + ndf.periode.toLowerCase() + ")" : "", lignesNdf: ndf ? ndf.lignes : undefined,
     aValider: !!depuisDepot}, t.photo);
   rapprocherTout();
   ETAT_ECRAN.justificatifs = Object.assign(ETAT_ECRAN.justificatifs || {}, {choisi: j.id});

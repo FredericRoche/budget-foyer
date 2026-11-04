@@ -169,16 +169,30 @@ const cleNumero = s => norm(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").sli
    y figurent. Les fiches de la famille, des virements internes et des revenus sont écartées. */
 const MOTS_GENERIQUES = new Set(["sarl", "sas", "sasu", "eurl", "cedex", "france", "societe", "chez", "prlv", "sepa", "virement", "carte", "facture", "architecte"]);
 const motsNom = s => [...new Set(norm(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !MOTS_GENERIQUES.has(w)))];
+/* Mots de lieu et d'adresse : ils figurent aussi dans l'adresse du client (la vôtre) imprimée sur la facture ; seuls,
+   ils ne prouvent rien (le 04/11, un alias fait de lieux avait fait prendre des factures d'hébergeur pour la charcuterie). */
+const MOTS_LIEUX = new Set(["paris", "lyon", "valence", "saint", "sainte", "germain", "boulevard", "avenue", "place", "route",
+  "chemin", "quai", "allee", "impasse", "centre", "ville", "gare", "marche"]);
 function commercantDansTexte(texte, fiches){
   const mots = new Set(motsNom(texte)); let meilleur = null, score = 0;
   for (const f of fiches){
     if (["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne"].includes(f.categorie)) continue;
     for (const nom of [f.nom, ...(f.alias || [])]){
       const m = motsNom(nom);
-      if (m.length >= 2 && m.every(w => mots.has(w)) && m.length > score){ meilleur = f; score = m.length; }
+      if (m.length >= 2 && m.some(w => !MOTS_LIEUX.has(w)) && m.every(w => mots.has(w)) && m.length > score){ meilleur = f; score = m.length; }
     }
   }
   return meilleur;
+}
+/* Reconnaissance sûre : alias (raison sociale, enseigne) ou SIRET. Le reste n'est qu'une supposition, à faire confirmer. */
+function commercantSur(t, liste){
+  const fiches = liste || vivants("commercants");
+  const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
+  for (const f of fiches){
+    if (t.siret && f.siret === t.siret) return f;
+    for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
+  }
+  return null;
 }
 /* Commerçant connu pour un ticket : par alias (raison sociale, enseigne) ou SIRET, sinon par son nom dans le texte. */
 function commercantPourTicket(t, liste){
@@ -188,5 +202,14 @@ function commercantPourTicket(t, liste){
     if (t.siret && f.siret === t.siret) return f;
     for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
   }
-  return t.texte ? commercantDansTexte(t.texte, fiches) : null;
+  if (!t.texte) return null;
+  const parTexte = commercantDansTexte(t.texte, fiches);
+  // Émetteur lisible sur la pièce et inconnu des fiches : une fiche trouvée ailleurs dans le texte n'est retenue que si
+  // l'un de ses mots figure dans ce nom (sinon, nouveau fournisseur à ce nom plutôt qu'un rapprochement de hasard)
+  const emetteur = [t.raisonSociale, t.enseigne].filter(s => s && nomPlausible(s)).join(" ");
+  if (parTexte && emetteur){
+    const motsEmetteur = new Set(motsNom(emetteur));
+    if (![parTexte.nom, ...(parTexte.alias || [])].some(n => motsNom(n).some(w => !MOTS_LIEUX.has(w) && motsEmetteur.has(w)))) return null;
+  }
+  return parTexte;
 }

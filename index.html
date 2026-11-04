@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-nPHA00CKKeiQbdRaarKGCLmonP82vUSv07+mckLukD0=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-HEtBt9iXpwPiXTfR46o6UUIb3rCwAcd3zDNyKegvuMQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-04.1901";
+const VERSION_APP = "2026-11-04.1925";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2763,7 +2763,8 @@ function appliquerReprise(prep, options){
 /* ================= Justificatifs et rapprochement =================
    Un justificatif (ticket de caisse, facture, facturette CB) est rapproché de
    l'opération bancaire de même montant, dans une fenêtre de dates qui dépend de
-   son type. Un cas sans ambiguïté est appliqué d'office, réversible ; les autres
+   son type. Un cas sans ambiguïté qui ne change ni le fournisseur ni la catégorie de l'opération est rapproché
+   d'office (réversible) ; s'il les changerait, il est seulement proposé en tête, à confirmer d'un clic ; les autres
    attendent dans « À traiter ». Facture et facturette d'un même achat se
    rattachent à la même opération sans double compte. Plusieurs tickets réglés en
    un seul paiement forment un « achat groupé » et ventilent l'opération.
@@ -2887,7 +2888,18 @@ function delier(j){
   enregistrer("justificatifs", Object.assign(j, {operations: [], statut: "a_rapprocher", auto: false, rapprocheLe: null, refuse: true}));
 }
 
-/* Passe automatique, après chaque import ou fusion de la boîte. */
+/* Le rapprochement modifierait-il l'opération ? Fournisseur différent, catégorie différente, ou ventilation
+   (plusieurs pièces) : oui. Une pièce sans fournisseur ni catégorie, ou conforme à l'opération : non. */
+function rapprochementModifie(js, op){
+  if (js.length > 1) return true;
+  const j = js[0];
+  if (j.commercant && op.commercant && j.commercant !== op.commercant) return true;
+  if (j.categorie && j.categorie !== "À préciser" && (j.categorie !== op.categorie || (j.sousCategorie && j.sousCategorie !== op.sousCategorie))) return true;
+  return false;
+}
+/* Passe automatique, après chaque import ou fusion de la boîte. Décision de Frédéric (04/11/2026) : l'application
+   ne change rien d'elle-même sur une déduction. Un cas sûr qui ne modifie pas l'opération est rapproché d'office ;
+   sinon il est proposé en tête (« sur »), à confirmer. Renvoie le nombre de rapprochements faits d'office. */
 function rapprocherTout(){
   // Une saisie du téléphone n'est rapprochée qu'une fois validée sur le PC
   const libres = vivants("justificatifs").filter(j => (j.statut === "a_rapprocher" || !j.statut) && !j.aValider);
@@ -2897,16 +2909,17 @@ function rapprocherTout(){
   for (const js of groupes.values()){
     if (js.length < 2) continue;
     const c = candidats(js);
-    if (c.length === 1 && c[0].score >= 60 && !js.some(j => j.refuse)){ lier(js, c[0].op, true); auto++; }
-    else for (const j of js) enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map(x => ({op: x.op.id, score: x.score, groupe: js.map(y => y.id)}))}));
+    const sur = c.length === 1 && c[0].score >= 60 && !js.some(j => j.refuse);
+    if (sur && !rapprochementModifie(js, c[0].op)){ lier(js, c[0].op, true); auto++; continue; }
+    for (const j of js) enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map((x, i) => ({op: x.op.id, score: x.score, groupe: js.map(y => y.id), sur: sur && i === 0}))}));
   }
   // 2. Justificatifs seuls
   for (const j of libres.filter(j => !j.groupe || (groupes.get(j.groupe) || []).length < 2)){
     if (j.statut === "rapproche") continue;
     const c = candidats([j]);
     const sur = (c.length === 1 && c[0].score >= 60) || (c.length > 1 && c[0].score >= 85 && c[1].score < c[0].score - 25);
-    if (sur && !j.refuse){ lier([j], c[0].op, true); auto++; }
-    else enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map(x => ({op: x.op.id, score: x.score}))}));
+    if (sur && !j.refuse && !rapprochementModifie([j], c[0].op)){ lier([j], c[0].op, true); auto++; continue; }
+    enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map((x, i) => ({op: x.op.id, score: x.score, sur: sur && !j.refuse && i === 0}))}));
   }
   // 3. Achats groupés devinés (jamais appliqués d'office)
   const restants = vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && !(j.propositions || []).length);
@@ -2950,14 +2963,12 @@ async function creerJustificatif(donnees, piece){
   // qu'à la validation sur le PC (« Enregistrer la saisie »). Une saisie du téléphone ne modifie aucune fiche.
   if (j.commercantNom || j.raisonSociale){
     const mobile = j.origine === "mobile";
-    const c = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)))
-      || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    const sur = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)));
+    const c = sur || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    if (c && !sur && !commercantSur({raisonSociale: j.raisonSociale, enseigne: j.commercantNom})) j.fournisseurDevine = true;
     if (c){
-      if (!mobile){
-        if (j.raisonSociale && nomPlausible(j.raisonSociale)) ajouterAlias(c, j.raisonSociale);
-        if (j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; }
-        enregistrer("commercants", c); invaliderIndex();
-      }
+      // Aucune fiche n'est modifiée d'office (ni alias ni nature) : cela se fait à la validation, avec votre accord
+      if (!mobile && !j.fournisseurDevine && j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; enregistrer("commercants", c); invaliderIndex(); }
       Object.assign(j, {commercant: c.id, commercantNom: c.nom, fournisseurProvisoire: false});
       if (!j.categorie && c.categorie) Object.assign(j, {categorie: c.categorie, sousCategorie: c.sousCategorie || "", lieu: j.lieu || c.lieu || ""});
     } else j.fournisseurProvisoire = true;
@@ -3602,16 +3613,30 @@ const cleNumero = s => norm(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").sli
    y figurent. Les fiches de la famille, des virements internes et des revenus sont écartées. */
 const MOTS_GENERIQUES = new Set(["sarl", "sas", "sasu", "eurl", "cedex", "france", "societe", "chez", "prlv", "sepa", "virement", "carte", "facture", "architecte"]);
 const motsNom = s => [...new Set(norm(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !MOTS_GENERIQUES.has(w)))];
+/* Mots de lieu et d'adresse : ils figurent aussi dans l'adresse du client (la vôtre) imprimée sur la facture ; seuls,
+   ils ne prouvent rien (le 04/11, un alias fait de lieux avait fait prendre des factures d'hébergeur pour la charcuterie). */
+const MOTS_LIEUX = new Set(["paris", "lyon", "valence", "saint", "sainte", "germain", "boulevard", "avenue", "place", "route",
+  "chemin", "quai", "allee", "impasse", "centre", "ville", "gare", "marche"]);
 function commercantDansTexte(texte, fiches){
   const mots = new Set(motsNom(texte)); let meilleur = null, score = 0;
   for (const f of fiches){
     if (["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne"].includes(f.categorie)) continue;
     for (const nom of [f.nom, ...(f.alias || [])]){
       const m = motsNom(nom);
-      if (m.length >= 2 && m.every(w => mots.has(w)) && m.length > score){ meilleur = f; score = m.length; }
+      if (m.length >= 2 && m.some(w => !MOTS_LIEUX.has(w)) && m.every(w => mots.has(w)) && m.length > score){ meilleur = f; score = m.length; }
     }
   }
   return meilleur;
+}
+/* Reconnaissance sûre : alias (raison sociale, enseigne) ou SIRET. Le reste n'est qu'une supposition, à faire confirmer. */
+function commercantSur(t, liste){
+  const fiches = liste || vivants("commercants");
+  const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
+  for (const f of fiches){
+    if (t.siret && f.siret === t.siret) return f;
+    for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
+  }
+  return null;
 }
 /* Commerçant connu pour un ticket : par alias (raison sociale, enseigne) ou SIRET, sinon par son nom dans le texte. */
 function commercantPourTicket(t, liste){
@@ -3621,7 +3646,16 @@ function commercantPourTicket(t, liste){
     if (t.siret && f.siret === t.siret) return f;
     for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
   }
-  return t.texte ? commercantDansTexte(t.texte, fiches) : null;
+  if (!t.texte) return null;
+  const parTexte = commercantDansTexte(t.texte, fiches);
+  // Émetteur lisible sur la pièce et inconnu des fiches : une fiche trouvée ailleurs dans le texte n'est retenue que si
+  // l'un de ses mots figure dans ce nom (sinon, nouveau fournisseur à ce nom plutôt qu'un rapprochement de hasard)
+  const emetteur = [t.raisonSociale, t.enseigne].filter(s => s && nomPlausible(s)).join(" ");
+  if (parTexte && emetteur){
+    const motsEmetteur = new Set(motsNom(emetteur));
+    if (![parTexte.nom, ...(parTexte.alias || [])].some(n => motsNom(n).some(w => !MOTS_LIEUX.has(w) && motsEmetteur.has(w)))) return null;
+  }
+  return parTexte;
 }
 
 /* ===== 13-calculs.js ===== */
@@ -4739,7 +4773,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
   const aClasser = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose").sort((a, b) => a.date < b.date ? 1 : -1);
   const surs = aClasser.filter(o => o.statut === "propose" && o.categorie !== "À préciser");
   etat.coches = etat.coches || new Set(surs.map(o => o.id));
-  c.appendChild(entete("À traiter", "Ce qui attend une décision. Les cas sans ambiguïté ont été appliqués d'office et restent réversibles (en bas de page).",
+  c.appendChild(entete("À traiter", "Ce qui attend une décision. Les cas sans ambiguïté qui ne changent rien sont appliqués d'office et restent réversibles (en bas de page) ; ceux qui changeraient fournisseur ou catégorie attendent votre clic.",
     surs.length ? h("button", {class: "primaire", onclick: () => {
       let n = 0; for (const o of aClasser) if (etat.coches.has(o.id) && o.categorie !== "À préciser"){ validerClassement(o, false); n++; }
       etat.coches = null; message(n + " classement(s) validé(s)."); rafraichirEcran();
@@ -5070,7 +5104,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       for (const f of FICHIERS_EN_COURS.filter(x => x.statut === "pret")) await enregistrerFichier(f, true);
       if (FICHIERS_EN_COURS.some(f => f.source)) await nettoyerDepot();
       rafraichirEcran();
-    }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs s'appliqueront d'office.")));
+    }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs sans changement de fournisseur ni de catégorie s'appliqueront d'office, les autres seront proposés.")));
     const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.statut === "pret");
     if (detail){
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Aperçu : " + detail.lu.nom));
@@ -5207,6 +5241,8 @@ async function importerJustificatifPc(lu, depuisDepot){
   if (ndf) Object.assign(t, {type: "notefrais", montant: ndf.total, date: ndf.declaree, numero: "NDF " + ndf.numero, raisonSociale: ndf.entite || t.raisonSociale, enseigne: ndf.entite || t.enseigne});
   const precedente = ndf ? vivants("justificatifs").filter(x => estNoteFrais(x) && !x.aValider && x.id).sort((a, b) => a.date < b.date ? 1 : -1)[0] || null : null;
   const c = commercantPourTicket(t) || (precedente?.commercant ? obtenir("commercants", precedente.commercant) : null);
+  // Fournisseur trouvé autrement que par un alias ou un SIRET : simple supposition, affichée comme telle
+  const devine = !!c && !commercantSur(t) && !(ndf && precedente && c.id === precedente.commercant);
   // Même pièce déjà enregistrée (même montant, même date, même fournisseur) : on demande avant de l'ajouter
   const double = justificatifDejaLa({montant: t.montant, date: t.date, commercant: c?.id, raisonSociale: t.raisonSociale, numero: t.numero});
   if (double && !(await confirmer("Une pièce identique est déjà enregistrée : " + (double.commercantNom || double.raisonSociale || "fournisseur ?") + (double.numero ? ", facture n° " + double.numero : "") + ", " + euros(double.montant) + " du " + dateFr(double.date)
@@ -5214,7 +5250,7 @@ async function importerJustificatifPc(lu, depuisDepot){
   const j = await creerJustificatif({type: t.type, date: t.date || aujourdhui(), heure: t.heure, montant: t.montant || 0, raisonSociale: t.raisonSociale, commercantNom: c ? c.nom : nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")),
     commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
     categorie: precedente?.categorie || c?.categorie || "", sousCategorie: precedente ? precedente.sousCategorie || "" : c?.sousCategorie || "", lieu: precedente?.lieu || c?.lieu || "", aVerifier: true,
-    natureExacte: ndf ? "Note de frais n° " + ndf.numero + " (" + ndf.periode.toLowerCase() + ")" : "", lignesNdf: ndf ? ndf.lignes : undefined,
+    fournisseurDevine: devine, natureExacte: ndf ? "Note de frais n° " + ndf.numero + " (" + ndf.periode.toLowerCase() + ")" : "", lignesNdf: ndf ? ndf.lignes : undefined,
     aValider: !!depuisDepot}, t.photo);
   rapprocherTout();
   ETAT_ECRAN.justificatifs = Object.assign(ETAT_ECRAN.justificatifs || {}, {choisi: j.id});
@@ -5512,7 +5548,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " pièce(s) à valider (téléphone ou dépôt) · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
-     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s)."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
+     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office ; ceux qui changeraient fournisseur ou catégorie sont proposés, à confirmer."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
   if (!j && etat.listeSeule && attente.length){
     c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("span", {class: "discret"}, attente.length + " pièce(s) " + (nbValider ? "à valider" : "avec une opération candidate à trancher") + ". Cliquez sur une ligne pour l'ouvrir, ou "),
       h("button", {class: "mini", onclick: () => { etat.listeSeule = false; etat.ferme = null; rafraichirEcran(); }}, "Reprendre la file")));
@@ -5607,11 +5643,12 @@ function ecranRapprochement(j, etat, attente){
     type.addEventListener("change", () => { ligneCarte.querySelector("label").textContent = libPaye(); });
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
-      ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
+      ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
       ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque);
     champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num});
   });
   const enregistrerSaisie = () => {
+    const aliasAProposer = [];
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
@@ -5627,16 +5664,29 @@ function ecranRapprochement(j, etat, attente){
       if (f.x.commercantNom && (f.x.commercantNom !== ancienNom || !f.x.commercant || (choisie && choisie.id !== f.x.commercant) || f.selF.value === "__nouveau__")){
         let fiche = choisie || vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom));
         if (!fiche) fiche = enregistrer("commercants", {nom: f.x.commercantNom, alias: [], stats: {}, natures: {}});
-        if (f.x.raisonSociale && nomPlausible(f.x.raisonSociale) && ajouterAlias(fiche, f.x.raisonSociale)) message("Mémorisé : « " + f.x.raisonSociale + " » = " + fiche.nom + ".");
         f.x.commercant = fiche.id; invaliderIndex();
       }
+      // Nom lu sur la pièce, nouveau pour la fiche : proposé comme alias, jamais ajouté sans accord
+      const ficheFinale = f.x.commercant ? obtenir("commercants", f.x.commercant) : null;
+      if (ficheFinale && f.x.raisonSociale && nomPlausible(f.x.raisonSociale) && !estBanqueTerminal(f.x.raisonSociale) && cleLibelle(f.x.raisonSociale)
+        && !(ficheFinale.alias || []).includes(cleLibelle(f.x.raisonSociale)) && norm(ficheFinale.nom) !== norm(f.x.raisonSociale) && !f.x.aliasRefuse)
+        aliasAProposer.push({fiche: ficheFinale, nom: f.x.raisonSociale, x: f.x});
+      f.x.fournisseurDevine = false;
       enregistrer("justificatifs", f.x);
       if (apprendreChiffresCarte(f.x.carte4, f.x.carte)) message("Mémorisé : carte ****" + String(f.x.carte4).slice(-4) + " = " + libelleMoyen(f.x.carte) + ".");
       if (f.x.carte === "ESPECES" && !estNoteFrais(f.x) && !(f.x.operations || []).length) creerOperationEspeces(f.x);
     }
+    // Questions posées après l'enregistrement (la saisie est déjà sauvée, quelle que soit la réponse)
+    (async () => {
+      for (const p of aliasAProposer){
+        if (await confirmer("Retenir « " + p.nom + " » comme autre nom de « " + p.fiche.nom + " » ? Les prochaines pièces portant ce nom seront rattachées d'office à cette fiche.", "Retenir")){
+          if (ajouterAlias(p.fiche, p.nom)) message("Retenu : « " + p.nom + " » = " + p.fiche.nom + ".");
+        } else enregistrer("justificatifs", Object.assign(p.x, {aliasRefuse: true}));
+      }
+    })();
   };
   saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini" + (j.aValider ? " primaire" : ""), onclick: () => { const v = groupe.some(x => x.aValider); if (enregistrerSaisie() === false) return;
-      if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s)." : "."));
+      if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s) d'office." : "."));
         // Saisie suivante à valider, sinon justificatif suivant
         const suivant = attente.find(x => x.aValider && !groupe.includes(x)) || attente[idx + 1]; etat.choisi = suivant ? suivant.id : null;
       } else { message("Saisie enregistrée."); etat.choisi = null; } rafraichirEcran(); }}, j.aValider ? "Valider la saisie" : "Enregistrer la saisie"),
@@ -5671,8 +5721,8 @@ function ecranRapprochement(j, etat, attente){
       : "Aucune opération de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates. Le relevé n'est peut-être pas encore importé."));
     const [av, ap] = fenetre(j);
     cand.appendChild(h("p", {class: "note"}, nf
-      ? "Note de frais : on attend un crédit (virement de remboursement) du montant exact, date −" + av + " / +" + ap + " jours. Les dépenses avancées restent rapprochées de leurs propres débits. Un seul candidat sûr : rapproché d'office."
-      : "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" || j.type === "devis" ? "facture ou devis" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office."));
+      ? "Note de frais : on attend un crédit (virement de remboursement) du montant exact, date −" + av + " / +" + ap + " jours. Les dépenses avancées restent rapprochées de leurs propres débits. Un seul candidat sûr : proposé en tête, à confirmer (le virement change de catégorie)."
+      : "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" || j.type === "devis" ? "facture ou devis" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office s'il ne change ni fournisseur ni catégorie, sinon proposé en tête."));
     cand.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}},
       nf ? null : h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => { if (!(x.operations || []).length) creerOperationEspeces(x); }); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
       h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) enregistrer("justificatifs", Object.assign(x, {reporte: aujourdhui()})); const suivant = attente[idx + 1]; etat.choisi = suivant ? suivant.id : null; rafraichirEcran(); }}, "Reporter")));
@@ -7269,6 +7319,15 @@ async function autotest(){
       const tk = extraireTicket("Jean Dupont, architecte essai\nFacture\nn° Date\n2 6 – 0 7 – 10 2 12 / 10 /202 6\nMontant à régler TTC\n980 €");
       v("facture : date fragmentée et fournisseur nommé dans le texte", [tk.date, commercantPourTicket(tk)?.id === fp.id], ["2026-10-12", true]);
       {
+        // L'adresse du client (« avenue de Valence, Paris ») ne doit pas faire reconnaître une boutique dont l'alias n'est fait que de lieux
+        const fc = enregistrer("commercants", {nom: "Traiteur essai (place essai)", alias: ["RPG ST VALENCE PARIS"], stats: {}, natures: {}, categorie: "Alimentation"});
+        const fh = extraireTicket("Hebergeur Essai Network SA\nFacture N° 12345\nClient : Jean Dupont\n10 avenue de Valence\n75005 Paris\nTotal TTC 13,68 €");
+        const fh2 = Object.assign({}, fh, {raisonSociale: "Hebergeur Essai Network SA", enseigne: "Hebergeur Essai Network SA"});
+        v("fournisseur : reconnaissance sûre (alias) distinguée de la supposition (texte)", [commercantSur({raisonSociale: "RPG ST VALENCE PARIS"}, [fc])?.id === fc.id, commercantSur({raisonSociale: "Autre nom"}, [fc])], [true, null]);
+        v("facture : l'adresse du client ne désigne pas un commerçant", [commercantDansTexte(fh.texte, [fc]), commercantPourTicket(fh2, [fc])], [null, null]);
+        supprimer("commercants", fc.id);
+      }
+      {
         const nb0 = vivants("commercants").length;
         const jm = await creerJustificatif({type: "ticket", date: "2027-03-10", montant: 12, commercantNom: "Boulangrie Nouvele", origine: "mobile"});
         v("téléphone : fournisseur inconnu laissé provisoire, aucune fiche créée", [vivants("commercants").length - nb0, jm.fournisseurProvisoire], [0, true]);
@@ -7560,10 +7619,20 @@ async function autotest(){
     const opCafe = vivants("operations").find(o => /CAFE/.test(o.libelle) && o.compte === carte.id);
     const j1 = enregistrer("justificatifs", {type: "facturette", date: "2027-03-04", montant: 12.3, carte: "X333", carte4: "0333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
-    v("facturette rapprochée d'office (−1 jour, carte ****0333)", [obtenir("justificatifs", j1.id).statut, obtenir("justificatifs", j1.id).operations[0]], ["rapproche", opCafe.id]);
+    // Pièce sans fournisseur ni catégorie à imposer : rapprochée d'office
+    v("facturette rapprochée d'office (−1 jour, carte ****0333, rien ne change)", [obtenir("justificatifs", j1.id).statut, obtenir("justificatifs", j1.id).operations[0]], ["rapproche", opCafe.id]);
     const j2 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-04", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
     v("ticket du même achat : rattaché à la même opération", obtenir("justificatifs", j2.id).operations[0], opCafe.id);
+    {
+      // Pièce qui changerait la catégorie de l'opération : seulement proposée
+      const opX = enregistrer("operations", {compte: carte.id, date: "2027-03-20", montant: -44.4, libelle: "LIBRAIRIE CHANGE", categorie: "Culture et loisirs", sousCategorie: "Livres, presse, sorties, jeux", statut: "classe"});
+      const jx = enregistrer("justificatifs", {type: "ticket", date: "2027-03-20", montant: 44.4, carte: "X333", categorie: "Maison", sousCategorie: "Bricolage et jardin", statut: "a_rapprocher", operations: []});
+      rapprocherTout();
+      const px = obtenir("justificatifs", jx.id);
+      v("rapprochement qui changerait la catégorie : proposé, pas appliqué", [px.statut, (px.propositions || [])[0]?.op, obtenir("operations", opX.id).categorie], ["a_rapprocher", opX.id, "Culture et loisirs"]);
+      supprimer("justificatifs", jx.id); supprimer("operations", opX.id);
+    }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
     v("hors tolérance (opération 5 jours avant le ticket) : pas de rapprochement d'office", obtenir("justificatifs", j3.id).statut, "a_rapprocher");
