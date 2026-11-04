@@ -255,6 +255,22 @@ async function autotest(){
             v("note de frais : nature sans mot connu, débit proposé au choix à la main", debitsPossiblesNdf(j8, lignesNoteFrais(j8)[0]).some(o => o.id === pe.id), true);
             supprimer("operations", pe.id); supprimer("justificatifs", j8.id);
           }
+          {
+            // Relevé PDF LCL : détail des cartes, carte reconnue, devise ignorée, année de janvier, remboursement, doublons
+            const ck = enregistrer("comptes", {nom: "Carte essai PDF", type: "carte", banque: "LCL", carte: "X456", actif: true});
+            const rel = ["RELEVE DE COMPTE", "Indicatif : 8208 Compte : 99 Z", "PAIEMENTS PAR CARTE DE JANVIER 2027", "LIBELLE VALEUR DEBIT CREDIT",
+              "CARTE N° 12 3456 M JEAN ESSAI", "SOUS TOTAL : 1 608,50", "BOUTIQUE ESSAI LE 30/12 1 581,00", "Rotterdam 1581,00 EUR", "CAFE ESSAI LE 03/01 20,00", "CAFE ESSAI LE 03/01 20,00", "AVOIR ESSAI LE 05/01 12,50",
+              "CARTE N° 34 5678 MME MARIE ESSAI", "SOUS TOTAL : 8,00", "PAIN ESSAI LE 04/01 8,00", "TOTAUX 1 616,50", "MONTANT COMPTABILISE LE 31/01/2027"].join(L);
+            const lc = extraireCartesReleveLcl(rel);
+            v("relevé PDF LCL : cartes, dates, devise ignorée, remboursement reconnu", [lc.cartes.length, lc.cartes[0].carte, lc.cartes[0].lignes.map(l => l.date + " " + l.montant).join(" | "), lc.cartes[0].controle.ok, lc.cartes[1].carte],
+              [2, "X456", "2026-12-30 -1581 | 2027-01-03 -20 | 2027-01-03 -20 | 2027-01-05 12.5", true, "X678"]);
+            const p1 = preparerCartesPdf(lc); appliquerCartesPdf(p1);
+            const p2 = preparerCartesPdf(extraireCartesReleveLcl(rel));
+            v("relevé PDF LCL : deux achats identiques gardés, réimport sans doublon, carte inconnue sans titulaire", [p1.nouvelles.length, p2.nouvelles.length, vivants("operations").filter(o => o.compte === ck.id && o.date === "2027-01-03").length, p1.cartes[1].sansTitulaire], [5, 0, 2, true]);
+            for (const o of vivants("operations").filter(o => /ESSAI/.test(o.libelle) && o.date >= "2026-12-30" && o.date <= "2027-01-05")) supprimer("operations", o.id);
+            for (const i of vivants("imports").filter(i => /2027-01|2026-12-30/.test(JSON.stringify(i.periode || {})))) supprimer("imports", i.id);
+            supprimer("comptes", ck.id);
+          }
           v("note de frais : un parking de gare n'est pas un billet de train", [libelleColleNature("Train", {libelle: "EFFIA VALENCE TGV"}), libelleColleNature("Train", {libelle: "SNCF-VOYAGEURS PARIS"})], [false, true]);
           const o4 = enregistrer("operations", {compte: cc.id, date: "2026-09-01", montant: -12.4, libelle: "TUNNEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});
           const r4 = rapprochementLignesNdf(jn).find(r => r.ligne.n === 4);

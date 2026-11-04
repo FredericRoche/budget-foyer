@@ -101,6 +101,41 @@ function preparerReleve(lu, compte){
   for (const n of res.nouvelles) n.proposition = proposerClassement({libelle: n.libelle, montant: n.montant, date: n.date, compte: cid, mcc: n.mcc, categorieBanque: n.categorieBanque});
   return res;
 }
+/* Détail des cartes lu dans un relevé PDF : une préparation par carte. Une ligne déjà présente sur la carte
+   (ou sur « Cartes LCL (sans titulaire) ») à la même date et pour le même montant n'est pas recréée, quel que
+   soit son libellé (celui du PDF diffère de celui des exports CSV) ; deux achats identiques du même jour restent deux. */
+function preparerCartesPdf(lu){
+  const nv = vivants("comptes").find(c => c.carte === "LCL-NV");
+  const preps = [];
+  for (const c of lu.cartes){
+    const compte = trouverCompte({carte: c.carte, banque: "LCL"}) || nv || null;
+    const sansTitulaire = !trouverCompte({carte: c.carte, banque: "LCL"});
+    const cle = (d, m) => d + "|" + versCentimes(m);
+    const existants = new Map();
+    for (const op of vivants("operations").filter(o => compte && (o.compte === compte.id || (nv && o.compte === nv.id))))
+      existants.set(cle(op.date, op.montant), (existants.get(cle(op.date, op.montant)) || 0) + 1);
+    const vus = new Map(), nouvelles = [], deja = [];
+    for (const l of c.lignes){
+      const k = cle(l.date, l.montant); const n = (vus.get(k) || 0) + 1; vus.set(k, n);
+      (n <= (existants.get(k) || 0) ? deja : nouvelles).push(l);
+    }
+    const emp = empreintes(compte ? compte.id : "?", nouvelles);
+    preps.push({lu: Object.assign({}, lu, {genre: "carte", carte: c.carte, lignes: c.lignes, periode: {debut: c.lignes.map(l => l.date).sort()[0], fin: c.lignes.map(l => l.date).sort().pop()}}),
+      carte: c, compte, sansTitulaire, deja, reattribuees: [], ecartees: [], controles: [c.controle],
+      nouvelles: nouvelles.map((l, i) => Object.assign({}, l, {empreinte: emp[i]}))});
+  }
+  return {cartes: preps, nouvelles: preps.flatMap(p => p.nouvelles),
+    controles: preps.map(p => p.controles[0]).concat(preps.filter(p => p.sansTitulaire).map(p => ({ok: true, texte: "carte " + p.carte.numero + " (" + p.carte.titulaire + ") inconnue : lignes sur « Cartes LCL (sans titulaire) »"})))};
+}
+function appliquerCartesPdf(prep){
+  let n = 0;
+  for (const p of prep.cartes){
+    if (!p.compte) p.compte = compteCartesNonVentilees(compteCourantLcl()?.id || "");
+    if (!p.nouvelles.length) continue;
+    appliquerReleve(p); n += p.nouvelles.length;
+  }
+  return n;
+}
 function periodesCartes(){
   return vivants("imports").filter(i => i.genre === "carte" && i.banque === "LCL").map(i => i.periode);
 }

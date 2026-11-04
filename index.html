@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-7XQihyKWv2u8nSekqPfleg/ekhtFOWBfyhIFnWMflc0=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-URZ10cD57hvZRV2K+rMoSUE7Anbe4cr2GCbDcWygYw4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-04.1810";
+const VERSION_APP = "2026-11-04.1842";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1972,6 +1972,54 @@ function lireAmexCsv(nom, lignes){
   return {genre: "carte", banque: "Amex", nom, numero: "", carte: "AMEX", periode: {debut: dates[0], fin: dates[dates.length - 1]}, lignes: ops};
 }
 
+/* ---------- Relevé de compte LCL en PDF : paiements par carte du mois ----------
+   « PAIEMENTS PAR CARTE D'OCTOBRE 2025 », puis par carte « CARTE N° 12 3456 M JEAN DUPONT »,
+   « SOUS TOTAL : 3 996,27 » et une ligne par achat « LIBELLÉ LE 22/10 1 581,00 ». Les lignes de devise
+   (« Rotterdam 1581,00 EUR ») sont ignorées. La carte est reconnue par ses 3 derniers chiffres (X456).
+   Le texte ne distingue pas un remboursement d'un achat : la somme est contrôlée contre le sous-total, et
+   un écart égal au double d'une ligne la désigne comme remboursement. */
+function extraireCartesReleveLcl(texte){
+  const T = String(texte || "").replace(/[\u00a0\u202f\u2009]/g, " ");
+  if (!/PAIEMENTS PAR CARTE/i.test(T) || !/CARTE N°\s*\d/i.test(T)) return null;
+  const MOIS = {janvier: 1, fevrier: 2, mars: 3, avril: 4, mai: 5, juin: 6, juillet: 7, aout: 8, septembre: 9, octobre: 10, novembre: 11, decembre: 12};
+  const numero = ((T.match(/Compte\s*:\s*([0-9 ]+[A-Z])/) || [])[1] || "").replace(/\s/g, "");
+  const lignes = T.split(/\n/).map(l => l.trim());
+  const cartes = [];
+  let moisCarte = 0, anCarte = 0, carte = null;
+  for (const l of lignes){
+    const s = l.match(/PAIEMENTS PAR CARTE D[E'’ ]+\s*([A-ZÉÛa-zéû]+)\s+(\d{4})/i);
+    if (s){ moisCarte = MOIS[norm(s[1]).toLowerCase()] || 0; anCarte = +s[2]; carte = null; continue; }
+    if (!moisCarte) continue;
+    const c = l.match(/CARTE N°\s*(\d{2})\s*(\d{4})\s+(?:M|MME|MLLE|MR)\.?\s+(.+)$/i);
+    if (c){ carte = {numero: c[1] + " " + c[2], carte: "X" + c[2].slice(-3), titulaire: c[3].trim(), sousTotal: null, lignes: [], mois: anCarte + "-" + pad2(moisCarte)}; cartes.push(carte); continue; }
+    if (!carte) continue;
+    const st = l.match(/^SOUS TOTAL\s*:\s*([\d .]+,\d{2})/i);
+    if (st){ carte.sousTotal = lireMontant(st[1]); continue; }
+    if (/^TOTAUX\b|^MONTANT COMPTABILISE/i.test(l)){ carte = null; continue; }
+    const a = l.match(/^(.+?)\s+LE\s+(\d{2})\/(\d{2})\s+(\d[\d .]*,\d{2})$/);
+    if (!a) continue;
+    // Année : celle du mois de la carte, sauf un achat de fin d'année réglé en janvier
+    const mm = +a[3], an = mm > moisCarte + 1 ? anCarte - 1 : anCarte;
+    carte.lignes.push({date: an + "-" + a[3] + "-" + a[2], montant: -lireMontant(a[4]), libelle: propre(a[1]), type: "Carte"});
+  }
+  const pleines = cartes.filter(c => c.lignes.length);
+  if (!pleines.length) return null;
+  for (const c of pleines){
+    const t = -somme(c.lignes, l => versCentimes(l.montant));
+    const st = c.sousTotal === null ? null : versCentimes(c.sousTotal);
+    if (st !== null && t !== st){
+      const remb = c.lignes.find(l => -versCentimes(l.montant) * 2 === t - st);
+      if (remb) remb.montant = -remb.montant;   // remboursement : crédit sur la carte
+    }
+    const t2 = -somme(c.lignes, l => versCentimes(l.montant));
+    c.controle = {ok: st === null || t2 === st, texte: "carte " + c.numero + " : " + c.lignes.length + " ligne(s), " + euros(t2 / 100)
+      + (st === null ? "" : t2 === st ? " = sous-total" : " ≠ sous-total " + euros(st / 100))};
+  }
+  const dates = pleines.flatMap(c => c.lignes.map(l => l.date)).sort();
+  return {genre: "cartes_lcl", banque: "LCL", numero, cartes: pleines, periode: {debut: dates[0], fin: dates[dates.length - 1]},
+    titre: "Détail des cartes " + pleines.map(c => c.carte).join(", ") + " · " + pleines[0].mois};
+}
+
 /* ---------- Justificatifs d'achat SNCF Connect ----------
    Un PDF par paiement : date de la transaction, montant, carte, et pour chaque trajet sa date, son heure
    et ses voyageurs. Les trajets d'une même commande (aller et retour) partagent un prix de bloc. */
@@ -2071,6 +2119,9 @@ function premier(texte, re){ const m = texte.match(re); return m ? m[1].trim() :
 function reconnaitrePdf(nom, texte, octets){
   const T = texte; const N = norm(texte);
   const base = {nom, texte: T, octets};
+  // Relevé de compte LCL : on n'en garde que le détail des cartes (le compte vient des exports CSV)
+  const cartesPdf = extraireCartesReleveLcl(T);
+  if (cartesPdf) return Object.assign(base, cartesPdf, {nom});
   // Facture des cartes LCL (« RELEVE CB AU jj/mm/aa »)
   if (/RELEVE CB AU/.test(T) && /DIFFERE|Montant/i.test(T)){
     return Object.assign(base, {genre: "facture_cb", banque: "LCL",
@@ -2262,6 +2313,41 @@ function preparerReleve(lu, compte){
   }
   for (const n of res.nouvelles) n.proposition = proposerClassement({libelle: n.libelle, montant: n.montant, date: n.date, compte: cid, mcc: n.mcc, categorieBanque: n.categorieBanque});
   return res;
+}
+/* Détail des cartes lu dans un relevé PDF : une préparation par carte. Une ligne déjà présente sur la carte
+   (ou sur « Cartes LCL (sans titulaire) ») à la même date et pour le même montant n'est pas recréée, quel que
+   soit son libellé (celui du PDF diffère de celui des exports CSV) ; deux achats identiques du même jour restent deux. */
+function preparerCartesPdf(lu){
+  const nv = vivants("comptes").find(c => c.carte === "LCL-NV");
+  const preps = [];
+  for (const c of lu.cartes){
+    const compte = trouverCompte({carte: c.carte, banque: "LCL"}) || nv || null;
+    const sansTitulaire = !trouverCompte({carte: c.carte, banque: "LCL"});
+    const cle = (d, m) => d + "|" + versCentimes(m);
+    const existants = new Map();
+    for (const op of vivants("operations").filter(o => compte && (o.compte === compte.id || (nv && o.compte === nv.id))))
+      existants.set(cle(op.date, op.montant), (existants.get(cle(op.date, op.montant)) || 0) + 1);
+    const vus = new Map(), nouvelles = [], deja = [];
+    for (const l of c.lignes){
+      const k = cle(l.date, l.montant); const n = (vus.get(k) || 0) + 1; vus.set(k, n);
+      (n <= (existants.get(k) || 0) ? deja : nouvelles).push(l);
+    }
+    const emp = empreintes(compte ? compte.id : "?", nouvelles);
+    preps.push({lu: Object.assign({}, lu, {genre: "carte", carte: c.carte, lignes: c.lignes, periode: {debut: c.lignes.map(l => l.date).sort()[0], fin: c.lignes.map(l => l.date).sort().pop()}}),
+      carte: c, compte, sansTitulaire, deja, reattribuees: [], ecartees: [], controles: [c.controle],
+      nouvelles: nouvelles.map((l, i) => Object.assign({}, l, {empreinte: emp[i]}))});
+  }
+  return {cartes: preps, nouvelles: preps.flatMap(p => p.nouvelles),
+    controles: preps.map(p => p.controles[0]).concat(preps.filter(p => p.sansTitulaire).map(p => ({ok: true, texte: "carte " + p.carte.numero + " (" + p.carte.titulaire + ") inconnue : lignes sur « Cartes LCL (sans titulaire) »"})))};
+}
+function appliquerCartesPdf(prep){
+  let n = 0;
+  for (const p of prep.cartes){
+    if (!p.compte) p.compte = compteCartesNonVentilees(compteCourantLcl()?.id || "");
+    if (!p.nouvelles.length) continue;
+    appliquerReleve(p); n += p.nouvelles.length;
+  }
+  return n;
 }
 function periodesCartes(){
   return vivants("imports").filter(i => i.genre === "carte" && i.banque === "LCL").map(i => i.periode);
@@ -4963,7 +5049,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
     gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
-        reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+        cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
         document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : lu.sousGenre === "achat_sncf" ? "Justificatif SNCF Connect · " + lu.titre : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
@@ -5063,6 +5149,7 @@ function preparerFichier(f){
       else if (lu.genre !== "valorisation") f.prep = preparerReleve(lu, f.compte);
       f.statut = "pret";
     } else if (lu.genre === "reprise_v7"){ f.prep = preparerReprise(lu); f.statut = "pret"; }
+    else if (lu.genre === "cartes_lcl"){ f.prep = preparerCartesPdf(lu); f.statut = "pret"; }
     else if (["regles", "plan", "justificatif_pdf", "image", "document"].includes(lu.genre)) f.statut = "pret";
     else f.statut = "erreur";
   } catch (e){ f.erreur = e.message; f.statut = "erreur"; console.error(e); }
@@ -5089,6 +5176,7 @@ async function enregistrerFichier(f, enLot){
     const lu = f.lu;
     if (lu.genre === "compte" || lu.genre === "carte"){ const imp = appliquerReleve(f.prep); f.resultat = imp.nouvelles + " opération(s)"; }
     else if (lu.genre === "facture_cb") appliquerFacture(f.prep);
+    else if (lu.genre === "cartes_lcl"){ const n = appliquerCartesPdf(f.prep); f.resultat = n + " opération(s)"; }
     else if (lu.genre === "valorisation") appliquerValorisation(lu, f.compte);
     else if (lu.genre === "reprise_v7"){
       const ok = enLot ? true : await confirmer("Reprendre " + f.prep.operations.length + " opérations, le budget " + (f.prep.budget?.annee || "") + " (" + euros(f.prep.budget?.total || 0) + ") et " + f.prep.echeances.length + " échéances à confirmer ? Le classeur n'est pas modifié.", "Reprendre");
@@ -5177,6 +5265,7 @@ async function dossierImport(quoi, interactif){
 function reglesRangement(){ return LIVRE.parametres.rangement || {}; }
 /* Clé de la règle qui s'applique au fichier : un compte, ou une famille de pièces. */
 function cleRangement(lu, compte){
+  if (lu.genre === "cartes_lcl") return "releves_pdf_lcl";
   if (["compte", "carte", "valorisation"].includes(lu.genre)) return compte ? "compte:" + compte.id : null;
   if (lu.genre === "facture_cb") return "factures_cb";
   if (lu.genre === "document" && lu.sousGenre === "achat_sncf") return "justificatifs";
@@ -5185,7 +5274,7 @@ function cleRangement(lu, compte){
   if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "plans";
   return null;
 }
-const LIBELLES_RANGEMENT = {factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
+const LIBELLES_RANGEMENT = {releves_pdf_lcl: "Relevés PDF du compte LCL", factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
 function libelleRangement(cle){ return cle.startsWith("compte:") ? libelleCompte(cle.slice(7)) : LIBELLES_RANGEMENT[cle] || cle; }
 
 /* Année du fichier : fin de période, date de valeur, arrêté, sinon aujourd'hui. */
@@ -5208,6 +5297,7 @@ function proposerRangement(lu, compte, index){
   const enfant = (base, re) => base && index.find(c => c.startsWith(base + "/") && c.split("/").length === base.split("/").length + 1 && re.test(c.split("/").pop()));
   const courant = () => { const c = compteCourantLcl(); return c ? parNumero(c.numero) : null; };
   if (lu.genre === "compte"){ const b = parNumero(compte?.numero); return b ? b + "/Historiques CSV" : (compte ? compte.nom : null); }
+  if (lu.genre === "cartes_lcl"){ const b = courant(); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés" : "Relevés PDF LCL"); }
   if (lu.genre === "carte"){
     if (lu.banque === "Amex"){ const b = parNom(/^amex$/i); return (b || "Amex") + "/Relevés"; }
     const debit = compte?.compteDebit ? vivants("comptes").find(c => c.id === compte.compteDebit) : null;
@@ -7282,6 +7372,22 @@ async function autotest(){
             const j8 = enregistrer("justificatifs", {type: "notefrais", date: "2025-11-24", montant: 1581, texteOCR: t8, statut: "a_rapprocher", operations: []});
             v("note de frais : nature sans mot connu, débit proposé au choix à la main", debitsPossiblesNdf(j8, lignesNoteFrais(j8)[0]).some(o => o.id === pe.id), true);
             supprimer("operations", pe.id); supprimer("justificatifs", j8.id);
+          }
+          {
+            // Relevé PDF LCL : détail des cartes, carte reconnue, devise ignorée, année de janvier, remboursement, doublons
+            const ck = enregistrer("comptes", {nom: "Carte essai PDF", type: "carte", banque: "LCL", carte: "X456", actif: true});
+            const rel = ["RELEVE DE COMPTE", "Indicatif : 8208 Compte : 99 Z", "PAIEMENTS PAR CARTE DE JANVIER 2027", "LIBELLE VALEUR DEBIT CREDIT",
+              "CARTE N° 12 3456 M JEAN ESSAI", "SOUS TOTAL : 1 608,50", "BOUTIQUE ESSAI LE 30/12 1 581,00", "Rotterdam 1581,00 EUR", "CAFE ESSAI LE 03/01 20,00", "CAFE ESSAI LE 03/01 20,00", "AVOIR ESSAI LE 05/01 12,50",
+              "CARTE N° 34 5678 MME MARIE ESSAI", "SOUS TOTAL : 8,00", "PAIN ESSAI LE 04/01 8,00", "TOTAUX 1 616,50", "MONTANT COMPTABILISE LE 31/01/2027"].join(L);
+            const lc = extraireCartesReleveLcl(rel);
+            v("relevé PDF LCL : cartes, dates, devise ignorée, remboursement reconnu", [lc.cartes.length, lc.cartes[0].carte, lc.cartes[0].lignes.map(l => l.date + " " + l.montant).join(" | "), lc.cartes[0].controle.ok, lc.cartes[1].carte],
+              [2, "X456", "2026-12-30 -1581 | 2027-01-03 -20 | 2027-01-03 -20 | 2027-01-05 12.5", true, "X678"]);
+            const p1 = preparerCartesPdf(lc); appliquerCartesPdf(p1);
+            const p2 = preparerCartesPdf(extraireCartesReleveLcl(rel));
+            v("relevé PDF LCL : deux achats identiques gardés, réimport sans doublon, carte inconnue sans titulaire", [p1.nouvelles.length, p2.nouvelles.length, vivants("operations").filter(o => o.compte === ck.id && o.date === "2027-01-03").length, p1.cartes[1].sansTitulaire], [5, 0, 2, true]);
+            for (const o of vivants("operations").filter(o => /ESSAI/.test(o.libelle) && o.date >= "2026-12-30" && o.date <= "2027-01-05")) supprimer("operations", o.id);
+            for (const i of vivants("imports").filter(i => /2027-01|2026-12-30/.test(JSON.stringify(i.periode || {})))) supprimer("imports", i.id);
+            supprimer("comptes", ck.id);
           }
           v("note de frais : un parking de gare n'est pas un billet de train", [libelleColleNature("Train", {libelle: "EFFIA VALENCE TGV"}), libelleColleNature("Train", {libelle: "SNCF-VOYAGEURS PARIS"})], [false, true]);
           const o4 = enregistrer("operations", {compte: cc.id, date: "2026-09-01", montant: -12.4, libelle: "TUNNEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});

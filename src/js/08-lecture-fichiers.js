@@ -98,6 +98,54 @@ function lireAmexCsv(nom, lignes){
   return {genre: "carte", banque: "Amex", nom, numero: "", carte: "AMEX", periode: {debut: dates[0], fin: dates[dates.length - 1]}, lignes: ops};
 }
 
+/* ---------- Relevé de compte LCL en PDF : paiements par carte du mois ----------
+   « PAIEMENTS PAR CARTE D'OCTOBRE 2025 », puis par carte « CARTE N° 12 3456 M JEAN DUPONT »,
+   « SOUS TOTAL : 3 996,27 » et une ligne par achat « LIBELLÉ LE 22/10 1 581,00 ». Les lignes de devise
+   (« Rotterdam 1581,00 EUR ») sont ignorées. La carte est reconnue par ses 3 derniers chiffres (X456).
+   Le texte ne distingue pas un remboursement d'un achat : la somme est contrôlée contre le sous-total, et
+   un écart égal au double d'une ligne la désigne comme remboursement. */
+function extraireCartesReleveLcl(texte){
+  const T = String(texte || "").replace(/[\u00a0\u202f\u2009]/g, " ");
+  if (!/PAIEMENTS PAR CARTE/i.test(T) || !/CARTE N°\s*\d/i.test(T)) return null;
+  const MOIS = {janvier: 1, fevrier: 2, mars: 3, avril: 4, mai: 5, juin: 6, juillet: 7, aout: 8, septembre: 9, octobre: 10, novembre: 11, decembre: 12};
+  const numero = ((T.match(/Compte\s*:\s*([0-9 ]+[A-Z])/) || [])[1] || "").replace(/\s/g, "");
+  const lignes = T.split(/\n/).map(l => l.trim());
+  const cartes = [];
+  let moisCarte = 0, anCarte = 0, carte = null;
+  for (const l of lignes){
+    const s = l.match(/PAIEMENTS PAR CARTE D[E'’ ]+\s*([A-ZÉÛa-zéû]+)\s+(\d{4})/i);
+    if (s){ moisCarte = MOIS[norm(s[1]).toLowerCase()] || 0; anCarte = +s[2]; carte = null; continue; }
+    if (!moisCarte) continue;
+    const c = l.match(/CARTE N°\s*(\d{2})\s*(\d{4})\s+(?:M|MME|MLLE|MR)\.?\s+(.+)$/i);
+    if (c){ carte = {numero: c[1] + " " + c[2], carte: "X" + c[2].slice(-3), titulaire: c[3].trim(), sousTotal: null, lignes: [], mois: anCarte + "-" + pad2(moisCarte)}; cartes.push(carte); continue; }
+    if (!carte) continue;
+    const st = l.match(/^SOUS TOTAL\s*:\s*([\d .]+,\d{2})/i);
+    if (st){ carte.sousTotal = lireMontant(st[1]); continue; }
+    if (/^TOTAUX\b|^MONTANT COMPTABILISE/i.test(l)){ carte = null; continue; }
+    const a = l.match(/^(.+?)\s+LE\s+(\d{2})\/(\d{2})\s+(\d[\d .]*,\d{2})$/);
+    if (!a) continue;
+    // Année : celle du mois de la carte, sauf un achat de fin d'année réglé en janvier
+    const mm = +a[3], an = mm > moisCarte + 1 ? anCarte - 1 : anCarte;
+    carte.lignes.push({date: an + "-" + a[3] + "-" + a[2], montant: -lireMontant(a[4]), libelle: propre(a[1]), type: "Carte"});
+  }
+  const pleines = cartes.filter(c => c.lignes.length);
+  if (!pleines.length) return null;
+  for (const c of pleines){
+    const t = -somme(c.lignes, l => versCentimes(l.montant));
+    const st = c.sousTotal === null ? null : versCentimes(c.sousTotal);
+    if (st !== null && t !== st){
+      const remb = c.lignes.find(l => -versCentimes(l.montant) * 2 === t - st);
+      if (remb) remb.montant = -remb.montant;   // remboursement : crédit sur la carte
+    }
+    const t2 = -somme(c.lignes, l => versCentimes(l.montant));
+    c.controle = {ok: st === null || t2 === st, texte: "carte " + c.numero + " : " + c.lignes.length + " ligne(s), " + euros(t2 / 100)
+      + (st === null ? "" : t2 === st ? " = sous-total" : " ≠ sous-total " + euros(st / 100))};
+  }
+  const dates = pleines.flatMap(c => c.lignes.map(l => l.date)).sort();
+  return {genre: "cartes_lcl", banque: "LCL", numero, cartes: pleines, periode: {debut: dates[0], fin: dates[dates.length - 1]},
+    titre: "Détail des cartes " + pleines.map(c => c.carte).join(", ") + " · " + pleines[0].mois};
+}
+
 /* ---------- Justificatifs d'achat SNCF Connect ----------
    Un PDF par paiement : date de la transaction, montant, carte, et pour chaque trajet sa date, son heure
    et ses voyageurs. Les trajets d'une même commande (aller et retour) partagent un prix de bloc. */
@@ -197,6 +245,9 @@ function premier(texte, re){ const m = texte.match(re); return m ? m[1].trim() :
 function reconnaitrePdf(nom, texte, octets){
   const T = texte; const N = norm(texte);
   const base = {nom, texte: T, octets};
+  // Relevé de compte LCL : on n'en garde que le détail des cartes (le compte vient des exports CSV)
+  const cartesPdf = extraireCartesReleveLcl(T);
+  if (cartesPdf) return Object.assign(base, cartesPdf, {nom});
   // Facture des cartes LCL (« RELEVE CB AU jj/mm/aa »)
   if (/RELEVE CB AU/.test(T) && /DIFFERE|Montant/i.test(T)){
     return Object.assign(base, {genre: "facture_cb", banque: "LCL",
