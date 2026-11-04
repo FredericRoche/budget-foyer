@@ -8,7 +8,8 @@
      dont la nature exacte contient le texte donné
    - fusionnerFiches {garder, absorber: [noms], nom?} : opérations, justificatifs et alias rejoignent « garder »
    - deplacerSousCategorie {de: [cat, sous], vers: [cat, sous]} : liste des réglages et tous les enregistrements
-   - reclasser {fournisseur, de: [cat, sous], vers: [cat, sous], ficheParDefaut?} : opérations de ce fournisseur */
+   - reclasser {fournisseur, de: [cat, sous], vers: [cat, sous], ficheParDefaut?} : opérations de ce fournisseur
+   - categorieFiche {fiche, categorie, sousCategorie} : classement par défaut fixé, sans toucher au passé */
 
 const ficheNommeeReelle = nom => vivants("commercants").find(c => c.nom === nom) || vivants("commercants").find(c => norm(c.nom) === norm(nom)) || null;
 const ficheNommee = ficheNommeeReelle;
@@ -23,7 +24,8 @@ function lireCorrections(nom, o){
 /* Aperçu : une ligne par action, avec ce qu'elle toucherait aujourd'hui. */
 function preparerCorrections(lu){
   // Les actions s'enchaînent : un renommage ou une création compte pour les actions suivantes de l'aperçu
-  const renomme = new Map(), cree = new Set();
+  const renomme = new Map(), cree = new Set(), absorbees = new Map();
+  const opsV = f => f ? opsDeFiche(f).concat(...(absorbees.get(f.id) || []).map(opsDeFiche)) : [];
   const ficheNommee = nom => {
     for (const [ancien, nouveau] of renomme) if (norm(nouveau) === norm(nom)) return ficheNommeeReelle(ancien);
     if ([...renomme.keys()].some(k => norm(k) === norm(nom))) return null;
@@ -47,6 +49,8 @@ function preparerCorrections(lu){
         const g = ficheNommee(a.garder), abs = (a.absorber || []).map(ficheNommee).filter(f => f && f !== g);
         if (!g) return {ok: false, texte: "Fiche « " + a.garder + " » introuvable : fusion ignorée"};
         const n = somme(abs, f => opsDeFiche(f).length);
+        absorbees.set(g.id, (absorbees.get(g.id) || []).concat(abs));
+        if (a.nom && a.nom !== g.nom) renomme.set(g.nom, a.nom);
         return {ok: !!abs.length, n, texte: "Fusion dans « " + (a.nom || g.nom) + " » de " + (abs.length ? abs.map(f => "« " + f.nom + " »").join(", ") : "aucune fiche trouvée") + " (" + n + " opération(s) déplacée(s))"};
       }
       if (a.type === "deplacerSousCategorie"){
@@ -55,9 +59,14 @@ function preparerCorrections(lu){
       }
       if (a.type === "reclasser"){
         const f = ficheNommee(a.fournisseur);
-        const ops = opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]);
+        const ops = opsV(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]);
         return f ? {ok: true, n: ops.length, texte: "« " + a.fournisseur + " » : " + ops.length + " opération(s) de " + a.de.join(" › ") + " vers " + a.vers.join(" › ") + (a.ficheParDefaut ? " (et classement par défaut de la fiche)" : "")}
           : {ok: false, texte: "Fiche « " + a.fournisseur + " » introuvable : ignorée"};
+      }
+      if (a.type === "categorieFiche"){
+        const f = ficheNommee(a.fiche);
+        return f ? {ok: true, n: 0, texte: "« " + a.fiche + " » : classement par défaut " + a.categorie + " › " + (a.sousCategorie || "") + " (opérations passées inchangées)"}
+          : {ok: false, texte: "Fiche « " + a.fiche + " » introuvable : ignorée"};
       }
       return {ok: false, texte: "Action inconnue « " + a.type + " » : ignorée"};
     } catch (e){ return {ok: false, texte: "Action « " + a.type + " » illisible : " + e.message}; }
@@ -96,6 +105,11 @@ function appliquerCorrections(lu){
       for (const o of opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]))
         enregistrer("operations", Object.assign(o, {categorie: a.vers[0], sousCategorie: a.vers[1], nature: natureParDefaut(a.vers[0]), statut: "classe", verrou: true}));
       if (a.ficheParDefaut){ Object.assign(f, {categorie: a.vers[0], sousCategorie: a.vers[1], fixe: true}); enregistrer("commercants", f); }
+      faites++;
+    } else if (a.type === "categorieFiche"){
+      const f = ficheNommee(a.fiche); if (!f) continue;
+      ajouterCategorieSilencieuse(a.categorie, a.sousCategorie || "");
+      Object.assign(f, {categorie: a.categorie, sousCategorie: a.sousCategorie || "", fixe: true}); enregistrer("commercants", f);
       faites++;
     }
   }
