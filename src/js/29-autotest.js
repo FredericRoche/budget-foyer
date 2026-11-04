@@ -153,6 +153,17 @@ async function autotest(){
           v("carte : 4 chiffres de la facturette appris puis reconnus", carteDesChiffres("############7998"), "X111");
           supprimer("comptes", ck.id);
         }
+        {
+          // Note de frais : rapprochée du virement de remboursement (crédit), jamais d'un débit de même montant
+          const cc = enregistrer("comptes", {nom: "Courant essai NF", type: "courant", banque: "Essai", actif: true});
+          const deb = enregistrer("operations", {compte: cc.id, date: "2027-04-02", montant: -1735.61, libelle: "CB ESSAI DEBIT"});
+          const cre = enregistrer("operations", {compte: cc.id, date: "2027-05-20", montant: 1735.61, libelle: "VIR EMPLOYEUR ESSAI REMB NDF"});
+          const nf = await creerJustificatif({type: "notefrais", date: "2027-04-01", montant: 1735.61, commercantNom: "Employeur essai", origine: "pc"});
+          const c = candidats([nf]).map(x => x.op.id);
+          v("note de frais : candidat = le crédit, pas le débit", [c.includes(cre.id), c.includes(deb.id)], [true, false]);
+          v("note de frais : lue sur la pièce, hors en-cours", [extraireTicket("EMPLOYEUR ESSAI" + String.fromCharCode(10) + "NOTE DE FRAIS" + String.fromCharCode(10) + "Collaborateur" + String.fromCharCode(10) + "Total 1 735,61").type, encoursSaisis().lignes.some(l => l.montant === 1735.61)], ["notefrais", false]);
+          delier(nf); supprimer("justificatifs", nf.id); supprimer("operations", deb.id); supprimer("operations", cre.id); supprimer("comptes", cc.id);
+        }
         v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
         v("téléphone : fournisseur retrouvé par un morceau du nom ou de l'alias", rechercherFournisseurs(["savour"], [{nom: "La Savoureine Eurre", alias: []}, {nom: "Autre", alias: ["SAVOUREINE SARL"]}, {nom: "Sans rapport", alias: []}]).map(f => f.nom), ["La Savoureine Eurre", "Autre"]);
         v("pièce : lecture illisible ni proposée ni apprise comme nom", [nomPlausible("‘ au qi Tee ce L j"), nomPlausible("La Savoureine")], [false, true]);

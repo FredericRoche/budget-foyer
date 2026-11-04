@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qUETcdyvQinxWckz9fewAKX3lqupxUkEMgFT0X3dRYg=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-DrGNRk/bU6CI+PU89pPyv8g0EQIAnKB7kIvnFWo7dZo=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-10-31.1439";
+const VERSION_APP = "2026-11-04.1453";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2606,16 +2606,25 @@ function appliquerReprise(prep, options){
    son type. Un cas sans ambiguïté est appliqué d'office, réversible ; les autres
    attendent dans « À traiter ». Facture et facturette d'un même achat se
    rattachent à la même opération sans double compte. Plusieurs tickets réglés en
-   un seul paiement forment un « achat groupé » et ventilent l'opération. */
+   un seul paiement forment un « achat groupé » et ventilent l'opération.
+   Une note de frais est une créance : elle se rapproche du virement reçu (crédit de
+   même montant), pas d'un débit, et n'entre ni dans les dépenses en attente ni dans
+   les en-cours de cartes. */
 
-const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", facturette: "Facturette CB", autre: "Autre"};
+const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", facturette: "Facturette CB", notefrais: "Note de frais (à rembourser)", autre: "Autre"};
+const estNoteFrais = j => j && j.type === "notefrais";
+/* Note de frais : remboursement attendu de quelques jours avant (date de la dernière dépense) à 120 jours après. */
+const FENETRE_NOTE_FRAIS = [7, 120];
 
 function fenetre(j){
   const p = LIVRE.parametres;
+  if (estNoteFrais(j)) return FENETRE_NOTE_FRAIS;
   return j.type === "facture" || j.type === "devis" ? [p.tolFactureAvant, p.tolFactureApres] : [p.tolTicketAvant, p.tolTicketApres];
 }
 function compteCompatible(j, compte){
   if (!j.carte) return true;
+  // Note de frais : seul un compte de réception désigné (« Virement · compte ») restreint la recherche
+  if (estNoteFrais(j)) return !j.carte.startsWith("CPT:") || compte.id === j.carte.slice(4);
   if (j.carte === "ESPECES") return compte.type === "especes";
   if (j.carte.startsWith("CPT:") || j.carte.startsWith("CHQ:")) return compte.id === j.carte.slice(4);
   if (j.carte === "AMEX") return compte.carte === "AMEX";
@@ -2648,9 +2657,10 @@ function candidats(js){
   if (!j.carte && j.carte4) j.carte = carteDesChiffres(j.carte4);
   const [avant, apres] = fenetre(j);
   const nomJ = js.map(x => [x.commercantNom, x.raisonSociale].filter(Boolean).join(" ")).join(" ");
+  const credit = estNoteFrais(j);   // remboursement attendu : on cherche un crédit
   const r = [];
   for (const op of vivants("operations")){
-    if (op.montant >= 0 || -versCentimes(op.montant) !== cents) continue;
+    if ((credit ? op.montant <= 0 : op.montant >= 0) || Math.abs(versCentimes(op.montant)) !== cents) continue;
     const dj = ecartJours(j.date, op.date);
     if (dj < -avant || dj > apres) continue;
     const compte = obtenir("comptes", op.compte); if (!compte || !compteCompatible(j, compte)) continue;
@@ -2670,7 +2680,7 @@ function candidats(js){
 /* Combinaisons de 2 ou 3 justificatifs du même jour et de la même carte dont la somme égale une opération. */
 function achatsGroupes(libres){
   const r = [];
-  const parJour = regrouper(libres.filter(j => j.type !== "facture"), j => j.date + "|" + (j.carte || ""));
+  const parJour = regrouper(libres.filter(j => j.type !== "facture" && !estNoteFrais(j)), j => j.date + "|" + (j.carte || ""));
   for (const liste of parJour.values()){
     if (liste.length < 2) continue;
     const combos = [];
@@ -2757,7 +2767,7 @@ function libelleMoyen(carte){
 }
 function encoursSaisis(){
   const m = new Map();
-  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES")){
+  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES" && !estNoteFrais(x))){
     const k = libelleMoyen(j.carte); const g = m.get(k) || m.set(k, {moyen: k, n: 0, montant: 0, depuis: j.date}).get(k);
     g.n++; g.montant += j.montant || 0; if (j.date && j.date < g.depuis) g.depuis = j.date;
   }
@@ -2793,7 +2803,7 @@ async function creerJustificatif(donnees, piece){
     } else j.fournisseurProvisoire = true;
     enregistrer("justificatifs", j);
   }
-  if (j.carte === "ESPECES" && !j.aValider) creerOperationEspeces(j);
+  if (j.carte === "ESPECES" && !j.aValider && !estNoteFrais(j)) creerOperationEspeces(j);
   return j;
 }
 function compteEspeces(){
@@ -2922,7 +2932,8 @@ function extraireTicket(texte){
   const facturette = N.some(l => /TICKET CLIENT|A CONSERVER|NO AUTO|N° AUTO|AUTOR|SANS CONTACT|CONTACTLESS|DEBIT|CARTE BANCAIRE|VISA|MASTERCARD|CB EMV|AID A0/.test(l))
     && N.length < 40 && !N.some(l => /TVA \d|QTE|QUANTITE/.test(l));
   const facture = N.some(l => /^FACTURE|FACTURE N|N° DE FACTURE|DATE DE FACTURE|ECHEANCE|CONDITIONS DE PAIEMENT/.test(l));
-  res.type = facture ? "facture" : facturette ? "facturette" : "ticket";
+  const noteFrais = N.some(l => /NOTE DE FRAIS|NOTES DE FRAIS|NOTE DE DEPENSES|EXPENSE REPORT|EXPENSE CLAIM/.test(l));
+  res.type = noteFrais ? "notefrais" : facture ? "facture" : facturette ? "facturette" : "ticket";
 
   /* Montant : ligne « TOTAL / À PAYER / NET / MONTANT », sinon le plus grand montant */
   const motsTotal = /(TOTAL TTC|NET A PAYER|A PAYER|TOTAL|MONTANT( TTC)?|SOMME|TTC|PAYE|CB )/;
@@ -3967,7 +3978,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
   const tb = somme(lignes.filter(l => l.ligne), l => l.budget), tr = somme(lignes, l => l.realise) - depensesProjets(borneB(an + "-" + pad2(mo) + "-01"), finMo, regP);
   // Dépenses du mois saisies (tickets, factures, chèques) dont l'opération n'est pas encore au relevé,
   // retenues selon la même règle que le réalisé (hors « Hors budget » et revenus)
-  const taEnAttente = somme(vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && j.carte !== "ESPECES" && (j.date || "").slice(0, 7) === an + "-" + pad2(mo) && !estDepenseProjet(j, regP, true)
+  const taEnAttente = somme(vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && j.carte !== "ESPECES" && !estNoteFrais(j) && (j.date || "").slice(0, 7) === an + "-" + pad2(mo) && !estDepenseProjet(j, regP, true)
     && (n => !NATURES_HORS_RESULTAT.includes(n) && n !== "Revenu")((budget?.lignes || []).find(x => x.categorie === j.categorie && (x.sousCategorie || "") === (j.sousCategorie || ""))?.nature || natureParDefaut(j.categorie))), j => j.montant || 0);
   const cumulB = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.budget) : 0;
   const cumulR = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.realise) - depensesProjets(borneB(an + "-01-01"), finMo, regP) : 0;
@@ -4902,7 +4913,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : "à rapprocher")))}));
 }});
 
 /* Pièces déjà enregistrées qui pourraient être la même : même montant à 45 jours près, ou même fournisseur
@@ -4980,10 +4991,14 @@ function ecranRapprochement(j, etat, attente){
     const ligneCheque = h("div", {class: "champ-ocr", hidden: !String(x.carte || "").startsWith("CHQ:")}, h("label", null, "N° de chèque"), cheque, h("span", {class: "confiance"}, "pour le rapprochement"));
     carte.addEventListener("change", () => { ligneCheque.hidden = !carte.value.startsWith("CHQ:"); });
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
+    // Note de frais : le moyen de paiement devient le compte sur lequel le remboursement est attendu
+    const libPaye = () => estNoteFrais({type: type.value}) ? "Remboursé sur" : "Payé avec";
+    const ligneCarte = ligneOcr(libPaye(), carte, x.carte4 ? "carte ****" + x.carte4 : "");
+    type.addEventListener("change", () => { ligneCarte.querySelector("label").textContent = libPaye(); });
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""), ligneCheque);
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque);
     champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte, cheque, num});
   });
   const enregistrerSaisie = () => {
@@ -5003,7 +5018,7 @@ function ecranRapprochement(j, etat, attente){
       }
       enregistrer("justificatifs", f.x);
       if (apprendreChiffresCarte(f.x.carte4, f.x.carte)) message("Mémorisé : carte ****" + String(f.x.carte4).slice(-4) + " = " + libelleMoyen(f.x.carte) + ".");
-      if (f.x.carte === "ESPECES" && !(f.x.operations || []).length) creerOperationEspeces(f.x);
+      if (f.x.carte === "ESPECES" && !estNoteFrais(f.x) && !(f.x.operations || []).length) creerOperationEspeces(f.x);
     }
   };
   saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini" + (j.aValider ? " primaire" : ""), onclick: () => { const v = groupe.some(x => x.aValider); if (enregistrerSaisie() === false) return;
@@ -5036,11 +5051,16 @@ function ecranRapprochement(j, etat, attente){
         h("span", {class: "petit"}, euros(x.op.montant) + " · écart de date " + (x.ecart > 0 ? "+" : "") + x.ecart + " j" + (x.sim > 0.4 ? " · nom proche" : ""))),
         h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, x.score + " %"), h("button", {class: "mini" + (i === 0 ? " primaire" : ""), onclick: () => { if (enregistrerSaisie() === false) return; lier(groupe, x.op, false); rafraichirEcran(); }}, "Rapprocher"))));
     });
-    if (!liste.length && !propositionsGroupe.length) cand.appendChild(h("p", {class: "vide"}, "Aucune opération de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates. Le relevé n'est peut-être pas encore importé."));
+    const nf = estNoteFrais(j);
+    if (!liste.length && !propositionsGroupe.length) cand.appendChild(h("p", {class: "vide"}, nf
+      ? "Aucun virement reçu de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates : le remboursement n'est pas encore arrivé, ou le relevé n'est pas importé."
+      : "Aucune opération de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates. Le relevé n'est peut-être pas encore importé."));
     const [av, ap] = fenetre(j);
-    cand.appendChild(h("p", {class: "note"}, "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" || j.type === "devis" ? "facture ou devis" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office."));
+    cand.appendChild(h("p", {class: "note"}, nf
+      ? "Note de frais : on attend un crédit (virement de remboursement) du montant exact, date −" + av + " / +" + ap + " jours. Les dépenses avancées restent rapprochées de leurs propres débits. Un seul candidat sûr : rapproché d'office."
+      : "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" || j.type === "devis" ? "facture ou devis" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office."));
     cand.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}},
-      h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => { if (!(x.operations || []).length) creerOperationEspeces(x); }); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
+      nf ? null : h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => { if (!(x.operations || []).length) creerOperationEspeces(x); }); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
       h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) enregistrer("justificatifs", Object.assign(x, {reporte: aujourdhui()})); const suivant = attente[idx + 1]; etat.choisi = suivant ? suivant.id : null; rafraichirEcran(); }}, "Reporter")));
   }
   grille.appendChild(cand);
@@ -6638,6 +6658,17 @@ async function autotest(){
           apprendreChiffresCarte("7998", "X111");
           v("carte : 4 chiffres de la facturette appris puis reconnus", carteDesChiffres("############7998"), "X111");
           supprimer("comptes", ck.id);
+        }
+        {
+          // Note de frais : rapprochée du virement de remboursement (crédit), jamais d'un débit de même montant
+          const cc = enregistrer("comptes", {nom: "Courant essai NF", type: "courant", banque: "Essai", actif: true});
+          const deb = enregistrer("operations", {compte: cc.id, date: "2027-04-02", montant: -1735.61, libelle: "CB ESSAI DEBIT"});
+          const cre = enregistrer("operations", {compte: cc.id, date: "2027-05-20", montant: 1735.61, libelle: "VIR EMPLOYEUR ESSAI REMB NDF"});
+          const nf = await creerJustificatif({type: "notefrais", date: "2027-04-01", montant: 1735.61, commercantNom: "Employeur essai", origine: "pc"});
+          const c = candidats([nf]).map(x => x.op.id);
+          v("note de frais : candidat = le crédit, pas le débit", [c.includes(cre.id), c.includes(deb.id)], [true, false]);
+          v("note de frais : lue sur la pièce, hors en-cours", [extraireTicket("EMPLOYEUR ESSAI" + String.fromCharCode(10) + "NOTE DE FRAIS" + String.fromCharCode(10) + "Collaborateur" + String.fromCharCode(10) + "Total 1 735,61").type, encoursSaisis().lignes.some(l => l.montant === 1735.61)], ["notefrais", false]);
+          delier(nf); supprimer("justificatifs", nf.id); supprimer("operations", deb.id); supprimer("operations", cre.id); supprimer("comptes", cc.id);
         }
         v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
         v("téléphone : fournisseur retrouvé par un morceau du nom ou de l'alias", rechercherFournisseurs(["savour"], [{nom: "La Savoureine Eurre", alias: []}, {nom: "Autre", alias: ["SAVOUREINE SARL"]}, {nom: "Sans rapport", alias: []}]).map(f => f.nom), ["La Savoureine Eurre", "Autre"]);

@@ -84,7 +84,8 @@ function extraireTicket(texte){
   const facturette = N.some(l => /TICKET CLIENT|A CONSERVER|NO AUTO|N° AUTO|AUTOR|SANS CONTACT|CONTACTLESS|DEBIT|CARTE BANCAIRE|VISA|MASTERCARD|CB EMV|AID A0/.test(l))
     && N.length < 40 && !N.some(l => /TVA \d|QTE|QUANTITE/.test(l));
   const facture = N.some(l => /^FACTURE|FACTURE N|N° DE FACTURE|DATE DE FACTURE|ECHEANCE|CONDITIONS DE PAIEMENT/.test(l));
-  res.type = facture ? "facture" : facturette ? "facturette" : "ticket";
+  const noteFrais = N.some(l => /NOTE DE FRAIS|NOTES DE FRAIS|NOTE DE DEPENSES|EXPENSE REPORT|EXPENSE CLAIM/.test(l));
+  res.type = noteFrais ? "notefrais" : facture ? "facture" : facturette ? "facturette" : "ticket";
 
   /* Montant : ligne « TOTAL / À PAYER / NET / MONTANT », sinon le plus grand montant */
   const motsTotal = /(TOTAL TTC|NET A PAYER|A PAYER|TOTAL|MONTANT( TTC)?|SOMME|TTC|PAYE|CB )/;
