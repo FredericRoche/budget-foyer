@@ -11,7 +11,9 @@
    - reclasser {fournisseur, de: [cat, sous], vers: [cat, sous], ficheParDefaut?} : opérations de ce fournisseur
    - categorieFiche {fiche, categorie, sousCategorie} : classement par défaut fixé, sans toucher au passé */
 
-const ficheNommeeReelle = nom => vivants("commercants").find(c => c.nom === nom) || vivants("commercants").find(c => norm(c.nom) === norm(nom)) || null;
+// Nom exact d'abord ; sinon sans tenir compte de la casse, des accents, des espaces ni de la ponctuation
+const cleNomFiche = s => norm(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+const ficheNommeeReelle = nom => vivants("commercants").find(c => c.nom === nom) || vivants("commercants").find(c => cleNomFiche(c.nom) === cleNomFiche(nom)) || null;
 const ficheNommee = ficheNommeeReelle;
 const opsDeFiche = f => f ? vivants("operations").filter(o => o.commercant === f.id) : [];
 const justifsDeFiche = f => f ? vivants("justificatifs").filter(j => j.commercant === f.id) : [];

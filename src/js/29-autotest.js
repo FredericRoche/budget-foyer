@@ -297,6 +297,7 @@ async function autotest(){
             const ap2 = preparerCorrections({actions: [{type: "fusionnerFiches", garder: "Doublon Essai A", absorber: ["Doublon Essai B"], nom: "Doublon Essai"},
               {type: "reclasser", fournisseur: "Doublon Essai", de: ["Culture et loisirs", "Livres, presse, sorties, jeux"], vers: ["Abonnements", "Abonnements numériques"]},
               {type: "categorieFiche", fiche: "Doublon Essai", categorie: "Abonnements", sousCategorie: "Abonnements numériques"}]});
+            v("lot de corrections : fiche retrouvée malgré espaces et ponctuation", ficheNommee("Doublon  essai A.")?.id, fb.id);
             v("lot de corrections : aperçu d'une fusion renommée puis reclassée", ap2.lignes.map(l => l.ok + ":" + (l.n || 0)), ["true:1", "true:1", "true:0"]);
             v("lot de corrections : aperçu sans effet, actions enchaînées (renommage puis recréation)", [lot.genre, ap.lignes.length, obtenir("commercants", fa.id).nom, !!obtenir("commercants", fc2.id), ap.lignes[1].ok, ap.lignes[1].n], ["corrections", 4, "Etude Essai", true, true, 1]);
             appliquerCorrections(lot);
