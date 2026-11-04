@@ -103,7 +103,8 @@ function lireAmexCsv(nom, lignes){
    et ses voyageurs. Les trajets d'une même commande (aller et retour) partagent un prix de bloc. */
 function extraireAchatSncf(texte){
   const T = String(texte || "").replace(/[\u00a0\u202f\u2009]/g, " ").replace(/\ufb01/g, "fi");
-  if (!/Justificatif d.achat/i.test(T) || !/SNCF ?Connect/i.test(T)) return null;
+  // Le lecteur PDF coupe la ligature « fi » : « Justi fi catif d'achat »
+  if (!/Justi\s*fi\s*catif\s+d.\s*achat/i.test(T) || !/SNCF ?Connect/i.test(T)) return null;
   const tx = T.match(/Date de transaction\s*:\s*(\d{2}\/\d{2}\/\d{4})/);
   if (!tx) return null;
   const montants = [...T.matchAll(/Montant (?:de la transaction|total) \(TTC\)\s*:\s*([\d .]+,\d{2})\s*€/g)].map(m => lireMontant(m[1]));
@@ -118,7 +119,8 @@ function extraireAchatSncf(texte){
     for (const l of reste){
       const vs = [...l.matchAll(/Voyageur\s*\d+\s*:\s*([^-\n]+?)\s*(?:-|$)/g)].map(x => x[1].trim());
       if (vs.length) voyageurs.push(...vs);
-      else if (voyageurs.length || /^(Aller|Retour)\b/.test(l)) break;
+      else if (!l || /^[\d\s.,]+€$/.test(l)) continue;   // prix du bloc, parfois rendu entre deux voyageurs
+      else if (voyageurs.length || /(Aller|Retour)\s+\d{2}\//.test(l)) break;
     }
     trajets.push({sens: m[1], date: lireDate(m[2]), heure: m[3], voyageurs});
   }

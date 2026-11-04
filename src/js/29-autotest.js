@@ -208,6 +208,10 @@ async function autotest(){
             const ach = extraireAchatSncf(pdf);
             v("justificatif SNCF Connect lu (paiement, trajets, voyageurs)", [ach.date, ach.montant, ach.trajets.length, ach.trajets[0].voyageurs.join("/"), ach.trajets[2].sens, ach.carte4], ["2026-05-10", 396, 3, "JEAN ESSAI/MARIE ESSAI", "Retour", "1234"]);
             v("justificatif SNCF Connect reconnu à l'import", reconnaitrePdf("x.pdf", pdf, null).sousGenre, "achat_sncf");
+            // Texte tel que le lecteur PDF du navigateur le rend : ligature coupée, prix avant les voyageurs
+            const brut = extraireAchatSncf(["Justi fi catif d'achat", "Montant total (TTC) : 114,20 €", "Aller 09/07/2026 à 19:00:00", "88,00 €", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "176,00 €", "Voyageur 2 : MARIE ESSAI - Carte Liberté", "Réf: AAA",
+              "Aller 09/07/2026 à 21:12:00", "26,20 €", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "Date de transaction : 01/07/2026 à 11:44:31", "Montant de la transaction (TTC) : 114,20 €", "Société SNCF Connect - 1-3 Rue"].join(L));
+            v("justificatif SNCF Connect lu dans le texte du navigateur", [brut?.date, brut?.montant, brut?.trajets.map(t => t.heure + " " + t.voyageurs.join("/")).join(" | ")], ["2026-07-01", 114.2, "19:00 JEAN ESSAI/MARIE ESSAI | 21:12 JEAN ESSAI"]);
             const deb = enregistrer("operations", {compte: cc.id, date: "2026-05-11", montant: -396, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
             const nAch = enregistrerAchatsSncf({nom: "x.pdf", achats: [ach]}), nAch2 = enregistrerAchatsSncf({nom: "x.pdf", achats: [ach]});
             const t5 = ["NDF #2702 : Juin 2026, déclarée le 30/06/2026", " Déclarant : ESSAI Jean", "1 01/06/2026 Train 0,00 € 99,00 €", "2 15/06/2026 Train 0,00 € 99,00 €", "3 18/06/2026 Train 0,00 € 99,00 €", "4 20/12/2026 Train 0,00 € 99,00 €", "Total 396,00 €"].join(L);
