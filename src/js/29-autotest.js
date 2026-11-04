@@ -280,6 +280,28 @@ async function autotest(){
             for (const i of vivants("imports").filter(i => /2027-01|2026-12-30/.test(JSON.stringify(i.periode || {})))) supprimer("imports", i.id);
             supprimer("comptes", ck.id);
           }
+          {
+            // Lot de corrections : aperçu sans effet, puis application sur clic
+            const fa = enregistrer("commercants", {nom: "Etude Essai", alias: [], stats: {}, natures: {}});
+            const fb = enregistrer("commercants", {nom: "Doublon Essai A", alias: ["DOUBLON A"], stats: {}, natures: {}});
+            const fc2 = enregistrer("commercants", {nom: "Doublon Essai B", alias: ["DOUBLON B"], stats: {}, natures: {}});
+            const o1 = enregistrer("operations", {compte: cc.id, date: "2027-02-01", montant: -500, libelle: "VIR DEMENAGEUR ESSAI", commercant: fa.id, categorie: "Logement", sousCategorie: "Entretien"});
+            const o2 = enregistrer("operations", {compte: cc.id, date: "2027-02-02", montant: -5, libelle: "DOUBLON B", commercant: fc2.id, categorie: "Culture et loisirs", sousCategorie: "Livres, presse, sorties, jeux"});
+            const jd = enregistrer("justificatifs", {type: "devis", date: "2027-02-01", montant: 99, commercant: fa.id, commercantNom: fa.nom, natureExacte: "Étude de sol essai", statut: "a_rapprocher", operations: []});
+            const lot = lireJson("c.json", JSON.stringify({format: "budget-foyer-corrections", actions: [
+              {type: "renommerFiche", de: "Etude Essai", vers: "Demenageur Essai"}, {type: "creerFiche", nom: "Etude Essai", depuis: "Demenageur Essai", natureJustificatifs: "sol"},
+              {type: "fusionnerFiches", garder: "Doublon Essai A", absorber: ["Doublon Essai B", "Inconnue Essai"]},
+              {type: "reclasser", fournisseur: "Doublon Essai A", de: ["Culture et loisirs", "Livres, presse, sorties, jeux"], vers: ["Abonnements", "Abonnements numériques"], ficheParDefaut: true}]}));
+            const ap = preparerCorrections(lot);
+            v("lot de corrections : aperçu sans effet", [lot.genre, ap.lignes.length, obtenir("commercants", fa.id).nom, !!obtenir("commercants", fc2.id)], ["corrections", 4, "Etude Essai", true]);
+            appliquerCorrections(lot);
+            const etude = ficheNommee("Etude Essai");
+            v("lot de corrections : renommage, fiche recréée avec son devis, fusion, reclassement", [obtenir("commercants", fa.id).nom, obtenir("justificatifs", jd.id).commercant === etude?.id, obtenir("operations", o1.id).commercant === fa.id,
+              obtenir("operations", o2.id).commercant === fb.id, !obtenir("commercants", fc2.id), obtenir("operations", o2.id).categorie, obtenir("commercants", fb.id).categorie],
+              ["Demenageur Essai", true, true, true, true, "Abonnements", "Abonnements"]);
+            for (const x of [o1, o2]) supprimer("operations", x.id); supprimer("justificatifs", jd.id);
+            for (const f of [fa, fb, etude].filter(Boolean)) supprimer("commercants", f.id);
+          }
           v("note de frais : un parking de gare n'est pas un billet de train", [libelleColleNature("Train", {libelle: "EFFIA VALENCE TGV"}), libelleColleNature("Train", {libelle: "SNCF-VOYAGEURS PARIS"})], [false, true]);
           const o4 = enregistrer("operations", {compte: cc.id, date: "2026-09-01", montant: -12.4, libelle: "TUNNEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});
           const r4 = rapprochementLignesNdf(jn).find(r => r.ligne.n === 4);

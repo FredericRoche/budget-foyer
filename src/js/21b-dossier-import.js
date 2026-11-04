@@ -48,7 +48,7 @@ function cleRangement(lu, compte){
   if (lu.genre === "document" && lu.sousGenre === "achat_sncf") return "justificatifs";
   if (lu.genre === "document") return lu.sousGenre === "avis_impot" ? "avis_impot" : "avis_opere";
   if (lu.genre === "justificatif_pdf" || lu.genre === "image") return "justificatifs";
-  if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "plans";
+  if (["plan", "regles", "reprise_v7", "corrections"].includes(lu.genre)) return "plans";
   return null;
 }
 const LIBELLES_RANGEMENT = {releves_pdf_lcl: "Relevés PDF du compte LCL", factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
@@ -91,7 +91,7 @@ function proposerRangement(lu, compte, index){
   if (lu.genre === "document" && lu.sousGenre === "avis_impot") return parNom(/^imp[ôo]ts?$/i) || "Impôts";
   if (lu.genre === "document") return parNom(/^avis d.op[ée]r[ée]$/i) || "Avis d'opéré";
   if (lu.genre === "justificatif_pdf" || lu.genre === "image") return parNom(/^justificatifs$/i) || "Justificatifs";
-  if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "Budget/Plans importés";
+  if (["plan", "regles", "reprise_v7", "corrections"].includes(lu.genre)) return "Budget/Plans importés";
   return null;
 }
 

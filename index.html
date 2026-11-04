@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-HEtBt9iXpwPiXTfR46o6UUIb3rCwAcd3zDNyKegvuMQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-OeShFLcdOR9ZRR9v9JpV0dkZyqQ5ndTneX2syUpKAJE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-04.1925";
+const VERSION_APP = "2026-11-04.1939";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2094,6 +2094,7 @@ function lireJson(nom, texte){
   let o; try { o = JSON.parse(texte); } catch (e) { return {genre: "inconnu", nom, raison: "JSON illisible"}; }
   if (o.format === "budget-foyer-regles") return {genre: "regles", nom, contenu: o};
   if (o.format === "budget-foyer-plan") return {genre: "plan", nom, contenu: o};
+  if (o.format === "budget-foyer-corrections") return lireCorrections(nom, o);
   // Achats SNCF Connect relevés dans les e-mails de confirmation (quand le site ne remonte plus assez loin)
   if (o.format === "budget-foyer-achats-sncf"){
     const achats = (o.achats || []).filter(a => a && /^\d{4}-\d{2}-\d{2}$/.test(a.date || "") && a.montant > 0 && (a.trajets || []).length)
@@ -2597,6 +2598,102 @@ function appliquerRegles(contenu){
   for (const n2 of contenu.natures || []) if (!LIVRE.parametres.natures.includes(n2)) modifierParametres({natures: [...LIVRE.parametres.natures, n2]});
   invaliderIndex();
   return n;
+}
+
+/* ===== 09b-corrections.js ===== */
+/* ================= Lot de corrections (fichier « budget-foyer-corrections ») =================
+   Corrections préparées hors de l'application (par exemple après un contrôle de cohérence de l'export),
+   appliquées en une fois APRÈS aperçu et clic : rien ne s'applique à la lecture du fichier. Les fiches sont
+   désignées par leur nom exact ; une fiche introuvable rend l'action « ignorée », sans erreur.
+   Actions :
+   - renommerFiche {de, vers, categorie?, sousCategorie?}
+   - creerFiche {nom, depuis, natureJustificatifs} : crée la fiche et y rattache les justificatifs de « depuis »
+     dont la nature exacte contient le texte donné
+   - fusionnerFiches {garder, absorber: [noms], nom?} : opérations, justificatifs et alias rejoignent « garder »
+   - deplacerSousCategorie {de: [cat, sous], vers: [cat, sous]} : liste des réglages et tous les enregistrements
+   - reclasser {fournisseur, de: [cat, sous], vers: [cat, sous], ficheParDefaut?} : opérations de ce fournisseur */
+
+const ficheNommee = nom => vivants("commercants").find(c => c.nom === nom) || vivants("commercants").find(c => norm(c.nom) === norm(nom)) || null;
+const opsDeFiche = f => f ? vivants("operations").filter(o => o.commercant === f.id) : [];
+const justifsDeFiche = f => f ? vivants("justificatifs").filter(j => j.commercant === f.id) : [];
+
+function lireCorrections(nom, o){
+  const actions = (o.actions || []).filter(a => a && a.type);
+  if (!actions.length) return {genre: "inconnu", nom, raison: "lot de corrections vide"};
+  return {genre: "corrections", nom, actions, titre: o.titre || "", date: aujourdhui()};
+}
+/* Aperçu : une ligne par action, avec ce qu'elle toucherait aujourd'hui. */
+function preparerCorrections(lu){
+  const lignes = lu.actions.map(a => {
+    try {
+      if (a.type === "renommerFiche"){
+        const f = ficheNommee(a.de);
+        return f ? {ok: true, n: opsDeFiche(f).length, texte: "Fiche « " + a.de + " » renommée « " + a.vers + " » (" + opsDeFiche(f).length + " opération(s))" + (a.categorie ? ", classement par défaut " + a.categorie + " › " + (a.sousCategorie || "") : "")}
+          : {ok: false, texte: "Fiche « " + a.de + " » introuvable : ignorée"};
+      }
+      if (a.type === "creerFiche"){
+        const d = ficheNommee(a.depuis);
+        const js = justifsDeFiche(d).filter(j => norm(j.natureExacte || "").includes(norm(a.natureJustificatifs || "")));
+        return {ok: !ficheNommee(a.nom) || !!js.length, n: js.length, texte: "Fiche « " + a.nom + " » " + (ficheNommee(a.nom) ? "(existe déjà)" : "créée") + " ; " + js.length + " justificatif(s) de « " + a.depuis + " » (« " + a.natureJustificatifs + " ») y passent"};
+      }
+      if (a.type === "fusionnerFiches"){
+        const g = ficheNommee(a.garder), abs = (a.absorber || []).map(ficheNommee).filter(f => f && f !== g);
+        if (!g) return {ok: false, texte: "Fiche « " + a.garder + " » introuvable : fusion ignorée"};
+        const n = somme(abs, f => opsDeFiche(f).length);
+        return {ok: !!abs.length, n, texte: "Fusion dans « " + (a.nom || g.nom) + " » de " + (abs.length ? abs.map(f => "« " + f.nom + " »").join(", ") : "aucune fiche trouvée") + " (" + n + " opération(s) déplacée(s))"};
+      }
+      if (a.type === "deplacerSousCategorie"){
+        const n = vivants("operations").filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]).length;
+        return {ok: true, n, texte: a.de.join(" › ") + " → " + a.vers.join(" › ") + " (" + n + " opération(s), réglages et budgets compris)"};
+      }
+      if (a.type === "reclasser"){
+        const f = ficheNommee(a.fournisseur);
+        const ops = opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]);
+        return f ? {ok: true, n: ops.length, texte: "« " + a.fournisseur + " » : " + ops.length + " opération(s) de " + a.de.join(" › ") + " vers " + a.vers.join(" › ") + (a.ficheParDefaut ? " (et classement par défaut de la fiche)" : "")}
+          : {ok: false, texte: "Fiche « " + a.fournisseur + " » introuvable : ignorée"};
+      }
+      return {ok: false, texte: "Action inconnue « " + a.type + " » : ignorée"};
+    } catch (e){ return {ok: false, texte: "Action « " + a.type + " » illisible : " + e.message}; }
+  });
+  return {lignes, controles: lignes, nouvelles: lignes.filter(l => l.ok && l.n).flatMap(l => Array(l.n).fill(0))};
+}
+/* Application, dans l'ordre du fichier. Renvoie le nombre d'actions appliquées. */
+function appliquerCorrections(lu){
+  let faites = 0;
+  for (const a of lu.actions){
+    if (a.type === "renommerFiche"){
+      const f = ficheNommee(a.de); if (!f) continue;
+      f.nom = a.vers;
+      if (a.categorie) Object.assign(f, {categorie: a.categorie, sousCategorie: a.sousCategorie || "", fixe: true});
+      enregistrer("commercants", f);
+      for (const j of justifsDeFiche(f)) enregistrer("justificatifs", Object.assign(j, {commercantNom: f.nom}));
+      faites++;
+    } else if (a.type === "creerFiche"){
+      const d = ficheNommee(a.depuis);
+      const f = ficheNommee(a.nom) || enregistrer("commercants", {nom: a.nom, alias: [], stats: {}, natures: {}});
+      for (const j of justifsDeFiche(d).filter(j => norm(j.natureExacte || "").includes(norm(a.natureJustificatifs || ""))))
+        enregistrer("justificatifs", Object.assign(j, {commercant: f.id, commercantNom: f.nom}));
+      faites++;
+    } else if (a.type === "fusionnerFiches"){
+      const g = ficheNommee(a.garder); if (!g) continue;
+      for (const f of (a.absorber || []).map(ficheNommee).filter(f => f && f !== g)) fusionnerCommercants(g, f);
+      if (a.nom && a.nom !== g.nom){ g.nom = a.nom; enregistrer("commercants", g); for (const j of justifsDeFiche(g)) enregistrer("justificatifs", Object.assign(j, {commercantNom: g.nom})); }
+      faites++;
+    } else if (a.type === "deplacerSousCategorie"){
+      ajouterCategorieSilencieuse(a.vers[0], a.vers[1]);
+      deplacerSousCategorie(a.de[0], a.de[1], a.vers[0], a.vers[1]);
+      faites++;
+    } else if (a.type === "reclasser"){
+      const f = ficheNommee(a.fournisseur); if (!f) continue;
+      ajouterCategorieSilencieuse(a.vers[0], a.vers[1]);
+      for (const o of opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]))
+        enregistrer("operations", Object.assign(o, {categorie: a.vers[0], sousCategorie: a.vers[1], nature: natureParDefaut(a.vers[0]), statut: "classe", verrou: true}));
+      if (a.ficheParDefaut){ Object.assign(f, {categorie: a.vers[0], sousCategorie: a.vers[1], fixe: true}); enregistrer("commercants", f); }
+      faites++;
+    }
+  }
+  invaliderIndex();
+  return faites;
 }
 
 /* ===== 10-reprise.js ===== */
@@ -5083,7 +5180,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
     gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
-        cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+        corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
         document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : lu.sousGenre === "achat_sncf" ? "Justificatif SNCF Connect · " + lu.titre : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
@@ -5184,6 +5281,7 @@ function preparerFichier(f){
       f.statut = "pret";
     } else if (lu.genre === "reprise_v7"){ f.prep = preparerReprise(lu); f.statut = "pret"; }
     else if (lu.genre === "cartes_lcl"){ f.prep = preparerCartesPdf(lu); f.statut = "pret"; }
+    else if (lu.genre === "corrections"){ f.prep = preparerCorrections(lu); f.statut = "pret"; }
     else if (["regles", "plan", "justificatif_pdf", "image", "document"].includes(lu.genre)) f.statut = "pret";
     else f.statut = "erreur";
   } catch (e){ f.erreur = e.message; f.statut = "erreur"; console.error(e); }
@@ -5211,6 +5309,10 @@ async function enregistrerFichier(f, enLot){
     if (lu.genre === "compte" || lu.genre === "carte"){ const imp = appliquerReleve(f.prep); f.resultat = imp.nouvelles + " opération(s)"; }
     else if (lu.genre === "facture_cb") appliquerFacture(f.prep);
     else if (lu.genre === "cartes_lcl"){ const n = appliquerCartesPdf(f.prep); f.resultat = n + " opération(s)"; }
+    else if (lu.genre === "corrections"){
+      if (!enLot && !(await confirmer("Appliquer les " + lu.actions.length + " correction(s) du lot « " + lu.nom + " » ?", "Appliquer"))) return;
+      const n = appliquerCorrections(lu); f.resultat = n + " correction(s)"; message(n + " correction(s) appliquée(s).");
+    }
     else if (lu.genre === "valorisation") appliquerValorisation(lu, f.compte);
     else if (lu.genre === "reprise_v7"){
       const ok = enLot ? true : await confirmer("Reprendre " + f.prep.operations.length + " opérations, le budget " + (f.prep.budget?.annee || "") + " (" + euros(f.prep.budget?.total || 0) + ") et " + f.prep.echeances.length + " échéances à confirmer ? Le classeur n'est pas modifié.", "Reprendre");
@@ -5307,7 +5409,7 @@ function cleRangement(lu, compte){
   if (lu.genre === "document" && lu.sousGenre === "achat_sncf") return "justificatifs";
   if (lu.genre === "document") return lu.sousGenre === "avis_impot" ? "avis_impot" : "avis_opere";
   if (lu.genre === "justificatif_pdf" || lu.genre === "image") return "justificatifs";
-  if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "plans";
+  if (["plan", "regles", "reprise_v7", "corrections"].includes(lu.genre)) return "plans";
   return null;
 }
 const LIBELLES_RANGEMENT = {releves_pdf_lcl: "Relevés PDF du compte LCL", factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
@@ -5350,7 +5452,7 @@ function proposerRangement(lu, compte, index){
   if (lu.genre === "document" && lu.sousGenre === "avis_impot") return parNom(/^imp[ôo]ts?$/i) || "Impôts";
   if (lu.genre === "document") return parNom(/^avis d.op[ée]r[ée]$/i) || "Avis d'opéré";
   if (lu.genre === "justificatif_pdf" || lu.genre === "image") return parNom(/^justificatifs$/i) || "Justificatifs";
-  if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "Budget/Plans importés";
+  if (["plan", "regles", "reprise_v7", "corrections"].includes(lu.genre)) return "Budget/Plans importés";
   return null;
 }
 
@@ -7451,6 +7553,28 @@ async function autotest(){
             for (const o of vivants("operations").filter(o => /ESSAI/.test(o.libelle) && o.date >= "2026-12-30" && o.date <= "2027-01-05")) supprimer("operations", o.id);
             for (const i of vivants("imports").filter(i => /2027-01|2026-12-30/.test(JSON.stringify(i.periode || {})))) supprimer("imports", i.id);
             supprimer("comptes", ck.id);
+          }
+          {
+            // Lot de corrections : aperçu sans effet, puis application sur clic
+            const fa = enregistrer("commercants", {nom: "Etude Essai", alias: [], stats: {}, natures: {}});
+            const fb = enregistrer("commercants", {nom: "Doublon Essai A", alias: ["DOUBLON A"], stats: {}, natures: {}});
+            const fc2 = enregistrer("commercants", {nom: "Doublon Essai B", alias: ["DOUBLON B"], stats: {}, natures: {}});
+            const o1 = enregistrer("operations", {compte: cc.id, date: "2027-02-01", montant: -500, libelle: "VIR DEMENAGEUR ESSAI", commercant: fa.id, categorie: "Logement", sousCategorie: "Entretien"});
+            const o2 = enregistrer("operations", {compte: cc.id, date: "2027-02-02", montant: -5, libelle: "DOUBLON B", commercant: fc2.id, categorie: "Culture et loisirs", sousCategorie: "Livres, presse, sorties, jeux"});
+            const jd = enregistrer("justificatifs", {type: "devis", date: "2027-02-01", montant: 99, commercant: fa.id, commercantNom: fa.nom, natureExacte: "Étude de sol essai", statut: "a_rapprocher", operations: []});
+            const lot = lireJson("c.json", JSON.stringify({format: "budget-foyer-corrections", actions: [
+              {type: "renommerFiche", de: "Etude Essai", vers: "Demenageur Essai"}, {type: "creerFiche", nom: "Etude Essai", depuis: "Demenageur Essai", natureJustificatifs: "sol"},
+              {type: "fusionnerFiches", garder: "Doublon Essai A", absorber: ["Doublon Essai B", "Inconnue Essai"]},
+              {type: "reclasser", fournisseur: "Doublon Essai A", de: ["Culture et loisirs", "Livres, presse, sorties, jeux"], vers: ["Abonnements", "Abonnements numériques"], ficheParDefaut: true}]}));
+            const ap = preparerCorrections(lot);
+            v("lot de corrections : aperçu sans effet", [lot.genre, ap.lignes.length, obtenir("commercants", fa.id).nom, !!obtenir("commercants", fc2.id)], ["corrections", 4, "Etude Essai", true]);
+            appliquerCorrections(lot);
+            const etude = ficheNommee("Etude Essai");
+            v("lot de corrections : renommage, fiche recréée avec son devis, fusion, reclassement", [obtenir("commercants", fa.id).nom, obtenir("justificatifs", jd.id).commercant === etude?.id, obtenir("operations", o1.id).commercant === fa.id,
+              obtenir("operations", o2.id).commercant === fb.id, !obtenir("commercants", fc2.id), obtenir("operations", o2.id).categorie, obtenir("commercants", fb.id).categorie],
+              ["Demenageur Essai", true, true, true, true, "Abonnements", "Abonnements"]);
+            for (const x of [o1, o2]) supprimer("operations", x.id); supprimer("justificatifs", jd.id);
+            for (const f of [fa, fb, etude].filter(Boolean)) supprimer("commercants", f.id);
           }
           v("note de frais : un parking de gare n'est pas un billet de train", [libelleColleNature("Train", {libelle: "EFFIA VALENCE TGV"}), libelleColleNature("Train", {libelle: "SNCF-VOYAGEURS PARIS"})], [false, true]);
           const o4 = enregistrer("operations", {compte: cc.id, date: "2026-09-01", montant: -12.4, libelle: "TUNNEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});

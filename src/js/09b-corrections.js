@@ -1,0 +1,94 @@
+/* ================= Lot de corrections (fichier « budget-foyer-corrections ») =================
+   Corrections préparées hors de l'application (par exemple après un contrôle de cohérence de l'export),
+   appliquées en une fois APRÈS aperçu et clic : rien ne s'applique à la lecture du fichier. Les fiches sont
+   désignées par leur nom exact ; une fiche introuvable rend l'action « ignorée », sans erreur.
+   Actions :
+   - renommerFiche {de, vers, categorie?, sousCategorie?}
+   - creerFiche {nom, depuis, natureJustificatifs} : crée la fiche et y rattache les justificatifs de « depuis »
+     dont la nature exacte contient le texte donné
+   - fusionnerFiches {garder, absorber: [noms], nom?} : opérations, justificatifs et alias rejoignent « garder »
+   - deplacerSousCategorie {de: [cat, sous], vers: [cat, sous]} : liste des réglages et tous les enregistrements
+   - reclasser {fournisseur, de: [cat, sous], vers: [cat, sous], ficheParDefaut?} : opérations de ce fournisseur */
+
+const ficheNommee = nom => vivants("commercants").find(c => c.nom === nom) || vivants("commercants").find(c => norm(c.nom) === norm(nom)) || null;
+const opsDeFiche = f => f ? vivants("operations").filter(o => o.commercant === f.id) : [];
+const justifsDeFiche = f => f ? vivants("justificatifs").filter(j => j.commercant === f.id) : [];
+
+function lireCorrections(nom, o){
+  const actions = (o.actions || []).filter(a => a && a.type);
+  if (!actions.length) return {genre: "inconnu", nom, raison: "lot de corrections vide"};
+  return {genre: "corrections", nom, actions, titre: o.titre || "", date: aujourdhui()};
+}
+/* Aperçu : une ligne par action, avec ce qu'elle toucherait aujourd'hui. */
+function preparerCorrections(lu){
+  const lignes = lu.actions.map(a => {
+    try {
+      if (a.type === "renommerFiche"){
+        const f = ficheNommee(a.de);
+        return f ? {ok: true, n: opsDeFiche(f).length, texte: "Fiche « " + a.de + " » renommée « " + a.vers + " » (" + opsDeFiche(f).length + " opération(s))" + (a.categorie ? ", classement par défaut " + a.categorie + " › " + (a.sousCategorie || "") : "")}
+          : {ok: false, texte: "Fiche « " + a.de + " » introuvable : ignorée"};
+      }
+      if (a.type === "creerFiche"){
+        const d = ficheNommee(a.depuis);
+        const js = justifsDeFiche(d).filter(j => norm(j.natureExacte || "").includes(norm(a.natureJustificatifs || "")));
+        return {ok: !ficheNommee(a.nom) || !!js.length, n: js.length, texte: "Fiche « " + a.nom + " » " + (ficheNommee(a.nom) ? "(existe déjà)" : "créée") + " ; " + js.length + " justificatif(s) de « " + a.depuis + " » (« " + a.natureJustificatifs + " ») y passent"};
+      }
+      if (a.type === "fusionnerFiches"){
+        const g = ficheNommee(a.garder), abs = (a.absorber || []).map(ficheNommee).filter(f => f && f !== g);
+        if (!g) return {ok: false, texte: "Fiche « " + a.garder + " » introuvable : fusion ignorée"};
+        const n = somme(abs, f => opsDeFiche(f).length);
+        return {ok: !!abs.length, n, texte: "Fusion dans « " + (a.nom || g.nom) + " » de " + (abs.length ? abs.map(f => "« " + f.nom + " »").join(", ") : "aucune fiche trouvée") + " (" + n + " opération(s) déplacée(s))"};
+      }
+      if (a.type === "deplacerSousCategorie"){
+        const n = vivants("operations").filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]).length;
+        return {ok: true, n, texte: a.de.join(" › ") + " → " + a.vers.join(" › ") + " (" + n + " opération(s), réglages et budgets compris)"};
+      }
+      if (a.type === "reclasser"){
+        const f = ficheNommee(a.fournisseur);
+        const ops = opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]);
+        return f ? {ok: true, n: ops.length, texte: "« " + a.fournisseur + " » : " + ops.length + " opération(s) de " + a.de.join(" › ") + " vers " + a.vers.join(" › ") + (a.ficheParDefaut ? " (et classement par défaut de la fiche)" : "")}
+          : {ok: false, texte: "Fiche « " + a.fournisseur + " » introuvable : ignorée"};
+      }
+      return {ok: false, texte: "Action inconnue « " + a.type + " » : ignorée"};
+    } catch (e){ return {ok: false, texte: "Action « " + a.type + " » illisible : " + e.message}; }
+  });
+  return {lignes, controles: lignes, nouvelles: lignes.filter(l => l.ok && l.n).flatMap(l => Array(l.n).fill(0))};
+}
+/* Application, dans l'ordre du fichier. Renvoie le nombre d'actions appliquées. */
+function appliquerCorrections(lu){
+  let faites = 0;
+  for (const a of lu.actions){
+    if (a.type === "renommerFiche"){
+      const f = ficheNommee(a.de); if (!f) continue;
+      f.nom = a.vers;
+      if (a.categorie) Object.assign(f, {categorie: a.categorie, sousCategorie: a.sousCategorie || "", fixe: true});
+      enregistrer("commercants", f);
+      for (const j of justifsDeFiche(f)) enregistrer("justificatifs", Object.assign(j, {commercantNom: f.nom}));
+      faites++;
+    } else if (a.type === "creerFiche"){
+      const d = ficheNommee(a.depuis);
+      const f = ficheNommee(a.nom) || enregistrer("commercants", {nom: a.nom, alias: [], stats: {}, natures: {}});
+      for (const j of justifsDeFiche(d).filter(j => norm(j.natureExacte || "").includes(norm(a.natureJustificatifs || ""))))
+        enregistrer("justificatifs", Object.assign(j, {commercant: f.id, commercantNom: f.nom}));
+      faites++;
+    } else if (a.type === "fusionnerFiches"){
+      const g = ficheNommee(a.garder); if (!g) continue;
+      for (const f of (a.absorber || []).map(ficheNommee).filter(f => f && f !== g)) fusionnerCommercants(g, f);
+      if (a.nom && a.nom !== g.nom){ g.nom = a.nom; enregistrer("commercants", g); for (const j of justifsDeFiche(g)) enregistrer("justificatifs", Object.assign(j, {commercantNom: g.nom})); }
+      faites++;
+    } else if (a.type === "deplacerSousCategorie"){
+      ajouterCategorieSilencieuse(a.vers[0], a.vers[1]);
+      deplacerSousCategorie(a.de[0], a.de[1], a.vers[0], a.vers[1]);
+      faites++;
+    } else if (a.type === "reclasser"){
+      const f = ficheNommee(a.fournisseur); if (!f) continue;
+      ajouterCategorieSilencieuse(a.vers[0], a.vers[1]);
+      for (const o of opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]))
+        enregistrer("operations", Object.assign(o, {categorie: a.vers[0], sousCategorie: a.vers[1], nature: natureParDefaut(a.vers[0]), statut: "classe", verrou: true}));
+      if (a.ficheParDefaut){ Object.assign(f, {categorie: a.vers[0], sousCategorie: a.vers[1], fixe: true}); enregistrer("commercants", f); }
+      faites++;
+    }
+  }
+  invaliderIndex();
+  return faites;
+}

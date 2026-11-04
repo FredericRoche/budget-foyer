@@ -220,6 +220,7 @@ function lireJson(nom, texte){
   let o; try { o = JSON.parse(texte); } catch (e) { return {genre: "inconnu", nom, raison: "JSON illisible"}; }
   if (o.format === "budget-foyer-regles") return {genre: "regles", nom, contenu: o};
   if (o.format === "budget-foyer-plan") return {genre: "plan", nom, contenu: o};
+  if (o.format === "budget-foyer-corrections") return lireCorrections(nom, o);
   // Achats SNCF Connect relevés dans les e-mails de confirmation (quand le site ne remonte plus assez loin)
   if (o.format === "budget-foyer-achats-sncf"){
     const achats = (o.achats || []).filter(a => a && /^\d{4}-\d{2}-\d{2}$/.test(a.date || "") && a.montant > 0 && (a.trajets || []).length)

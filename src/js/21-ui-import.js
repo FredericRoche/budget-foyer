@@ -22,7 +22,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
     gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
-        cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+        corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
         document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : lu.sousGenre === "achat_sncf" ? "Justificatif SNCF Connect · " + lu.titre : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
@@ -123,6 +123,7 @@ function preparerFichier(f){
       f.statut = "pret";
     } else if (lu.genre === "reprise_v7"){ f.prep = preparerReprise(lu); f.statut = "pret"; }
     else if (lu.genre === "cartes_lcl"){ f.prep = preparerCartesPdf(lu); f.statut = "pret"; }
+    else if (lu.genre === "corrections"){ f.prep = preparerCorrections(lu); f.statut = "pret"; }
     else if (["regles", "plan", "justificatif_pdf", "image", "document"].includes(lu.genre)) f.statut = "pret";
     else f.statut = "erreur";
   } catch (e){ f.erreur = e.message; f.statut = "erreur"; console.error(e); }
@@ -150,6 +151,10 @@ async function enregistrerFichier(f, enLot){
     if (lu.genre === "compte" || lu.genre === "carte"){ const imp = appliquerReleve(f.prep); f.resultat = imp.nouvelles + " opération(s)"; }
     else if (lu.genre === "facture_cb") appliquerFacture(f.prep);
     else if (lu.genre === "cartes_lcl"){ const n = appliquerCartesPdf(f.prep); f.resultat = n + " opération(s)"; }
+    else if (lu.genre === "corrections"){
+      if (!enLot && !(await confirmer("Appliquer les " + lu.actions.length + " correction(s) du lot « " + lu.nom + " » ?", "Appliquer"))) return;
+      const n = appliquerCorrections(lu); f.resultat = n + " correction(s)"; message(n + " correction(s) appliquée(s).");
+    }
     else if (lu.genre === "valorisation") appliquerValorisation(lu, f.compte);
     else if (lu.genre === "reprise_v7"){
       const ok = enLot ? true : await confirmer("Reprendre " + f.prep.operations.length + " opérations, le budget " + (f.prep.budget?.annee || "") + " (" + euros(f.prep.budget?.total || 0) + ") et " + f.prep.echeances.length + " échéances à confirmer ? Le classeur n'est pas modifié.", "Reprendre");
