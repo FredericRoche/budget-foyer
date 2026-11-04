@@ -6,7 +6,9 @@
      d'année, sous le nom « 2026 Note de frais 2681 novembre 2026 - 02-11.pdf ».
    - Dépenses avancées : chaque ligne est rapprochée du débit de même montant (achat
      jusqu'à 60 jours avant la date de la ligne, ou 5 jours après), un débit ne sert
-     qu'une fois ; le libellé (SNCF, hôtel, autoroute…) départage. Les débits trouvés
+     qu'une fois ; le libellé (SNCF, hôtel, autoroute…) départage. Un débit du double
+     du montant est admis (deux billets payés ensemble, un seul remboursé) : il est
+     alors ventilé, la part remboursée avec la note, l'autre gardant son classement. Les débits trouvés
      prennent la catégorie de la note (par exemple « Transfert », hors budget), sans
      rien apprendre au fournisseur : un billet de train personnel reste classé à part.
      Le classement d'avant est gardé, pour pouvoir le rétablir. */
@@ -60,44 +62,114 @@ function libelleColleNature(nature, op){
 /* Débit pris par une autre note (ou une autre ligne de celle-ci). */
 function debitPrisAilleurs(op, j){ return op.ndf && op.ndf.justificatif !== j.id; }
 
-/* Proposition ligne → débit : chaque débit ne sert qu'une fois ; meilleurs scores d'abord. */
+/* Proposition ligne → débit. Un débit ne sert qu'une fois (sauf à couvrir un groupe de lignes) ;
+   facteur 2 : deux billets payés ensemble (le vôtre et un autre), seul le vôtre est sur la note.
+   1. Débits déjà classés avec cette note : repris tels quels.
+   2. Un débit par ligne : montant égal, ou double ; meilleurs scores d'abord.
+   3. Plusieurs lignes en un paiement (2 à 8 trajets, éventuellement à deux) : la somme des lignes, ou son
+      double, égale le débit. Exigé : un libellé cohérent avec la nature (SNCF pour un train…), pour ne pas
+      prendre une coïncidence de montant ; à défaut d'autre critère, les dates les plus resserrées l'emportent. */
 function rapprochementLignesNdf(j){
-  const lignes = lignesNoteFrais(j);
+  const lignes = lignesNoteFrais(j).filter(l => l.date && l.montant);
   const [avant, apres] = FENETRE_LIGNE_NDF;
+  const dansFenetre = (l, op) => { const dj = ecartJours(l.date, op.date); return dj >= -avant && dj <= apres; };
+  const res = new Map();   // n de ligne → {op, facteur, groupe}
+  const prises = new Set();
+  // 1. Déjà classés
+  for (const op of vivants("operations").filter(o => o.ndf && o.ndf.justificatif === j.id)){
+    const ns = op.ndf.lignes || [op.ndf.ligne];
+    for (const n of ns) res.set(n, {op, facteur: op.ndf.facteur || 1, groupe: ns.length > 1 ? ns : null});
+    prises.add(op.id);
+  }
+  const libres = () => lignes.filter(l => !res.has(l.n));
+  const ops = vivants("operations").filter(op => op.montant < 0 && !op.ndf && !op.ventilation && !prises.has(op.id));
+  // 2. Une ligne, un débit
   const paires = [];
-  const ops = vivants("operations").filter(op => op.montant < 0 && !debitPrisAilleurs(op, j));
-  for (const l of lignes){
-    if (!l.date || !l.montant) continue;
+  for (const l of libres()){
     const c = versCentimes(l.montant);
     for (const op of ops){
-      if (-versCentimes(op.montant) !== c) continue;
-      const dj = ecartJours(l.date, op.date);   // négatif : achat avant la date de la ligne
-      if (dj < -avant || dj > apres) continue;
-      const deja = op.ndf && op.ndf.justificatif === j.id && op.ndf.ligne === l.n;
-      const score = (deja ? 1000 : 0) + (libelleColleNature(l.nature, op) ? 100 : 0) - Math.abs(dj) - (dj > 0 ? 3 : 0);
-      paires.push({l, op, score, ecart: dj});
+      const d = -versCentimes(op.montant);
+      const facteur = d === c ? 1 : d === 2 * c ? 2 : 0;
+      // Le double (billets pour deux) n'est retenu que si le libellé va avec la nature : pas de coïncidence de montant
+      if (!facteur || !dansFenetre(l, op) || (facteur === 2 && !libelleColleNature(l.nature, op))) continue;
+      const dj = ecartJours(l.date, op.date);
+      paires.push({l, op, facteur, score: (libelleColleNature(l.nature, op) ? 100 : 0) - Math.abs(dj) - (dj > 0 ? 3 : 0) - (facteur === 2 ? 20 : 0)});
     }
   }
   paires.sort((a, b) => b.score - a.score);
-  const parLigne = new Map(), prises = new Set();
   for (const p of paires){
-    if (parLigne.has(p.l.n) || prises.has(p.op.id)) continue;
-    parLigne.set(p.l.n, p); prises.add(p.op.id);
+    if (res.has(p.l.n) || prises.has(p.op.id)) continue;
+    res.set(p.l.n, {op: p.op, facteur: p.facteur, groupe: null}); prises.add(p.op.id);
   }
-  return lignes.map(l => ({ligne: l, op: parLigne.get(l.n)?.op || null, ecart: parLigne.get(l.n)?.ecart ?? null,
-    nom: parLigne.has(l.n) && libelleColleNature(l.nature, parLigne.get(l.n).op)}));
+  // 3. Plusieurs lignes, un débit
+  const propositions = [];
+  for (const op of ops.filter(o => !prises.has(o.id))){
+    const d = -versCentimes(op.montant);
+    const proches = libres().filter(l => dansFenetre(l, op) && libelleColleNature(l.nature, op) && versCentimes(l.montant) < d)
+      .sort((a, b) => Math.abs(ecartJours(a.date, op.date)) - Math.abs(ecartJours(b.date, op.date))).slice(0, 12);
+    if (proches.length < 2) continue;
+    let meilleur = null;
+    const essayer = (choix) => {
+      const t = somme(choix, l => versCentimes(l.montant));
+      const facteur = t === d ? 1 : 2 * t === d ? 2 : 0;
+      if (!facteur) return;
+      const dates = choix.map(l => l.date).sort();
+      const score = -ecartJours(dates[0], dates[dates.length - 1]) - somme(choix, l => Math.abs(ecartJours(l.date, op.date))) / choix.length + (facteur === 2 ? 5 : 0);
+      if (!meilleur || score > meilleur.score) meilleur = {op, choix: choix.slice(), facteur, score};
+    };
+    const parcourir = (debut, choix, total) => {
+      if (choix.length >= 2) essayer(choix);
+      if (choix.length >= 8) return;
+      for (let i = debut; i < proches.length; i++){
+        const t = total + versCentimes(proches[i].montant);
+        if (t > d) continue;
+        choix.push(proches[i]); parcourir(i + 1, choix, t); choix.pop();
+      }
+    };
+    parcourir(0, [], 0);
+    if (meilleur) propositions.push(meilleur);
+  }
+  propositions.sort((a, b) => b.score - a.score);
+  for (const p of propositions){
+    if (prises.has(p.op.id) || p.choix.some(l => res.has(l.n))) continue;
+    const ns = p.choix.map(l => l.n);
+    for (const l of p.choix) res.set(l.n, {op: p.op, facteur: p.facteur, groupe: ns});
+    prises.add(p.op.id);
+  }
+  return lignesNoteFrais(j).map(l => {
+    const r = res.get(l.n);
+    return {ligne: l, op: r?.op || null, facteur: r?.facteur || 1, groupe: r?.groupe || null, ecart: r ? ecartJours(l.date, r.op.date) : null,
+      nom: !!r && libelleColleNature(l.nature, r.op)};
+  });
 }
-/* Classe les débits trouvés dans la catégorie de la note. Renvoie le nombre de débits touchés. */
+/* Classe les débits trouvés avec la note. Un débit qui couvre exactement une ligne prend la catégorie de la note ;
+   un débit plus large (deux billets, plusieurs trajets) est ventilé : une part par ligne avec la note, le reste
+   gardant le classement du débit. Renvoie le nombre de débits touchés. */
 function classerDepensesNdf(j, rapprochement){
   if (!j.categorie) return 0;
+  const parOp = new Map();
+  for (const r of rapprochement) if (r.op) (parOp.get(r.op.id) || parOp.set(r.op.id, []).get(r.op.id)).push(r);
+  const nature = j.nature || natureParDefaut(j.categorie);
+  const num = (j.numero || "").replace(/^NDF\s*/i, "");
   let n = 0;
-  for (const r of rapprochement){
-    const op = r.op; if (!op) continue;
-    if (op.ndf && op.ndf.justificatif === j.id && op.categorie === j.categorie && (op.sousCategorie || "") === (j.sousCategorie || "")) continue;
-    const avant = op.ndf?.avant || {categorie: op.categorie, sousCategorie: op.sousCategorie, nature: op.nature, statut: op.statut, verrou: !!op.verrou, natureExacte: op.natureExacte || ""};
-    Object.assign(op, {categorie: j.categorie, sousCategorie: j.sousCategorie || "", nature: j.nature || natureParDefaut(j.categorie), statut: "classe", verrou: true,
-      natureExacte: op.natureExacte || ("Note de frais n° " + (j.numero || "").replace(/^NDF\s*/i, "") + " · " + r.ligne.nature).trim(),
-      ndf: {justificatif: j.id, ligne: r.ligne.n, avant}});
+  for (const rs of parOp.values()){
+    const op = rs[0].op;
+    if (op.ndf && op.ndf.justificatif === j.id) continue;   // déjà classé avec cette note
+    const avant = {categorie: op.categorie, sousCategorie: op.sousCategorie, nature: op.nature, statut: op.statut, verrou: !!op.verrou, natureExacte: op.natureExacte || ""};
+    const libNote = r => ("Note de frais n° " + num + " · ligne " + r.ligne.n + " · " + r.ligne.nature).trim();
+    const lignesOp = rs.map(r => r.ligne.n), facteur = rs[0].facteur;
+    const couvert = somme(rs, r => Math.abs(r.ligne.montant));
+    if (rs.length === 1 && facteur === 1){
+      Object.assign(op, {categorie: j.categorie, sousCategorie: j.sousCategorie || "", nature, statut: "classe", verrou: true,
+        natureExacte: op.natureExacte || libNote(rs[0]), ndf: {justificatif: j.id, ligne: lignesOp[0], lignes: lignesOp, facteur, avant}});
+    } else {
+      const reste = Math.round((op.montant + couvert) * 100) / 100;
+      Object.assign(op, {statut: "classe", verrou: true, ndf: {justificatif: j.id, ligne: lignesOp[0], lignes: lignesOp, facteur, avant, partiel: true},
+        ventilation: rs.map(r => ({montant: -Math.abs(r.ligne.montant), categorie: j.categorie, sousCategorie: j.sousCategorie || "", nature, lieu: op.lieu || "",
+          natureExacte: libNote(r), justificatif: j.id}))
+          .concat(reste < -0.004 ? [{montant: reste, categorie: avant.categorie, sousCategorie: avant.sousCategorie || "", nature: avant.nature || natureParDefaut(avant.categorie), lieu: op.lieu || "",
+            natureExacte: avant.natureExacte || "Part non remboursée"}] : [])});
+    }
     op.justificatifs = [...new Set([...(op.justificatifs || []), j.id])];
     enregistrer("operations", op); n++;
   }
@@ -110,6 +182,7 @@ function declasserDepensesNdf(j){
     const a = op.ndf.avant || {};
     Object.assign(op, {categorie: a.categorie || "À préciser", sousCategorie: a.sousCategorie || "", nature: a.nature || natureParDefaut(a.categorie), statut: a.statut || "a_preciser", verrou: !!a.verrou, natureExacte: a.natureExacte || ""});
     op.justificatifs = (op.justificatifs || []).filter(x => x !== j.id);
+    if (op.ndf.partiel) delete op.ventilation;
     delete op.ndf; enregistrer("operations", op); n++;
   }
   return n;
@@ -129,11 +202,13 @@ function blocDetailNoteFrais(j, avantClasser){
   bloc.appendChild(tableau([{titre: "N°", num: true}, {titre: "Date"}, {titre: "Nature"}, {titre: "Montant", num: true}, {titre: "Débit retrouvé"}], rap, {classe: "serre", ligne: r => h("tr", null,
     h("td", {class: "num"}, String(r.ligne.n)), h("td", null, dateCourte(r.ligne.date)), h("td", null, r.ligne.nature), h("td", {class: "num"}, euros(r.ligne.montant)),
     h("td", {class: "petit"}, r.op ? [(r.op.ndf?.justificatif === j.id ? h("span", {class: "pos"}, "✓ ") : null), dateCourte(r.op.date) + " · " + r.op.libelle + " · " + libelleCompte(r.op.compte),
-      h("span", {class: "discret"}, " (" + (r.ecart > 0 ? "+" : "") + r.ecart + " j" + (r.nom ? ", libellé cohérent" : "") + ")")] : h("span", {class: "discret"}, "non retrouvé (autre moyen de paiement, relevé non importé ?)")))}));
+      h("span", {class: "discret"}, " (" + (r.ecart > 0 ? "+" : "") + r.ecart + " j" + (r.nom ? ", libellé cohérent" : "") + ")"),
+      r.groupe || r.facteur === 2 ? h("div", {class: "petit"}, "un paiement de " + euros(-r.op.montant) + (r.groupe ? " pour les lignes " + r.groupe.join(", ") : "")
+        + (r.facteur === 2 ? ", à deux (billets payés pour deux personnes)" : "") + " : ventilé, la part de la note d'un côté, le reste garde son classement") : null] : h("span", {class: "discret"}, "non retrouvé (autre moyen de paiement, relevé non importé ?)")))}));
   const cat = j.categorie ? j.categorie + (j.sousCategorie ? " › " + j.sousCategorie : "") : "";
   const aClasser = trouves.length - dejaClasses.length;
   bloc.appendChild(h("p", {class: "note"}, "Débit de même montant, acheté jusqu'à " + FENETRE_LIGNE_NDF[0] + " jours avant la date de la ligne ou " + FENETRE_LIGNE_NDF[1]
-    + " jours après ; à montant égal, le libellé (SNCF, hôtel, autoroute…) puis la date la plus proche départagent. Vérifiez les correspondances avant de classer."));
+    + " jours après ; un paiement peut aussi couvrir plusieurs lignes, ou le double (billets pour deux personnes), si son libellé est cohérent : il sera ventilé. À montant égal, le libellé (SNCF, hôtel, autoroute…) puis la date la plus proche départagent. Vérifiez les correspondances avant de classer."));
   bloc.appendChild(h("div", {class: "outils", style: {marginTop: ".4rem"}},
     h("button", {class: "mini" + (aClasser ? " primaire" : ""), disabled: !aClasser, title: cat ? "" : "Choisissez d'abord la catégorie de la note",
       onclick: async () => {

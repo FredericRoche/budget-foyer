@@ -183,7 +183,27 @@ async function autotest(){
           v("note de frais : débits classés avec la note", [n, obtenir("operations", o3.id).categorie, (obtenir("operations", o1.id).justificatifs || []).includes(jn.id)], [3, "Transfert", true]);
           declasserDepensesNdf(jn);
           v("note de frais : classement d'avant rétabli", [obtenir("operations", o3.id).categorie, obtenir("operations", o3.id).sousCategorie, !!obtenir("operations", o1.id).ndf], ["Voyages", "Hôtels", false]);
-          for (const o of [o1, o2, o3]) supprimer("operations", o.id); supprimer("justificatifs", jn.id); supprimer("comptes", cc.id);
+          // Deux billets payés ensemble, un seul sur la note : débit ventilé, l'autre moitié garde son classement
+          const o4 = enregistrer("operations", {compte: cc.id, date: "2026-09-01", montant: -12.4, libelle: "TUNNEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});
+          const r4 = rapprochementLignesNdf(jn).find(r => r.ligne.n === 4);
+          classerDepensesNdf(jn, [r4]);
+          const v4 = obtenir("operations", o4.id).ventilation || [];
+          v("note de frais : débit du double ventilé (part remboursée / part du foyer)", [r4.facteur === 2, v4.map(x => x.montant + " " + x.categorie)], [true, ["-6.2 Transfert", "-6.2 Voyages"]]);
+          declasserDepensesNdf(jn);
+          v("note de frais : ventilation retirée au rétablissement", !!obtenir("operations", o4.id).ventilation, false);
+          // Un paiement pour plusieurs trajets à deux : 4 billets (2 lignes × 2 personnes) = 396 €
+          const texte2 = ["NDF #2700 : Décembre 2026, déclarée le 05/12/2026", "1 03/12/2026 Train 0,00 € 99,00 €", "2 05/12/2026 Train 0,00 € 99,00 €", "3 05/12/2026 Taxi 0,00 € 30,00 €", "Total 228,00 €"].join(L);
+          const o5 = enregistrer("operations", {compte: cc.id, date: "2026-11-20", montant: -396, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          const o6 = enregistrer("operations", {compte: cc.id, date: "2026-12-05", montant: -60, libelle: "BOULANGERIE ESSAI", categorie: "Alimentation", sousCategorie: "Courses", statut: "classe"});
+          const j2 = enregistrer("justificatifs", {type: "notefrais", date: "2026-12-05", montant: 228, texteOCR: texte2, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+          const rap2 = rapprochementLignesNdf(j2);
+          v("note de frais : un paiement pour plusieurs trajets à deux, sans coïncidence de montant", rap2.map(r => r.op ? r.op.id + "×" + r.facteur : null), [o5.id + "×2", o5.id + "×2", null]);
+          classerDepensesNdf(j2, rap2);
+          v("note de frais : paiement groupé ventilé (deux parts avec la note, le reste au foyer)", (obtenir("operations", o5.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-99 Transfert", "-198 Transports"]);
+          v("note de frais : groupe repris tel quel une fois classé", rapprochementLignesNdf(j2).map(r => r.op ? r.op.id : null), [o5.id, o5.id, null]);
+          declasserDepensesNdf(j2);
+          for (const o of [o5, o6]) supprimer("operations", o.id); supprimer("justificatifs", j2.id);
+          for (const o of [o1, o2, o3, o4]) supprimer("operations", o.id); supprimer("justificatifs", jn.id); supprimer("comptes", cc.id);
         }
         v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
         v("téléphone : fournisseur retrouvé par un morceau du nom ou de l'alias", rechercherFournisseurs(["savour"], [{nom: "La Savoureine Eurre", alias: []}, {nom: "Autre", alias: ["SAVOUREINE SARL"]}, {nom: "Sans rapport", alias: []}]).map(f => f.nom), ["La Savoureine Eurre", "Autre"]);
