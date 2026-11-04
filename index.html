@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-OeShFLcdOR9ZRR9v9JpV0dkZyqQ5ndTneX2syUpKAJE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-8RKNAQGNoC/14xRKX1mdLya1eWiLpqnLGEtEGE5E4qQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-04.1939";
+const VERSION_APP = "2026-11-04.1942";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2336,7 +2336,7 @@ function preparerCartesPdf(lu){
     const emp = empreintes(compte ? compte.id : "?", nouvelles);
     preps.push({lu: Object.assign({}, lu, {genre: "carte", carte: c.carte, lignes: c.lignes, periode: {debut: c.lignes.map(l => l.date).sort()[0], fin: c.lignes.map(l => l.date).sort().pop()}}),
       carte: c, compte, sansTitulaire, deja, reattribuees: [], ecartees: [], controles: [c.controle],
-      nouvelles: nouvelles.map((l, i) => Object.assign({}, l, {empreinte: emp[i]}))});
+      nouvelles: nouvelles.map((l, i) => Object.assign({}, l, {empreinte: emp[i], proposition: proposerClassement({libelle: l.libelle, montant: l.montant, date: l.date, compte: compte ? compte.id : "?"})}))});
   }
   return {cartes: preps, nouvelles: preps.flatMap(p => p.nouvelles),
     controles: preps.map(p => p.controles[0]).concat(preps.filter(p => p.sansTitulaire).map(p => ({ok: true, texte: "carte " + p.carte.numero + " (" + p.carte.titulaire + ") inconnue : lignes sur « Cartes LCL (sans titulaire) »"})))};
@@ -2655,7 +2655,7 @@ function preparerCorrections(lu){
       return {ok: false, texte: "Action inconnue « " + a.type + " » : ignorée"};
     } catch (e){ return {ok: false, texte: "Action « " + a.type + " » illisible : " + e.message}; }
   });
-  return {lignes, controles: lignes, nouvelles: lignes.filter(l => l.ok && l.n).flatMap(l => Array(l.n).fill(0))};
+  return {lignes, controles: lignes, nouvelles: [], nb: somme(lignes.filter(l => l.ok), l => l.n || 0)};
 }
 /* Application, dans l'ordre du fichier. Renvoie le nombre d'actions appliquées. */
 function appliquerCorrections(lu){
@@ -5183,7 +5183,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
         corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
         document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : lu.sousGenre === "achat_sncf" ? "Justificatif SNCF Connect · " + lu.titre : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
-      const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
+      const nouvelles = p?.nb != null ? p.nb : p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
       const controle = f.erreur ? h("span", {class: "neg"}, f.erreur) : lu.genre === "inconnu" ? h("span", {class: "neg"}, lu.raison)
         : p?.controles?.length ? p.controles.map(x => h("div", {class: x.ok ? "" : "neg"}, (x.ok ? "✓ " : "⚠ ") + x.texte))
         : lu.genre === "facture_cb" && p ? h("span", {class: Math.abs(p.ecart) < 0.01 ? "" : "neg"}, (Math.abs(p.ecart) < 0.01 ? "✓ " : "⚠ écart " + euros(p.ecart) + " · ") + euros(lu.montant) + " débité le " + dateFr(lu.dateDebit))
@@ -5202,7 +5202,8 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       if (FICHIERS_EN_COURS.some(f => f.source)) await nettoyerDepot();
       rafraichirEcran();
     }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs sans changement de fournisseur ni de catégorie s'appliqueront d'office, les autres seront proposés.")));
-    const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.statut === "pret");
+    // Aperçu des opérations nouvelles : seulement pour les fichiers qui en proposent un classement (relevés)
+    const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.prep.nouvelles[0]?.proposition && f.statut === "pret");
     if (detail){
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Aperçu : " + detail.lu.nom));
       gauche.appendChild(tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Classement proposé"}, {titre: "Lieu"}, {titre: "Origine"}], detail.prep.nouvelles, {classe: "serre", limite: 60, ligne: l =>

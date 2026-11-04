@@ -25,7 +25,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
         corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
         document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : lu.sousGenre === "achat_sncf" ? "Justificatif SNCF Connect · " + lu.titre : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
-      const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
+      const nouvelles = p?.nb != null ? p.nb : p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
       const controle = f.erreur ? h("span", {class: "neg"}, f.erreur) : lu.genre === "inconnu" ? h("span", {class: "neg"}, lu.raison)
         : p?.controles?.length ? p.controles.map(x => h("div", {class: x.ok ? "" : "neg"}, (x.ok ? "✓ " : "⚠ ") + x.texte))
         : lu.genre === "facture_cb" && p ? h("span", {class: Math.abs(p.ecart) < 0.01 ? "" : "neg"}, (Math.abs(p.ecart) < 0.01 ? "✓ " : "⚠ écart " + euros(p.ecart) + " · ") + euros(lu.montant) + " débité le " + dateFr(lu.dateDebit))
@@ -44,7 +44,8 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       if (FICHIERS_EN_COURS.some(f => f.source)) await nettoyerDepot();
       rafraichirEcran();
     }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs sans changement de fournisseur ni de catégorie s'appliqueront d'office, les autres seront proposés.")));
-    const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.statut === "pret");
+    // Aperçu des opérations nouvelles : seulement pour les fichiers qui en proposent un classement (relevés)
+    const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.prep.nouvelles[0]?.proposition && f.statut === "pret");
     if (detail){
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Aperçu : " + detail.lu.nom));
       gauche.appendChild(tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Classement proposé"}, {titre: "Lieu"}, {titre: "Origine"}], detail.prep.nouvelles, {classe: "serre", limite: 60, ligne: l =>

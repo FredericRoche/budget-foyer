@@ -122,7 +122,7 @@ function preparerCartesPdf(lu){
     const emp = empreintes(compte ? compte.id : "?", nouvelles);
     preps.push({lu: Object.assign({}, lu, {genre: "carte", carte: c.carte, lignes: c.lignes, periode: {debut: c.lignes.map(l => l.date).sort()[0], fin: c.lignes.map(l => l.date).sort().pop()}}),
       carte: c, compte, sansTitulaire, deja, reattribuees: [], ecartees: [], controles: [c.controle],
-      nouvelles: nouvelles.map((l, i) => Object.assign({}, l, {empreinte: emp[i]}))});
+      nouvelles: nouvelles.map((l, i) => Object.assign({}, l, {empreinte: emp[i], proposition: proposerClassement({libelle: l.libelle, montant: l.montant, date: l.date, compte: compte ? compte.id : "?"})}))});
   }
   return {cartes: preps, nouvelles: preps.flatMap(p => p.nouvelles),
     controles: preps.map(p => p.controles[0]).concat(preps.filter(p => p.sansTitulaire).map(p => ({ok: true, texte: "carte " + p.carte.numero + " (" + p.carte.titulaire + ") inconnue : lignes sur « Cartes LCL (sans titulaire) »"})))};

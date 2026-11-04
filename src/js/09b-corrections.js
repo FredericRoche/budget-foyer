@@ -52,7 +52,7 @@ function preparerCorrections(lu){
       return {ok: false, texte: "Action inconnue « " + a.type + " » : ignorée"};
     } catch (e){ return {ok: false, texte: "Action « " + a.type + " » illisible : " + e.message}; }
   });
-  return {lignes, controles: lignes, nouvelles: lignes.filter(l => l.ok && l.n).flatMap(l => Array(l.n).fill(0))};
+  return {lignes, controles: lignes, nouvelles: [], nb: somme(lignes.filter(l => l.ok), l => l.n || 0)};
 }
 /* Application, dans l'ordre du fichier. Renvoie le nombre d'actions appliquées. */
 function appliquerCorrections(lu){
