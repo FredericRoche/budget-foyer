@@ -55,11 +55,21 @@ Les chemins ci-dessous sont relatifs à `src/js/`. Les noms entre parenthèses s
 ### Rapprochement des tickets avec les opérations du relevé
 - **Ce que fait la fonctionnalité :**
   - associer chaque justificatif à l'opération bancaire de même montant, dans une fenêtre de dates propre à son type (ticket, facture, facturette) ;
-  - appliquer d'office un cas sans ambiguïté, de façon réversible ; les autres attendent dans « À traiter » ;
+  - appliquer d'office un cas sans ambiguïté **seulement s'il ne change ni le fournisseur ni la catégorie de l'opération** (ni ne la ventile), de façon réversible ; sinon le proposer en tête, à confirmer d'un clic ; les autres attendent dans « À traiter » ;
   - gérer plusieurs tickets payés en une fois, la facture et la facturette d'un même achat (sans double compte), et les paiements en espèces.
 - **Où :** `11-rapprochement.js` (`candidats`, `fenetre`, `achatsGroupes`, `lier`, `delier`, `rapprocherTout`, `justificatifDejaLa`, `creerOperationEspeces`), écran `22-ui-justificatifs.js`.
 - **Dépend de :** opérations bancaires importées et justificatifs saisis. La carte (4 derniers chiffres) et son titulaire affinent les candidats.
-- **Se reprend :** facilement, si l'application d'accueil a déjà des opérations et des pièces jointes.
+- **Se reprend :** facilement, si l'application d'accueil a déjà des opérations et des pièces jointes. Le test `rapprochementModifie` (même fichier) est la garde à reprendre avec.
+
+### Notes de frais : avance, remboursement et détail ligne par ligne
+- **Ce que fait la fonctionnalité :**
+  - un justificatif de type « Note de frais (à rembourser) » est une **créance** : il se rapproche du **virement reçu** (crédit) de même montant, jamais d'un débit, et sort des dépenses en attente ;
+  - la note détaillée exportée par l'outil de l'employeur (« NDF #… », déclarant, lignes date / nature / montant) est lue, rangée sous un nom normalisé, et chaque ligne est rapprochée du **débit qui l'a payée** : montant exact, plusieurs lignes sur un paiement, billets pour deux personnes, ou choix à la main ;
+  - le débit est **ventilé** : la part de la note va dans une catégorie hors budget (Transfert), le reste (autres voyageurs, trajets personnels) garde son classement ; tout se défait ;
+  - les **justificatifs d'achat SNCF Connect** (PDF, ZIP, ou commandes relevées dans les e-mails en JSON) donnent pour chaque paiement ses trajets et ses voyageurs : la ligne du déclarant est rattachée au bon paiement sans calcul de montants.
+- **Où :** `11b-notes-frais.js` (`extraireNoteFrais`, `rapprochementLignesNdf`, `classerDepensesNdf`, `declasserDepensesNdf`, `debitsDesAchats`, `rangerNoteFrais`), `08-lecture-fichiers.js` (`extraireAchatSncf`, `lireZipJustificatifs`), `02-xlsx.js` (`octetsDuZip`).
+- **Dépend de :** rapprochement des justificatifs, relevés importés. Les formats (outil de notes de frais, SNCF Connect) sont ceux d'un foyer : à adapter.
+- **Se reprend :** l'idée (créance rapprochée d'un crédit, ventilation d'un débit partagé) se transpose partout ; les lecteurs de documents sont à refaire pour d'autres formats.
 
 ---
 
@@ -71,7 +81,8 @@ Les chemins ci-dessous sont relatifs à `src/js/`. Les noms entre parenthèses s
   - la clé est rattachée à une **fiche fournisseur** (nom d'usage, alias) ;
   - chaque validation ou correction nourrit la fiche (catégorie, nature et lieu habituels) ; deux achats concordants suffisent à fixer un défaut ;
   - une fiche peut rester « à préciser » pour les fournisseurs aux achats variés ;
-  - les doublons probables sont détectés et peuvent être fusionnés.
+  - les doublons probables sont détectés et peuvent être fusionnés ;
+  - **rien n'est déduit en silence** : un fournisseur seulement deviné dans le texte d'une pièce est affiché « à confirmer » ; un nom lu sur une pièce ne devient alias qu'après une question ; les mots de lieu ou d'adresse (souvent l'adresse du client imprimée sur la facture) ne suffisent jamais à reconnaître un fournisseur ; « Nouveau fournisseur… » crée une fiche, ne renomme jamais celle qui était attachée.
 - **Ordre de décision du classement :** règle explicite, puis fiche du fournisseur, puis code MCC de la carte ou catégorie proposée par la banque, sinon « À préciser ».
 - **Où :**
   - `07-classement.js` (`cleLibelle`, `trouverCommercant`, `assurerCommercant`, `apprendre`, `apprendreCorrection`, `proposerClassement`, `classerAutomatiquement`, `validerClassement`, tables `MCC`) ;
@@ -92,6 +103,8 @@ Les chemins ci-dessous sont relatifs à `src/js/`. Les noms entre parenthèses s
   - PDF : lecture générale des lignes « date … montant ». Débit et crédit se distinguent par la position des colonnes, le contrôle se fait par l'ancien et le nouveau solde, puis l'utilisateur vérifie.
   - `analyserReleveLibre` est une fonction pure, testée dans `29-autotest.js`.
 - **Lecteurs dédiés** (LCL, Amex, relevés PDF de placements, avis d'impôt) : `08-lecture-fichiers.js`. Ils servent d'exemples de reconnaissance par motifs.
+- **Détail des cartes dans un relevé de compte PDF** (quand la banque ne donne plus de CSV pour les mois anciens) : `extraireCartesReleveLcl` lit la section « paiements par carte » carte par carte, contrôle chaque carte contre le **sous-total imprimé** (un écart égal au double d'une ligne la désigne comme remboursement) ; `preparerCartesPdf` (`09-import.js`) ne recrée pas un achat déjà connu sur la même carte, à la même date et pour le même montant, quel que soit son libellé.
+- **Lot de corrections** (`09b-corrections.js`) : un fichier JSON préparé à part (renommer, fusionner, recréer une fiche, déplacer une sous-catégorie, reclasser, fixer un classement par défaut) s'importe avec un aperçu chiffré, puis s'applique sur un clic. Utile après un contrôle de cohérence fait hors de l'application.
 - **Dossier de dépôt :** importer tout un dossier d'un coup, puis ranger chaque fichier traité dans un dossier d'archives. Voir `21b-dossier-import.js` (API File System Access, Chrome et Edge).
 - **Excel sans bibliothèque :** `02-xlsx.js` lit et écrit des `.xlsx` (zip et XML) avec les seules API du navigateur.
 

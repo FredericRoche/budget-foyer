@@ -83,6 +83,8 @@ L'application tient en **une page web unique (PWA), sans serveur** :
 
 ## 3. Conventions
 
+- **Principe du foyer d'origine, à garder : pas de déduction appliquée sans accord.** L'application ne change d'elle-même ni un fournisseur, ni une catégorie, ni une fiche sur une supposition. Elle propose, l'utilisateur confirme. Seul ce qui ne change rien peut être automatique (par exemple un rapprochement sûr qui garde fournisseur et catégorie). Toute nouvelle automatisation passe ce test.
+
 - **Tout en français** : identifiants, commentaires, textes affichés. Typographie française : guillemets « », espace avant `:` `;` `?` `!`.
 - Imitez le code voisin : même densité de commentaires (courts, en tête de fonction, sur le *pourquoi*), mêmes aides (`h`, `champ`, `selection`, `dialogue`, `tableau`, `message`, `confirmer`).
 - Montants en euros dans les objets ; les comparaisons et les sommes exactes se font en centimes (`versCentimes`). Dépense négative, recette positive.
@@ -137,7 +139,8 @@ L'identifiant de l'application Microsoft du propriétaire se trouve dans `CLIENT
 
 Ces éléments restent en sommeil tant qu'ils ne servent pas. Ne les retirez que si le propriétaire le demande.
 
-- **Lecteurs LCL** (compte, encours des cartes, facture des cartes à débit différé, livrets, PEA) et **Amex**.
+- **Lecteurs LCL** (compte, encours des cartes, facture des cartes à débit différé, livrets, PEA, détail des cartes dans le relevé de compte PDF) et **Amex** (CSV, Excel, CSV enregistré dans Excel).
+- **Notes de frais d'un employeur** et **justificatifs SNCF Connect** (`11b-notes-frais.js`) : formats propres au foyer d'origine.
 - **Règle ⌈n/2⌉** pour les lignes carte que LCL double dans l'export du compte.
 - **Reprise du classeur d'inventaire v7.**
 - **« Coût par site »** : visible seulement avec plusieurs lieux.
