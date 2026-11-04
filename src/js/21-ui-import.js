@@ -171,14 +171,20 @@ async function enregistrerFichier(f, enLot){
 async function importerJustificatifPc(lu, depuisDepot){
   let t;
   if (lu.genre === "image"){ message("Lecture du ticket « " + lu.nom + " »…"); t = await lireTicket(new Blob([lu.octets], {type: lu.mime})); }
-  else { t = Object.assign(extraireTicket(lu.texte), {photo: {mime: "application/pdf", octets: lu.octets}}); if (!/facturette/.test(t.type)) t.type = "facture"; }
-  const c = commercantPourTicket(t);
+  else { t = Object.assign(extraireTicket(lu.texte), {photo: {mime: "application/pdf", octets: lu.octets}}); if (!/facturette|notefrais/.test(t.type)) t.type = "facture"; }
+  // Note de frais détaillée : montant, date de déclaration, numéro et créancier lus sur la note ; classement repris de la note précédente
+  const ndf = lu.noteFrais;
+  if (ndf) Object.assign(t, {type: "notefrais", montant: ndf.total, date: ndf.declaree, numero: "NDF " + ndf.numero, raisonSociale: ndf.entite || t.raisonSociale, enseigne: ndf.entite || t.enseigne});
+  const precedente = ndf ? vivants("justificatifs").filter(x => estNoteFrais(x) && !x.aValider && x.id).sort((a, b) => a.date < b.date ? 1 : -1)[0] || null : null;
+  const c = commercantPourTicket(t) || (precedente?.commercant ? obtenir("commercants", precedente.commercant) : null);
   // Même pièce déjà enregistrée (même montant, même date, même fournisseur) : on demande avant de l'ajouter
   const double = justificatifDejaLa({montant: t.montant, date: t.date, commercant: c?.id, raisonSociale: t.raisonSociale, numero: t.numero});
   if (double && !(await confirmer("Une pièce identique est déjà enregistrée : " + (double.commercantNom || double.raisonSociale || "fournisseur ?") + (double.numero ? ", facture n° " + double.numero : "") + ", " + euros(double.montant) + " du " + dateFr(double.date)
     + ". L'ajouter quand même ?", "Ajouter quand même"))) return;
   const j = await creerJustificatif({type: t.type, date: t.date || aujourdhui(), heure: t.heure, montant: t.montant || 0, raisonSociale: t.raisonSociale, commercantNom: c ? c.nom : nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")),
-    commercant: c ? c.id : null, carte4: t.carte4, carte: carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc", categorie: c?.categorie || "", sousCategorie: c?.sousCategorie || "", lieu: c?.lieu || "", aVerifier: true,
+    commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
+    categorie: precedente?.categorie || c?.categorie || "", sousCategorie: precedente ? precedente.sousCategorie || "" : c?.sousCategorie || "", lieu: precedente?.lieu || c?.lieu || "", aVerifier: true,
+    natureExacte: ndf ? "Note de frais n° " + ndf.numero + " (" + ndf.periode.toLowerCase() + ")" : "", lignesNdf: ndf ? ndf.lignes : undefined,
     aValider: !!depuisDepot}, t.photo);
   rapprocherTout();
   ETAT_ECRAN.justificatifs = Object.assign(ETAT_ECRAN.justificatifs || {}, {choisi: j.id});

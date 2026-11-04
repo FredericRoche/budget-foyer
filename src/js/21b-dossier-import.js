@@ -181,6 +181,7 @@ async function copieIdentique(d, octets, prefixe, niveau){
 }
 
 async function rangerFichier(f){
+  if (f.lu.noteFrais) return rangerNoteFrais(f);   // dossier propre, nom normalisé, sans sous-dossier d'année
   const archives = await dossierImport("archives", true);
   if (!archives){ f.rangement = {reste: "archives non désignées"}; return; }
   const r = dossierRangement(f);
@@ -239,6 +240,7 @@ function celluleRangement(f){
   if (f.rangement?.erreur) return h("span", {class: "neg"}, "reste au dépôt : " + f.rangement.erreur);
   if (f.rangement?.reste) return h("span", {class: "discret"}, "reste au dépôt (" + f.rangement.reste + ")");
   if (f.statut === "erreur" || f.lu.genre === "inconnu") return h("span", {class: "discret"}, "reste au dépôt");
+  if (f.lu.noteFrais) return h("span", null, "→ " + DOSSIER_NOTES_FRAIS.libelle.toLowerCase() + " : « " + nomNoteFrais(f.lu.noteFrais) + " »");
   const r = dossierRangement(f);
   if (!r) return h("span", {class: "discret"}, "reste au dépôt");
   if (!r.dossier) return h("button", {class: "mini discret", onclick: () => modifierRangement(r.cle, "")}, "Définir le rangement…");
@@ -255,7 +257,13 @@ function sectionDossiersImport(){
     return h("li", null, h("span", null, DOSSIERS_IMPORT[quoi].libelle + " : ", zone),
       h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierImport(quoi); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
   };
-  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives")));
+  const ligneNdf = (() => {
+    const zone = h("span", {class: "discret"}, "…");
+    reglage(DOSSIER_NOTES_FRAIS.cle, null).then(d => { zone.textContent = d ? "« " + d.name + " »" : "non désigné (demandé au premier rangement)"; zone.className = d ? "" : "discret"; });
+    return h("li", null, h("span", null, DOSSIER_NOTES_FRAIS.libelle + " : ", zone),
+      h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierNotesFrais(); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
+  })();
+  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives"), ligneNdf));
   const regles = Object.entries(reglesRangement()).sort((a, b) => libelleRangement(a[0]).localeCompare(libelleRangement(b[0])));
   if (regles.length) corps.appendChild(tableau([{titre: "Pièces"}, {titre: "Rangées dans (+ année)"}, {titre: ""}], regles, {classe: "serre", ligne: ([cle, d]) =>
     h("tr", null, h("td", null, libelleRangement(cle)), h("td", {class: "petit"}, d), h("td", null, h("button", {class: "mini discret", onclick: () => modifierRangement(cle, d)}, "Modifier")))}));

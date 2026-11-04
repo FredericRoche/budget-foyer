@@ -217,6 +217,7 @@ function reconnaitrePdf(nom, texte, octets){
     return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : ""), date: an ? an + "-12-31" : null});
   }
   if (/^COMPTEDEDEPOTS_/.test(nom)) return Object.assign(base, {genre: "inconnu", raison: "relevé de compte PDF : importez plutôt l'export CSV du compte (plus complet)"});
-  // Pièce justificative (facture, ticket)
-  return Object.assign(base, {genre: "justificatif_pdf"});
+  // Pièce justificative (facture, ticket, note de frais détaillée)
+  const ndf = extraireNoteFrais(T);
+  return Object.assign(base, {genre: "justificatif_pdf"}, ndf ? {noteFrais: ndf, date: ndf.declaree} : {});
 }

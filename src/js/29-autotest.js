@@ -164,6 +164,27 @@ async function autotest(){
           v("note de frais : lue sur la pièce, hors en-cours", [extraireTicket("EMPLOYEUR ESSAI" + String.fromCharCode(10) + "NOTE DE FRAIS" + String.fromCharCode(10) + "Collaborateur" + String.fromCharCode(10) + "Total 1 735,61").type, encoursSaisis().lignes.some(l => l.montant === 1735.61)], ["notefrais", false]);
           delier(nf); supprimer("justificatifs", nf.id); supprimer("operations", deb.id); supprimer("operations", cre.id); supprimer("comptes", cc.id);
         }
+        {
+          // Note de frais détaillée : lecture des lignes, nom de rangement, débits retrouvés (un débit par ligne), classement réversible
+          const L = String.fromCharCode(10);
+          const texte = ["NDF #2681 : Novembre 2026, déclarée le 02/11/2026 Imprimé le 02/11/2026 à 16:44", " Entité légale : EMPLOYEUR ESSAI", "N° Date Nature TVA Montant TTC",
+            "1 28/05/2026 Train 0,00 € 99,00 €", "2 01/06/2026 Train 0,00 € 99,00 €", "3 17/06/2026 Hôtel 0,00 € 25,01 €", "4 08/09/2026 Péages 0,00 € 6,20 €", "Total 229,21 €"].join(L);
+          const x = extraireNoteFrais(texte);
+          v("note de frais détaillée : numéro, date, lignes, total", [x.numero, x.declaree, x.lignes.length, x.lignes[2].nature, x.total, x.entite], ["2681", "2026-11-02", 4, "Hôtel", 229.21, "EMPLOYEUR ESSAI"]);
+          v("note de frais : nom de rangement des notes déjà classées", nomNoteFrais(x), "2026 Note de frais 2681 novembre 2026 - 02-11.pdf");
+          const cc = enregistrer("comptes", {nom: "Carte essai NDF", type: "carte", carte: "X919", actif: true});
+          const o1 = enregistrer("operations", {compte: cc.id, date: "2026-05-27", montant: -99, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          const o2 = enregistrer("operations", {compte: cc.id, date: "2026-05-30", montant: -99, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          const o3 = enregistrer("operations", {compte: cc.id, date: "2026-06-17", montant: -25.01, libelle: "HOTEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});
+          const jn = enregistrer("justificatifs", {type: "notefrais", date: "2026-11-02", montant: 229.21, texteOCR: texte, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+          const rap = rapprochementLignesNdf(jn);
+          v("note de frais : chaque ligne trouve son débit, sans doublon", rap.map(r => r.op ? r.op.id : null), [o1.id, o2.id, o3.id, null]);
+          const n = classerDepensesNdf(jn, rap);
+          v("note de frais : débits classés avec la note", [n, obtenir("operations", o3.id).categorie, (obtenir("operations", o1.id).justificatifs || []).includes(jn.id)], [3, "Transfert", true]);
+          declasserDepensesNdf(jn);
+          v("note de frais : classement d'avant rétabli", [obtenir("operations", o3.id).categorie, obtenir("operations", o3.id).sousCategorie, !!obtenir("operations", o1.id).ndf], ["Voyages", "Hôtels", false]);
+          for (const o of [o1, o2, o3]) supprimer("operations", o.id); supprimer("justificatifs", jn.id); supprimer("comptes", cc.id);
+        }
         v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
         v("téléphone : fournisseur retrouvé par un morceau du nom ou de l'alias", rechercherFournisseurs(["savour"], [{nom: "La Savoureine Eurre", alias: []}, {nom: "Autre", alias: ["SAVOUREINE SARL"]}, {nom: "Sans rapport", alias: []}]).map(f => f.nom), ["La Savoureine Eurre", "Autre"]);
         v("pièce : lecture illisible ni proposée ni apprise comme nom", [nomPlausible("‘ au qi Tee ce L j"), nomPlausible("La Savoureine")], [false, true]);

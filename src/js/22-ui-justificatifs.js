@@ -170,6 +170,8 @@ function ecranRapprochement(j, etat, attente){
   }
   grille.appendChild(cand);
   bloc.appendChild(grille);
+  // Note de frais détaillée : dépenses avancées retrouvées au relevé, à classer avec la note (la saisie est enregistrée d'abord), sur toute la largeur
+  if (groupe.length === 1 && estNoteFrais(j)){ const d = blocDetailNoteFrais(j, enregistrerSaisie); if (d) bloc.appendChild(d); }
   return bloc;
 }
 
