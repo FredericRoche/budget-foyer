@@ -247,6 +247,14 @@ async function autotest(){
             supprimer("operations", d97.id); supprimer("operations", d114.id); supprimer("justificatifs", j6.id);
             for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && ["0201", "0202"].includes(d.transaction))) supprimer("documents", d.id);
           }
+          {
+            // Nature sans mot connu : le choix à la main propose les débits proches en montant, quel que soit le libellé
+            const pe = enregistrer("operations", {compte: cc.id, date: "2025-10-20", montant: -1599, libelle: "BOUTIQUE ESSAI", categorie: "Maison", sousCategorie: "Équipement, électroménager", statut: "classe"});
+            const t8 = ["NDF #1800 : Octobre 2025, déclarée le 24/11/2025", "1 22/10/2025 Petit équipement 0,00 € 1 581,00 €", "Total 1 581,00 €"].join(L);
+            const j8 = enregistrer("justificatifs", {type: "notefrais", date: "2025-11-24", montant: 1581, texteOCR: t8, statut: "a_rapprocher", operations: []});
+            v("note de frais : nature sans mot connu, débit proposé au choix à la main", debitsPossiblesNdf(j8, lignesNoteFrais(j8)[0]).some(o => o.id === pe.id), true);
+            supprimer("operations", pe.id); supprimer("justificatifs", j8.id);
+          }
           v("note de frais : un parking de gare n'est pas un billet de train", [libelleColleNature("Train", {libelle: "EFFIA VALENCE TGV"}), libelleColleNature("Train", {libelle: "SNCF-VOYAGEURS PARIS"})], [false, true]);
           const o4 = enregistrer("operations", {compte: cc.id, date: "2026-09-01", montant: -12.4, libelle: "TUNNEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});
           const r4 = rapprochementLignesNdf(jn).find(r => r.ligne.n === 4);

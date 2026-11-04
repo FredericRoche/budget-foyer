@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-cltgdMzWGotNgvd9eyPlH9oqmxpNroTeDbwyigMMxnE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-7XQihyKWv2u8nSekqPfleg/ekhtFOWBfyhIFnWMflc0=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-04.1808";
+const VERSION_APP = "2026-11-04.1810";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3221,9 +3221,14 @@ function dejaPorteNdf(j, op, saufLigne, rap){
 }
 function debitsPossiblesNdf(j, ligne){
   const rap = rapprochementLignesNdf(j);
-  return vivants("operations").filter(op => debitUtilisable(op, j) && -op.montant >= ligne.montant + dejaPorteNdf(j, op, ligne.n, rap) - 0.005 && libelleColleNature(ligne.nature, op)
-    && ecartJours(ligne.date, op.date) >= -120 && ecartJours(ligne.date, op.date) <= 5)
-    .sort((a, b) => Math.abs(ecartJours(ligne.date, a.date)) - Math.abs(ecartJours(ligne.date, b.date))).slice(0, 10);
+  // Nature sans mot connu (« Petit équipement », « Divers »…) : pas de filtre de libellé ; les montants les plus proches
+  // d'abord, sur une fenêtre plus courte (achat de quelques semaines avant à quelques jours après)
+  const connue = MOTS_NATURE_NDF.some(([n]) => n.test(ligne.nature));
+  const [avant, apres] = connue ? [120, 5] : [60, 10];
+  return vivants("operations").filter(op => debitUtilisable(op, j) && -op.montant >= ligne.montant + dejaPorteNdf(j, op, ligne.n, rap) - 0.005
+    && (!connue || libelleColleNature(ligne.nature, op)) && ecartJours(ligne.date, op.date) >= -avant && ecartJours(ligne.date, op.date) <= apres)
+    .sort((a, b) => connue ? Math.abs(ecartJours(ligne.date, a.date)) - Math.abs(ecartJours(ligne.date, b.date)) : (-a.montant) - (-b.montant))
+    .slice(0, 10);
 }
 function choisirDebitNdf(j, n, opId){
   const m = Object.assign({}, j.ndfManuel || {});
@@ -7269,6 +7274,14 @@ async function autotest(){
             v("note de frais : même jour, deux paiements : chaque ligne au bon justificatif", rapprochementLignesNdf(j6).map(r => r.op === d97 ? "97" : r.op === d114 ? "114" : "-"), ["114", "97", "114"]);
             supprimer("operations", d97.id); supprimer("operations", d114.id); supprimer("justificatifs", j6.id);
             for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && ["0201", "0202"].includes(d.transaction))) supprimer("documents", d.id);
+          }
+          {
+            // Nature sans mot connu : le choix à la main propose les débits proches en montant, quel que soit le libellé
+            const pe = enregistrer("operations", {compte: cc.id, date: "2025-10-20", montant: -1599, libelle: "BOUTIQUE ESSAI", categorie: "Maison", sousCategorie: "Équipement, électroménager", statut: "classe"});
+            const t8 = ["NDF #1800 : Octobre 2025, déclarée le 24/11/2025", "1 22/10/2025 Petit équipement 0,00 € 1 581,00 €", "Total 1 581,00 €"].join(L);
+            const j8 = enregistrer("justificatifs", {type: "notefrais", date: "2025-11-24", montant: 1581, texteOCR: t8, statut: "a_rapprocher", operations: []});
+            v("note de frais : nature sans mot connu, débit proposé au choix à la main", debitsPossiblesNdf(j8, lignesNoteFrais(j8)[0]).some(o => o.id === pe.id), true);
+            supprimer("operations", pe.id); supprimer("justificatifs", j8.id);
           }
           v("note de frais : un parking de gare n'est pas un billet de train", [libelleColleNature("Train", {libelle: "EFFIA VALENCE TGV"}), libelleColleNature("Train", {libelle: "SNCF-VOYAGEURS PARIS"})], [false, true]);
           const o4 = enregistrer("operations", {compte: cc.id, date: "2026-09-01", montant: -12.4, libelle: "TUNNEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});

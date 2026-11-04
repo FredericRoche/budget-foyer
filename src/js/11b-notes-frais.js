@@ -299,9 +299,14 @@ function dejaPorteNdf(j, op, saufLigne, rap){
 }
 function debitsPossiblesNdf(j, ligne){
   const rap = rapprochementLignesNdf(j);
-  return vivants("operations").filter(op => debitUtilisable(op, j) && -op.montant >= ligne.montant + dejaPorteNdf(j, op, ligne.n, rap) - 0.005 && libelleColleNature(ligne.nature, op)
-    && ecartJours(ligne.date, op.date) >= -120 && ecartJours(ligne.date, op.date) <= 5)
-    .sort((a, b) => Math.abs(ecartJours(ligne.date, a.date)) - Math.abs(ecartJours(ligne.date, b.date))).slice(0, 10);
+  // Nature sans mot connu (« Petit équipement », « Divers »…) : pas de filtre de libellé ; les montants les plus proches
+  // d'abord, sur une fenêtre plus courte (achat de quelques semaines avant à quelques jours après)
+  const connue = MOTS_NATURE_NDF.some(([n]) => n.test(ligne.nature));
+  const [avant, apres] = connue ? [120, 5] : [60, 10];
+  return vivants("operations").filter(op => debitUtilisable(op, j) && -op.montant >= ligne.montant + dejaPorteNdf(j, op, ligne.n, rap) - 0.005
+    && (!connue || libelleColleNature(ligne.nature, op)) && ecartJours(ligne.date, op.date) >= -avant && ecartJours(ligne.date, op.date) <= apres)
+    .sort((a, b) => connue ? Math.abs(ecartJours(ligne.date, a.date)) - Math.abs(ecartJours(ligne.date, b.date)) : (-a.montant) - (-b.montant))
+    .slice(0, 10);
 }
 function choisirDebitNdf(j, n, opId){
   const m = Object.assign({}, j.ndfManuel || {});
