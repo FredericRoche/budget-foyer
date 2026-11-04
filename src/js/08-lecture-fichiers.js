@@ -52,6 +52,7 @@ async function lireFichier(fichier, motDePasse){
     return r;
   }
   if (/^(jpe?g|png|heic|webp)$/.test(ext)) return {genre: "image", nom, octets, mime: fichier.type || "image/jpeg"};
+  if (ext === "zip") return lireZipJustificatifs(nom, buffer);
   return {genre: "inconnu", nom, raison: "format non reconnu (." + ext + ")"};
 }
 
@@ -101,12 +102,110 @@ function lireAmexCsv(nom, lignes){
   return {genre: "carte", banque: "Amex", nom, numero: "", carte: "AMEX", periode: {debut: dates[0], fin: dates[dates.length - 1]}, lignes: ops};
 }
 
+/* ---------- Relevé de compte LCL en PDF : paiements par carte du mois ----------
+   « PAIEMENTS PAR CARTE D'OCTOBRE 2025 », puis par carte « CARTE N° 12 3456 M JEAN DUPONT »,
+   « SOUS TOTAL : 3 996,27 » et une ligne par achat « LIBELLÉ LE 22/10 1 581,00 ». Les lignes de devise
+   (« Rotterdam 1581,00 EUR ») sont ignorées. La carte est reconnue par ses 3 derniers chiffres (X456).
+   Le texte ne distingue pas un remboursement d'un achat : la somme est contrôlée contre le sous-total, et
+   un écart égal au double d'une ligne la désigne comme remboursement. */
+function extraireCartesReleveLcl(texte){
+  const T = String(texte || "").replace(/[\u00a0\u202f\u2009]/g, " ");
+  if (!/PAIEMENTS PAR CARTE/i.test(T) || !/CARTE N°\s*\d/i.test(T)) return null;
+  const MOIS = {janvier: 1, fevrier: 2, mars: 3, avril: 4, mai: 5, juin: 6, juillet: 7, aout: 8, septembre: 9, octobre: 10, novembre: 11, decembre: 12};
+  const numero = ((T.match(/Compte\s*:\s*([0-9 ]+[A-Z])/) || [])[1] || "").replace(/\s/g, "");
+  const lignes = T.split(/\n/).map(l => l.trim());
+  const cartes = [];
+  let moisCarte = 0, anCarte = 0, carte = null;
+  for (const l of lignes){
+    const s = l.match(/PAIEMENTS PAR CARTE D[E'’ ]+\s*([A-ZÉÛa-zéû]+)\s+(\d{4})/i);
+    if (s){ moisCarte = MOIS[norm(s[1]).toLowerCase()] || 0; anCarte = +s[2]; carte = null; continue; }
+    if (!moisCarte) continue;
+    const c = l.match(/CARTE N°\s*(\d{2})\s*(\d{4})\s+(?:M|MME|MLLE|MR)\.?\s+(.+)$/i);
+    if (c){ carte = {numero: c[1] + " " + c[2], carte: "X" + c[2].slice(-3), titulaire: c[3].trim(), sousTotal: null, lignes: [], mois: anCarte + "-" + pad2(moisCarte)}; cartes.push(carte); continue; }
+    if (!carte) continue;
+    const st = l.match(/^SOUS TOTAL\s*:\s*([\d .]+,\d{2})/i);
+    if (st){ carte.sousTotal = lireMontant(st[1]); continue; }
+    if (/^TOTAUX\b|^MONTANT COMPTABILISE/i.test(l)){ carte = null; continue; }
+    const a = l.match(/^(.+?)\s+LE\s+(\d{2})\/(\d{2})\s+(\d[\d .]*,\d{2})$/);
+    if (!a) continue;
+    // Année : celle du mois de la carte, sauf un achat de fin d'année réglé en janvier
+    const mm = +a[3], an = mm > moisCarte + 1 ? anCarte - 1 : anCarte;
+    carte.lignes.push({date: an + "-" + a[3] + "-" + a[2], montant: -lireMontant(a[4]), libelle: propre(a[1]), type: "Carte"});
+  }
+  const pleines = cartes.filter(c => c.lignes.length);
+  if (!pleines.length) return null;
+  for (const c of pleines){
+    const t = -somme(c.lignes, l => versCentimes(l.montant));
+    const st = c.sousTotal === null ? null : versCentimes(c.sousTotal);
+    if (st !== null && t !== st){
+      const remb = c.lignes.find(l => -versCentimes(l.montant) * 2 === t - st);
+      if (remb) remb.montant = -remb.montant;   // remboursement : crédit sur la carte
+    }
+    const t2 = -somme(c.lignes, l => versCentimes(l.montant));
+    c.controle = {ok: st === null || t2 === st, texte: "carte " + c.numero + " : " + c.lignes.length + " ligne(s), " + euros(t2 / 100)
+      + (st === null ? "" : t2 === st ? " = sous-total" : " ≠ sous-total " + euros(st / 100))};
+  }
+  const dates = pleines.flatMap(c => c.lignes.map(l => l.date)).sort();
+  return {genre: "cartes_lcl", banque: "LCL", numero, cartes: pleines, periode: {debut: dates[0], fin: dates[dates.length - 1]},
+    titre: "Détail des cartes " + pleines.map(c => c.carte).join(", ") + " · " + pleines[0].mois};
+}
+
+/* ---------- Justificatifs d'achat SNCF Connect ----------
+   Un PDF par paiement : date de la transaction, montant, carte, et pour chaque trajet sa date, son heure
+   et ses voyageurs. Les trajets d'une même commande (aller et retour) partagent un prix de bloc. */
+function extraireAchatSncf(texte){
+  const T = String(texte || "").replace(/[\u00a0\u202f\u2009]/g, " ").replace(/\ufb01/g, "fi");
+  // Le lecteur PDF coupe la ligature « fi » : « Justi fi catif d'achat »
+  if (!/Justi\s*fi\s*catif\s+d.\s*achat/i.test(T) || !/SNCF ?Connect/i.test(T)) return null;
+  const tx = T.match(/Date de transaction\s*:\s*(\d{2}\/\d{2}\/\d{4})/);
+  if (!tx) return null;
+  const montants = [...T.matchAll(/Montant (?:de la transaction|total) \(TTC\)\s*:\s*([\d .]+,\d{2})\s*€/g)].map(m => lireMontant(m[1]));
+  const lignes = T.split(/\n/).map(l => l.trim());
+  const trajets = [];
+  for (let i = 0; i < lignes.length; i++){
+    const m = lignes[i].match(/(Aller|Retour)\s+(\d{2}\/\d{2}\/\d{4})\s+à\s+(\d{2}:\d{2})/);
+    if (!m) continue;
+    const voyageurs = [];
+    // Voyageurs sur la même ligne (texte fusionné) ou les suivantes
+    const reste = [lignes[i].slice(m.index + m[0].length)].concat(lignes.slice(i + 1, i + 12));
+    for (const l of reste){
+      const vs = [...l.matchAll(/Voyageur\s*\d+\s*:\s*([^-\n]+?)\s*(?:-|$)/g)].map(x => x[1].trim());
+      if (vs.length) voyageurs.push(...vs);
+      else if (!l || /^[\d\s.,]+€$/.test(l)) continue;   // prix du bloc, parfois rendu entre deux voyageurs
+      else if (voyageurs.length || /(Aller|Retour)\s+\d{2}\//.test(l)) break;
+    }
+    trajets.push({sens: m[1], date: lireDate(m[2]), heure: m[3], voyageurs});
+  }
+  if (!trajets.length) return null;
+  return {date: lireDate(tx[1]), montant: montants.length ? Math.max(...montants) : 0, transaction: ((T.match(/Transaction n°\s*(\d+)/) || [])[1] || ""),
+    carte4: ((T.match(/Numéro de carte\s*:\s*#*(\d{4})/) || [])[1] || ""), references: ((T.match(/Référence commande\s*([A-Z0-9, ]+)/) || [])[1] || "").split(/[ ,]+/).filter(Boolean), trajets};
+}
+/* ZIP de justificatifs (« JustificatifAchat_SNCFCONNECT.zip ») : chaque PDF est lu. */
+async function lireZipJustificatifs(nom, buffer){
+  const zip = extraireZip(buffer);
+  const achats = [];
+  for (const n of Object.keys(zip.entrees).filter(x => /\.pdf$/i.test(x)).sort()){
+    try { const a = extraireAchatSncf(await textePdf(await octetsDuZip(zip, n))); if (a) achats.push(a); } catch (e){ console.error(n, e); }
+  }
+  if (!achats.length) return {genre: "inconnu", nom, raison: "archive sans justificatif d'achat SNCF Connect"};
+  const dates = achats.map(a => a.date).sort();
+  return {genre: "document", sousGenre: "achat_sncf", nom, achats, periode: {debut: dates[0], fin: dates[dates.length - 1]}, date: dates[dates.length - 1], titre: achats.length + " paiement(s)"};
+}
+
 /* ---------- Classeurs ---------- */
+/* Export CSV Amex ouvert puis enregistré dans Excel : chaque ligne CSV tient dans la première cellule. */
+function amexCsvDansFeuille(nom, m){
+  const lignes = (m || []).filter(l => l && l[0] !== null && l[0] !== undefined && String(l[0]).trim());
+  if (!lignes.length || !/^date,description,montant/.test(norm(String(lignes[0][0])).replace(/\s/g, ""))) return null;
+  return lireCsv(nom, lignes.map(l => String(l[0])).join("\n"));
+}
 async function lireXlsx(nom, buffer){
   const c = await lireClasseur(buffer);
   if (c.feuilles["Opérations"] && c.feuilles["Synthèse"]) return {genre: "reprise_v7", nom, classeur: c};
   for (const n of c.noms){
     const m = c.feuilles[n];
+    const enCsv = amexCsvDansFeuille(nom, m);
+    if (enCsv) return enCsv;
     const iTete = m.findIndex(l => l && norm(l[0]) === "date" && norm(l[1]) === "description" && /montant/.test(norm(l[2])));
     if (iTete >= 0){
       const t = m[iTete].map(x => norm(x));
@@ -125,6 +224,16 @@ function lireJson(nom, texte){
   let o; try { o = JSON.parse(texte); } catch (e) { return {genre: "inconnu", nom, raison: "JSON illisible"}; }
   if (o.format === "budget-foyer-regles") return {genre: "regles", nom, contenu: o};
   if (o.format === "budget-foyer-plan") return {genre: "plan", nom, contenu: o};
+  if (o.format === "budget-foyer-corrections") return lireCorrections(nom, o);
+  // Achats SNCF Connect relevés dans les e-mails de confirmation (quand le site ne remonte plus assez loin)
+  if (o.format === "budget-foyer-achats-sncf"){
+    const achats = (o.achats || []).filter(a => a && /^\d{4}-\d{2}-\d{2}$/.test(a.date || "") && a.montant > 0 && (a.trajets || []).length)
+      .map(a => ({date: a.date, montant: +a.montant, transaction: a.transaction || "", carte4: a.carte4 || "", references: a.references || [], source: o.source || "",
+        trajets: a.trajets.map(t => ({sens: t.sens || "Aller", date: t.date, heure: t.heure || "", voyageurs: t.voyageurs || []}))}));
+    if (!achats.length) return {genre: "inconnu", nom, raison: "aucun achat lisible"};
+    const dates = achats.map(a => a.date).sort();
+    return {genre: "document", sousGenre: "achat_sncf", nom, achats, periode: {debut: dates[0], fin: dates[dates.length - 1]}, date: dates[dates.length - 1], titre: achats.length + " paiement(s), " + (o.source || "relevé")};
+  }
   return {genre: "inconnu", nom, raison: "JSON non reconnu"};
 }
 
@@ -141,6 +250,9 @@ function premier(texte, re){ const m = texte.match(re); return m ? m[1].trim() :
 function reconnaitrePdf(nom, texte, octets){
   const T = texte; const N = norm(texte);
   const base = {nom, texte: T, octets};
+  // Relevé de compte LCL : on n'en garde que le détail des cartes (le compte vient des exports CSV)
+  const cartesPdf = extraireCartesReleveLcl(T);
+  if (cartesPdf) return Object.assign(base, cartesPdf, {nom});
   // Facture des cartes LCL (« RELEVE CB AU jj/mm/aa »)
   if (/RELEVE CB AU/.test(T) && /DIFFERE|Montant/i.test(T)){
     return Object.assign(base, {genre: "facture_cb", banque: "LCL",
@@ -221,6 +333,10 @@ function reconnaitrePdf(nom, texte, octets){
     return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : ""), date: an ? an + "-12-31" : null});
   }
   if (/^COMPTEDEDEPOTS_/.test(nom)) return Object.assign(base, {genre: "inconnu", raison: "relevé de compte PDF : importez plutôt l'export CSV du compte (plus complet)"});
-  // Pièce justificative (facture, ticket)
-  return Object.assign(base, {genre: "justificatif_pdf"});
+  // Justificatif d'achat SNCF Connect : paiement et trajets (sert au rapprochement des notes de frais)
+  const achat = extraireAchatSncf(T);
+  if (achat) return Object.assign(base, {genre: "document", sousGenre: "achat_sncf", achats: [achat], date: achat.date, montant: achat.montant, titre: achat.trajets.length + " trajet(s)"});
+  // Pièce justificative (facture, ticket, note de frais détaillée)
+  const ndf = extraireNoteFrais(T);
+  return Object.assign(base, {genre: "justificatif_pdf"}, ndf ? {noteFrais: ndf, date: ndf.declaree} : {});
 }

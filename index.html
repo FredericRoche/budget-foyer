@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-BDNJhzcOP9+PRy5Qvt9uqsGUDql6SRxtZ4VM8aX0btk=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Dknzig6pbDs6PiHD+IlK0cRv+7AFRM9ahE6eSdHEy0Y=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-03.1829";
+const VERSION_APP = "2026-11-04.2033";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -659,6 +659,16 @@ function extraireZip(buffer){
     pos += 46 + tailleNom + tailleExtra + tailleComm;
   }
   return {donnees, dv, entrees};
+}
+/* Octets d'une entrée d'archive (PDF d'un ZIP de justificatifs). */
+async function octetsDuZip(zip, nom){
+  const e = zip.entrees[nom]; if (!e) return null;
+  const tailleNom = zip.dv.getUint16(e.decalage + 26, true), tailleExtra = zip.dv.getUint16(e.decalage + 28, true);
+  const debut = e.decalage + 30 + tailleNom + tailleExtra;
+  const brut = zip.donnees.subarray(debut, debut + e.tailleComp);
+  if (e.methode === 0) return brut.slice();
+  if (e.methode === 8) return new Uint8Array(await new Response(new Blob([brut]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+  throw new Error("compression " + e.methode + " non gérée");
 }
 async function lireDuZip(zip, nom){
   const e = zip.entrees[nom]; if (!e) return null;
@@ -1918,6 +1928,7 @@ async function lireFichier(fichier, motDePasse){
     return r;
   }
   if (/^(jpe?g|png|heic|webp)$/.test(ext)) return {genre: "image", nom, octets, mime: fichier.type || "image/jpeg"};
+  if (ext === "zip") return lireZipJustificatifs(nom, buffer);
   return {genre: "inconnu", nom, raison: "format non reconnu (." + ext + ")"};
 }
 
@@ -1967,12 +1978,110 @@ function lireAmexCsv(nom, lignes){
   return {genre: "carte", banque: "Amex", nom, numero: "", carte: "AMEX", periode: {debut: dates[0], fin: dates[dates.length - 1]}, lignes: ops};
 }
 
+/* ---------- Relevé de compte LCL en PDF : paiements par carte du mois ----------
+   « PAIEMENTS PAR CARTE D'OCTOBRE 2025 », puis par carte « CARTE N° 12 3456 M JEAN DUPONT »,
+   « SOUS TOTAL : 3 996,27 » et une ligne par achat « LIBELLÉ LE 22/10 1 581,00 ». Les lignes de devise
+   (« Rotterdam 1581,00 EUR ») sont ignorées. La carte est reconnue par ses 3 derniers chiffres (X456).
+   Le texte ne distingue pas un remboursement d'un achat : la somme est contrôlée contre le sous-total, et
+   un écart égal au double d'une ligne la désigne comme remboursement. */
+function extraireCartesReleveLcl(texte){
+  const T = String(texte || "").replace(/[\u00a0\u202f\u2009]/g, " ");
+  if (!/PAIEMENTS PAR CARTE/i.test(T) || !/CARTE N°\s*\d/i.test(T)) return null;
+  const MOIS = {janvier: 1, fevrier: 2, mars: 3, avril: 4, mai: 5, juin: 6, juillet: 7, aout: 8, septembre: 9, octobre: 10, novembre: 11, decembre: 12};
+  const numero = ((T.match(/Compte\s*:\s*([0-9 ]+[A-Z])/) || [])[1] || "").replace(/\s/g, "");
+  const lignes = T.split(/\n/).map(l => l.trim());
+  const cartes = [];
+  let moisCarte = 0, anCarte = 0, carte = null;
+  for (const l of lignes){
+    const s = l.match(/PAIEMENTS PAR CARTE D[E'’ ]+\s*([A-ZÉÛa-zéû]+)\s+(\d{4})/i);
+    if (s){ moisCarte = MOIS[norm(s[1]).toLowerCase()] || 0; anCarte = +s[2]; carte = null; continue; }
+    if (!moisCarte) continue;
+    const c = l.match(/CARTE N°\s*(\d{2})\s*(\d{4})\s+(?:M|MME|MLLE|MR)\.?\s+(.+)$/i);
+    if (c){ carte = {numero: c[1] + " " + c[2], carte: "X" + c[2].slice(-3), titulaire: c[3].trim(), sousTotal: null, lignes: [], mois: anCarte + "-" + pad2(moisCarte)}; cartes.push(carte); continue; }
+    if (!carte) continue;
+    const st = l.match(/^SOUS TOTAL\s*:\s*([\d .]+,\d{2})/i);
+    if (st){ carte.sousTotal = lireMontant(st[1]); continue; }
+    if (/^TOTAUX\b|^MONTANT COMPTABILISE/i.test(l)){ carte = null; continue; }
+    const a = l.match(/^(.+?)\s+LE\s+(\d{2})\/(\d{2})\s+(\d[\d .]*,\d{2})$/);
+    if (!a) continue;
+    // Année : celle du mois de la carte, sauf un achat de fin d'année réglé en janvier
+    const mm = +a[3], an = mm > moisCarte + 1 ? anCarte - 1 : anCarte;
+    carte.lignes.push({date: an + "-" + a[3] + "-" + a[2], montant: -lireMontant(a[4]), libelle: propre(a[1]), type: "Carte"});
+  }
+  const pleines = cartes.filter(c => c.lignes.length);
+  if (!pleines.length) return null;
+  for (const c of pleines){
+    const t = -somme(c.lignes, l => versCentimes(l.montant));
+    const st = c.sousTotal === null ? null : versCentimes(c.sousTotal);
+    if (st !== null && t !== st){
+      const remb = c.lignes.find(l => -versCentimes(l.montant) * 2 === t - st);
+      if (remb) remb.montant = -remb.montant;   // remboursement : crédit sur la carte
+    }
+    const t2 = -somme(c.lignes, l => versCentimes(l.montant));
+    c.controle = {ok: st === null || t2 === st, texte: "carte " + c.numero + " : " + c.lignes.length + " ligne(s), " + euros(t2 / 100)
+      + (st === null ? "" : t2 === st ? " = sous-total" : " ≠ sous-total " + euros(st / 100))};
+  }
+  const dates = pleines.flatMap(c => c.lignes.map(l => l.date)).sort();
+  return {genre: "cartes_lcl", banque: "LCL", numero, cartes: pleines, periode: {debut: dates[0], fin: dates[dates.length - 1]},
+    titre: "Détail des cartes " + pleines.map(c => c.carte).join(", ") + " · " + pleines[0].mois};
+}
+
+/* ---------- Justificatifs d'achat SNCF Connect ----------
+   Un PDF par paiement : date de la transaction, montant, carte, et pour chaque trajet sa date, son heure
+   et ses voyageurs. Les trajets d'une même commande (aller et retour) partagent un prix de bloc. */
+function extraireAchatSncf(texte){
+  const T = String(texte || "").replace(/[\u00a0\u202f\u2009]/g, " ").replace(/\ufb01/g, "fi");
+  // Le lecteur PDF coupe la ligature « fi » : « Justi fi catif d'achat »
+  if (!/Justi\s*fi\s*catif\s+d.\s*achat/i.test(T) || !/SNCF ?Connect/i.test(T)) return null;
+  const tx = T.match(/Date de transaction\s*:\s*(\d{2}\/\d{2}\/\d{4})/);
+  if (!tx) return null;
+  const montants = [...T.matchAll(/Montant (?:de la transaction|total) \(TTC\)\s*:\s*([\d .]+,\d{2})\s*€/g)].map(m => lireMontant(m[1]));
+  const lignes = T.split(/\n/).map(l => l.trim());
+  const trajets = [];
+  for (let i = 0; i < lignes.length; i++){
+    const m = lignes[i].match(/(Aller|Retour)\s+(\d{2}\/\d{2}\/\d{4})\s+à\s+(\d{2}:\d{2})/);
+    if (!m) continue;
+    const voyageurs = [];
+    // Voyageurs sur la même ligne (texte fusionné) ou les suivantes
+    const reste = [lignes[i].slice(m.index + m[0].length)].concat(lignes.slice(i + 1, i + 12));
+    for (const l of reste){
+      const vs = [...l.matchAll(/Voyageur\s*\d+\s*:\s*([^-\n]+?)\s*(?:-|$)/g)].map(x => x[1].trim());
+      if (vs.length) voyageurs.push(...vs);
+      else if (!l || /^[\d\s.,]+€$/.test(l)) continue;   // prix du bloc, parfois rendu entre deux voyageurs
+      else if (voyageurs.length || /(Aller|Retour)\s+\d{2}\//.test(l)) break;
+    }
+    trajets.push({sens: m[1], date: lireDate(m[2]), heure: m[3], voyageurs});
+  }
+  if (!trajets.length) return null;
+  return {date: lireDate(tx[1]), montant: montants.length ? Math.max(...montants) : 0, transaction: ((T.match(/Transaction n°\s*(\d+)/) || [])[1] || ""),
+    carte4: ((T.match(/Numéro de carte\s*:\s*#*(\d{4})/) || [])[1] || ""), references: ((T.match(/Référence commande\s*([A-Z0-9, ]+)/) || [])[1] || "").split(/[ ,]+/).filter(Boolean), trajets};
+}
+/* ZIP de justificatifs (« JustificatifAchat_SNCFCONNECT.zip ») : chaque PDF est lu. */
+async function lireZipJustificatifs(nom, buffer){
+  const zip = extraireZip(buffer);
+  const achats = [];
+  for (const n of Object.keys(zip.entrees).filter(x => /\.pdf$/i.test(x)).sort()){
+    try { const a = extraireAchatSncf(await textePdf(await octetsDuZip(zip, n))); if (a) achats.push(a); } catch (e){ console.error(n, e); }
+  }
+  if (!achats.length) return {genre: "inconnu", nom, raison: "archive sans justificatif d'achat SNCF Connect"};
+  const dates = achats.map(a => a.date).sort();
+  return {genre: "document", sousGenre: "achat_sncf", nom, achats, periode: {debut: dates[0], fin: dates[dates.length - 1]}, date: dates[dates.length - 1], titre: achats.length + " paiement(s)"};
+}
+
 /* ---------- Classeurs ---------- */
+/* Export CSV Amex ouvert puis enregistré dans Excel : chaque ligne CSV tient dans la première cellule. */
+function amexCsvDansFeuille(nom, m){
+  const lignes = (m || []).filter(l => l && l[0] !== null && l[0] !== undefined && String(l[0]).trim());
+  if (!lignes.length || !/^date,description,montant/.test(norm(String(lignes[0][0])).replace(/\s/g, ""))) return null;
+  return lireCsv(nom, lignes.map(l => String(l[0])).join("\n"));
+}
 async function lireXlsx(nom, buffer){
   const c = await lireClasseur(buffer);
   if (c.feuilles["Opérations"] && c.feuilles["Synthèse"]) return {genre: "reprise_v7", nom, classeur: c};
   for (const n of c.noms){
     const m = c.feuilles[n];
+    const enCsv = amexCsvDansFeuille(nom, m);
+    if (enCsv) return enCsv;
     const iTete = m.findIndex(l => l && norm(l[0]) === "date" && norm(l[1]) === "description" && /montant/.test(norm(l[2])));
     if (iTete >= 0){
       const t = m[iTete].map(x => norm(x));
@@ -1991,6 +2100,16 @@ function lireJson(nom, texte){
   let o; try { o = JSON.parse(texte); } catch (e) { return {genre: "inconnu", nom, raison: "JSON illisible"}; }
   if (o.format === "budget-foyer-regles") return {genre: "regles", nom, contenu: o};
   if (o.format === "budget-foyer-plan") return {genre: "plan", nom, contenu: o};
+  if (o.format === "budget-foyer-corrections") return lireCorrections(nom, o);
+  // Achats SNCF Connect relevés dans les e-mails de confirmation (quand le site ne remonte plus assez loin)
+  if (o.format === "budget-foyer-achats-sncf"){
+    const achats = (o.achats || []).filter(a => a && /^\d{4}-\d{2}-\d{2}$/.test(a.date || "") && a.montant > 0 && (a.trajets || []).length)
+      .map(a => ({date: a.date, montant: +a.montant, transaction: a.transaction || "", carte4: a.carte4 || "", references: a.references || [], source: o.source || "",
+        trajets: a.trajets.map(t => ({sens: t.sens || "Aller", date: t.date, heure: t.heure || "", voyageurs: t.voyageurs || []}))}));
+    if (!achats.length) return {genre: "inconnu", nom, raison: "aucun achat lisible"};
+    const dates = achats.map(a => a.date).sort();
+    return {genre: "document", sousGenre: "achat_sncf", nom, achats, periode: {debut: dates[0], fin: dates[dates.length - 1]}, date: dates[dates.length - 1], titre: achats.length + " paiement(s), " + (o.source || "relevé")};
+  }
   return {genre: "inconnu", nom, raison: "JSON non reconnu"};
 }
 
@@ -2007,6 +2126,9 @@ function premier(texte, re){ const m = texte.match(re); return m ? m[1].trim() :
 function reconnaitrePdf(nom, texte, octets){
   const T = texte; const N = norm(texte);
   const base = {nom, texte: T, octets};
+  // Relevé de compte LCL : on n'en garde que le détail des cartes (le compte vient des exports CSV)
+  const cartesPdf = extraireCartesReleveLcl(T);
+  if (cartesPdf) return Object.assign(base, cartesPdf, {nom});
   // Facture des cartes LCL (« RELEVE CB AU jj/mm/aa »)
   if (/RELEVE CB AU/.test(T) && /DIFFERE|Montant/i.test(T)){
     return Object.assign(base, {genre: "facture_cb", banque: "LCL",
@@ -2087,8 +2209,12 @@ function reconnaitrePdf(nom, texte, octets){
     return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : ""), date: an ? an + "-12-31" : null});
   }
   if (/^COMPTEDEDEPOTS_/.test(nom)) return Object.assign(base, {genre: "inconnu", raison: "relevé de compte PDF : importez plutôt l'export CSV du compte (plus complet)"});
-  // Pièce justificative (facture, ticket)
-  return Object.assign(base, {genre: "justificatif_pdf"});
+  // Justificatif d'achat SNCF Connect : paiement et trajets (sert au rapprochement des notes de frais)
+  const achat = extraireAchatSncf(T);
+  if (achat) return Object.assign(base, {genre: "document", sousGenre: "achat_sncf", achats: [achat], date: achat.date, montant: achat.montant, titre: achat.trajets.length + " trajet(s)"});
+  // Pièce justificative (facture, ticket, note de frais détaillée)
+  const ndf = extraireNoteFrais(T);
+  return Object.assign(base, {genre: "justificatif_pdf"}, ndf ? {noteFrais: ndf, date: ndf.declaree} : {});
 }
 
 /* ===== 08b-lecture-libre.js ===== */
@@ -2470,6 +2596,41 @@ function preparerReleve(lu, compte){
   for (const n of res.nouvelles) n.proposition = proposerClassement({libelle: n.libelle, montant: n.montant, date: n.date, compte: cid, mcc: n.mcc, categorieBanque: n.categorieBanque});
   return res;
 }
+/* Détail des cartes lu dans un relevé PDF : une préparation par carte. Une ligne déjà présente sur la carte
+   (ou sur « Cartes LCL (sans titulaire) ») à la même date et pour le même montant n'est pas recréée, quel que
+   soit son libellé (celui du PDF diffère de celui des exports CSV) ; deux achats identiques du même jour restent deux. */
+function preparerCartesPdf(lu){
+  const nv = vivants("comptes").find(c => c.carte === "LCL-NV");
+  const preps = [];
+  for (const c of lu.cartes){
+    const compte = trouverCompte({carte: c.carte, banque: "LCL"}) || nv || null;
+    const sansTitulaire = !trouverCompte({carte: c.carte, banque: "LCL"});
+    const cle = (d, m) => d + "|" + versCentimes(m);
+    const existants = new Map();
+    for (const op of vivants("operations").filter(o => compte && (o.compte === compte.id || (nv && o.compte === nv.id))))
+      existants.set(cle(op.date, op.montant), (existants.get(cle(op.date, op.montant)) || 0) + 1);
+    const vus = new Map(), nouvelles = [], deja = [];
+    for (const l of c.lignes){
+      const k = cle(l.date, l.montant); const n = (vus.get(k) || 0) + 1; vus.set(k, n);
+      (n <= (existants.get(k) || 0) ? deja : nouvelles).push(l);
+    }
+    const emp = empreintes(compte ? compte.id : "?", nouvelles);
+    preps.push({lu: Object.assign({}, lu, {genre: "carte", carte: c.carte, lignes: c.lignes, periode: {debut: c.lignes.map(l => l.date).sort()[0], fin: c.lignes.map(l => l.date).sort().pop()}}),
+      carte: c, compte, sansTitulaire, deja, reattribuees: [], ecartees: [], controles: [c.controle],
+      nouvelles: nouvelles.map((l, i) => Object.assign({}, l, {empreinte: emp[i], proposition: proposerClassement({libelle: l.libelle, montant: l.montant, date: l.date, compte: compte ? compte.id : "?"})}))});
+  }
+  return {cartes: preps, nouvelles: preps.flatMap(p => p.nouvelles),
+    controles: preps.map(p => p.controles[0]).concat(preps.filter(p => p.sansTitulaire).map(p => ({ok: true, texte: "carte " + p.carte.numero + " (" + p.carte.titulaire + ") inconnue : lignes sur « Cartes LCL (sans titulaire) »"})))};
+}
+function appliquerCartesPdf(prep){
+  let n = 0;
+  for (const p of prep.cartes){
+    if (!p.compte) p.compte = compteCartesNonVentilees(compteCourantLcl()?.id || "");
+    if (!p.nouvelles.length) continue;
+    appliquerReleve(p); n += p.nouvelles.length;
+  }
+  return n;
+}
 function periodesCartes(){
   return vivants("imports").filter(i => i.genre === "carte" && i.banque === "LCL").map(i => i.periode);
 }
@@ -2720,6 +2881,128 @@ function appliquerRegles(contenu){
   return n;
 }
 
+/* ===== 09b-corrections.js ===== */
+/* ================= Lot de corrections (fichier « budget-foyer-corrections ») =================
+   Corrections préparées hors de l'application (par exemple après un contrôle de cohérence de l'export),
+   appliquées en une fois APRÈS aperçu et clic : rien ne s'applique à la lecture du fichier. Les fiches sont
+   désignées par leur nom exact ; une fiche introuvable rend l'action « ignorée », sans erreur.
+   Actions :
+   - renommerFiche {de, vers, categorie?, sousCategorie?}
+   - creerFiche {nom, depuis, natureJustificatifs} : crée la fiche et y rattache les justificatifs de « depuis »
+     dont la nature exacte contient le texte donné
+   - fusionnerFiches {garder, absorber: [noms], nom?} : opérations, justificatifs et alias rejoignent « garder »
+   - deplacerSousCategorie {de: [cat, sous], vers: [cat, sous]} : liste des réglages et tous les enregistrements
+   - reclasser {fournisseur, de: [cat, sous], vers: [cat, sous], ficheParDefaut?} : opérations de ce fournisseur
+   - categorieFiche {fiche, categorie, sousCategorie} : classement par défaut fixé, sans toucher au passé */
+
+// Nom exact d'abord ; sinon sans tenir compte de la casse, des accents, des espaces ni de la ponctuation
+const cleNomFiche = s => norm(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+const ficheNommeeReelle = nom => vivants("commercants").find(c => c.nom === nom) || vivants("commercants").find(c => cleNomFiche(c.nom) === cleNomFiche(nom)) || null;
+const ficheNommee = ficheNommeeReelle;
+const opsDeFiche = f => f ? vivants("operations").filter(o => o.commercant === f.id) : [];
+const justifsDeFiche = f => f ? vivants("justificatifs").filter(j => j.commercant === f.id) : [];
+
+function lireCorrections(nom, o){
+  const actions = (o.actions || []).filter(a => a && a.type);
+  if (!actions.length) return {genre: "inconnu", nom, raison: "lot de corrections vide"};
+  return {genre: "corrections", nom, actions, titre: o.titre || "", date: aujourdhui()};
+}
+/* Aperçu : une ligne par action, avec ce qu'elle toucherait aujourd'hui. */
+function preparerCorrections(lu){
+  // Les actions s'enchaînent : un renommage ou une création compte pour les actions suivantes de l'aperçu
+  const renomme = new Map(), cree = new Set(), absorbees = new Map();
+  const opsV = f => f ? opsDeFiche(f).concat(...(absorbees.get(f.id) || []).map(opsDeFiche)) : [];
+  const ficheNommee = nom => {
+    for (const [ancien, nouveau] of renomme) if (norm(nouveau) === norm(nom)) return ficheNommeeReelle(ancien);
+    if ([...renomme.keys()].some(k => norm(k) === norm(nom))) return null;
+    return ficheNommeeReelle(nom);
+  };
+  const lignes = lu.actions.map(a => {
+    try {
+      if (a.type === "renommerFiche"){
+        const f = ficheNommee(a.de);
+        if (f) renomme.set(a.de, a.vers);
+        return f ? {ok: true, n: opsDeFiche(f).length, texte: "Fiche « " + a.de + " » renommée « " + a.vers + " » (" + opsDeFiche(f).length + " opération(s))" + (a.categorie ? ", classement par défaut " + a.categorie + " › " + (a.sousCategorie || "") : "")}
+          : {ok: false, texte: "Fiche « " + a.de + " » introuvable : ignorée"};
+      }
+      if (a.type === "creerFiche"){
+        const d = ficheNommee(a.depuis);
+        const js = justifsDeFiche(d).filter(j => norm(j.natureExacte || "").includes(norm(a.natureJustificatifs || "")));
+        const existe = !!ficheNommee(a.nom) || cree.has(norm(a.nom)); cree.add(norm(a.nom));
+        return {ok: !existe || !!js.length, n: js.length, texte: "Fiche « " + a.nom + " » " + (existe ? "(existe déjà)" : "créée") + " ; " + js.length + " justificatif(s) de « " + a.depuis + " » (« " + a.natureJustificatifs + " ») y passent"};
+      }
+      if (a.type === "fusionnerFiches"){
+        const g = ficheNommee(a.garder), abs = (a.absorber || []).map(ficheNommee).filter(f => f && f !== g);
+        if (!g) return {ok: false, texte: "Fiche « " + a.garder + " » introuvable : fusion ignorée"};
+        const n = somme(abs, f => opsDeFiche(f).length);
+        absorbees.set(g.id, (absorbees.get(g.id) || []).concat(abs));
+        if (a.nom && a.nom !== g.nom) renomme.set(g.nom, a.nom);
+        return {ok: !!abs.length, n, texte: "Fusion dans « " + (a.nom || g.nom) + " » de " + (abs.length ? abs.map(f => "« " + f.nom + " »").join(", ") : "aucune fiche trouvée") + " (" + n + " opération(s) déplacée(s))"};
+      }
+      if (a.type === "deplacerSousCategorie"){
+        const n = vivants("operations").filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]).length;
+        return {ok: true, n, texte: a.de.join(" › ") + " → " + a.vers.join(" › ") + " (" + n + " opération(s), réglages et budgets compris)"};
+      }
+      if (a.type === "reclasser"){
+        const f = ficheNommee(a.fournisseur);
+        const ops = opsV(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]);
+        return f ? {ok: true, n: ops.length, texte: "« " + a.fournisseur + " » : " + ops.length + " opération(s) de " + a.de.join(" › ") + " vers " + a.vers.join(" › ") + (a.ficheParDefaut ? " (et classement par défaut de la fiche)" : "")}
+          : {ok: false, texte: "Fiche « " + a.fournisseur + " » introuvable : ignorée"};
+      }
+      if (a.type === "categorieFiche"){
+        const f = ficheNommee(a.fiche);
+        return f ? {ok: true, n: 0, texte: "« " + a.fiche + " » : classement par défaut " + a.categorie + " › " + (a.sousCategorie || "") + " (opérations passées inchangées)"}
+          : {ok: false, texte: "Fiche « " + a.fiche + " » introuvable : ignorée"};
+      }
+      return {ok: false, texte: "Action inconnue « " + a.type + " » : ignorée"};
+    } catch (e){ return {ok: false, texte: "Action « " + a.type + " » illisible : " + e.message}; }
+  });
+  return {lignes, controles: lignes, nouvelles: [], nb: somme(lignes.filter(l => l.ok), l => l.n || 0)};
+}
+/* Application, dans l'ordre du fichier. Renvoie le nombre d'actions appliquées. */
+function appliquerCorrections(lu){
+  let faites = 0;
+  for (const a of lu.actions){
+    if (a.type === "renommerFiche"){
+      const f = ficheNommee(a.de); if (!f) continue;
+      f.nom = a.vers;
+      if (a.categorie) Object.assign(f, {categorie: a.categorie, sousCategorie: a.sousCategorie || "", fixe: true});
+      enregistrer("commercants", f);
+      for (const j of justifsDeFiche(f)) enregistrer("justificatifs", Object.assign(j, {commercantNom: f.nom}));
+      faites++;
+    } else if (a.type === "creerFiche"){
+      const d = ficheNommee(a.depuis);
+      const f = ficheNommee(a.nom) || enregistrer("commercants", {nom: a.nom, alias: [], stats: {}, natures: {}});
+      for (const j of justifsDeFiche(d).filter(j => norm(j.natureExacte || "").includes(norm(a.natureJustificatifs || ""))))
+        enregistrer("justificatifs", Object.assign(j, {commercant: f.id, commercantNom: f.nom}));
+      faites++;
+    } else if (a.type === "fusionnerFiches"){
+      const g = ficheNommee(a.garder); if (!g) continue;
+      for (const f of (a.absorber || []).map(ficheNommee).filter(f => f && f !== g)) fusionnerCommercants(g, f);
+      if (a.nom && a.nom !== g.nom){ g.nom = a.nom; enregistrer("commercants", g); for (const j of justifsDeFiche(g)) enregistrer("justificatifs", Object.assign(j, {commercantNom: g.nom})); }
+      faites++;
+    } else if (a.type === "deplacerSousCategorie"){
+      ajouterCategorieSilencieuse(a.vers[0], a.vers[1]);
+      deplacerSousCategorie(a.de[0], a.de[1], a.vers[0], a.vers[1]);
+      faites++;
+    } else if (a.type === "reclasser"){
+      const f = ficheNommee(a.fournisseur); if (!f) continue;
+      ajouterCategorieSilencieuse(a.vers[0], a.vers[1]);
+      for (const o of opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]))
+        enregistrer("operations", Object.assign(o, {categorie: a.vers[0], sousCategorie: a.vers[1], nature: natureParDefaut(a.vers[0]), statut: "classe", verrou: true}));
+      if (a.ficheParDefaut){ Object.assign(f, {categorie: a.vers[0], sousCategorie: a.vers[1], fixe: true}); enregistrer("commercants", f); }
+      faites++;
+    } else if (a.type === "categorieFiche"){
+      const f = ficheNommee(a.fiche); if (!f) continue;
+      ajouterCategorieSilencieuse(a.categorie, a.sousCategorie || "");
+      Object.assign(f, {categorie: a.categorie, sousCategorie: a.sousCategorie || "", fixe: true}); enregistrer("commercants", f);
+      faites++;
+    }
+  }
+  invaliderIndex();
+  return faites;
+}
+
 /* ===== 10-reprise.js ===== */
 /* ================= Reprise du classeur « Dépenses 2025-2026 – inventaire » =================
    Lit, sans le modifier, le classeur choisi par l'auteur :
@@ -2884,19 +3167,29 @@ function appliquerReprise(prep, options){
 /* ================= Justificatifs et rapprochement =================
    Un justificatif (ticket de caisse, facture, facturette CB) est rapproché de
    l'opération bancaire de même montant, dans une fenêtre de dates qui dépend de
-   son type. Un cas sans ambiguïté est appliqué d'office, réversible ; les autres
+   son type. Un cas sans ambiguïté qui ne change ni le fournisseur ni la catégorie de l'opération est rapproché
+   d'office (réversible) ; s'il les changerait, il est seulement proposé en tête, à confirmer d'un clic ; les autres
    attendent dans « À traiter ». Facture et facturette d'un même achat se
    rattachent à la même opération sans double compte. Plusieurs tickets réglés en
-   un seul paiement forment un « achat groupé » et ventilent l'opération. */
+   un seul paiement forment un « achat groupé » et ventilent l'opération.
+   Une note de frais est une créance : elle se rapproche du virement reçu (crédit de
+   même montant), pas d'un débit, et n'entre ni dans les dépenses en attente ni dans
+   les en-cours de cartes. */
 
-const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", facturette: "Facturette CB", autre: "Autre"};
+const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", facturette: "Facturette CB", notefrais: "Note de frais (à rembourser)", autre: "Autre"};
+const estNoteFrais = j => j && j.type === "notefrais";
+/* Note de frais : remboursement attendu de quelques jours avant (date de la dernière dépense) à 120 jours après. */
+const FENETRE_NOTE_FRAIS = [7, 120];
 
 function fenetre(j){
   const p = LIVRE.parametres;
+  if (estNoteFrais(j)) return FENETRE_NOTE_FRAIS;
   return j.type === "facture" || j.type === "devis" ? [p.tolFactureAvant, p.tolFactureApres] : [p.tolTicketAvant, p.tolTicketApres];
 }
 function compteCompatible(j, compte){
   if (!j.carte) return true;
+  // Note de frais : seul un compte de réception désigné (« Virement · compte ») restreint la recherche
+  if (estNoteFrais(j)) return !j.carte.startsWith("CPT:") || compte.id === j.carte.slice(4);
   if (j.carte === "ESPECES") return compte.type === "especes";
   if (j.carte.startsWith("CPT:") || j.carte.startsWith("CHQ:")) return compte.id === j.carte.slice(4);
   if (j.carte === "AMEX") return compte.carte === "AMEX";
@@ -2929,9 +3222,10 @@ function candidats(js){
   if (!j.carte && j.carte4) j.carte = carteDesChiffres(j.carte4);
   const [avant, apres] = fenetre(j);
   const nomJ = js.map(x => [x.commercantNom, x.raisonSociale].filter(Boolean).join(" ")).join(" ");
+  const credit = estNoteFrais(j);   // remboursement attendu : on cherche un crédit
   const r = [];
   for (const op of vivants("operations")){
-    if (op.montant >= 0 || -versCentimes(op.montant) !== cents) continue;
+    if ((credit ? op.montant <= 0 : op.montant >= 0) || Math.abs(versCentimes(op.montant)) !== cents) continue;
     const dj = ecartJours(j.date, op.date);
     if (dj < -avant || dj > apres) continue;
     const compte = obtenir("comptes", op.compte); if (!compte || !compteCompatible(j, compte)) continue;
@@ -2951,7 +3245,7 @@ function candidats(js){
 /* Combinaisons de 2 ou 3 justificatifs du même jour et de la même carte dont la somme égale une opération. */
 function achatsGroupes(libres){
   const r = [];
-  const parJour = regrouper(libres.filter(j => j.type !== "facture"), j => j.date + "|" + (j.carte || ""));
+  const parJour = regrouper(libres.filter(j => j.type !== "facture" && !estNoteFrais(j)), j => j.date + "|" + (j.carte || ""));
   for (const liste of parJour.values()){
     if (liste.length < 2) continue;
     const combos = [];
@@ -2998,7 +3292,18 @@ function delier(j){
   enregistrer("justificatifs", Object.assign(j, {operations: [], statut: "a_rapprocher", auto: false, rapprocheLe: null, refuse: true}));
 }
 
-/* Passe automatique, après chaque import ou fusion de la boîte. */
+/* Le rapprochement modifierait-il l'opération ? Fournisseur différent, catégorie différente, ou ventilation
+   (plusieurs pièces) : oui. Une pièce sans fournisseur ni catégorie, ou conforme à l'opération : non. */
+function rapprochementModifie(js, op){
+  if (js.length > 1) return true;
+  const j = js[0];
+  if (j.commercant && op.commercant && j.commercant !== op.commercant) return true;
+  if (j.categorie && j.categorie !== "À préciser" && (j.categorie !== op.categorie || (j.sousCategorie && j.sousCategorie !== op.sousCategorie))) return true;
+  return false;
+}
+/* Passe automatique, après chaque import ou fusion de la boîte. Décision de Frédéric (04/11/2026) : l'application
+   ne change rien d'elle-même sur une déduction. Un cas sûr qui ne modifie pas l'opération est rapproché d'office ;
+   sinon il est proposé en tête (« sur »), à confirmer. Renvoie le nombre de rapprochements faits d'office. */
 function rapprocherTout(){
   // Une saisie du téléphone n'est rapprochée qu'une fois validée sur le PC
   const libres = vivants("justificatifs").filter(j => (j.statut === "a_rapprocher" || !j.statut) && !j.aValider);
@@ -3008,16 +3313,17 @@ function rapprocherTout(){
   for (const js of groupes.values()){
     if (js.length < 2) continue;
     const c = candidats(js);
-    if (c.length === 1 && c[0].score >= 60 && !js.some(j => j.refuse)){ lier(js, c[0].op, true); auto++; }
-    else for (const j of js) enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map(x => ({op: x.op.id, score: x.score, groupe: js.map(y => y.id)}))}));
+    const sur = c.length === 1 && c[0].score >= 60 && !js.some(j => j.refuse);
+    if (sur && !rapprochementModifie(js, c[0].op)){ lier(js, c[0].op, true); auto++; continue; }
+    for (const j of js) enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map((x, i) => ({op: x.op.id, score: x.score, groupe: js.map(y => y.id), sur: sur && i === 0}))}));
   }
   // 2. Justificatifs seuls
   for (const j of libres.filter(j => !j.groupe || (groupes.get(j.groupe) || []).length < 2)){
     if (j.statut === "rapproche") continue;
     const c = candidats([j]);
     const sur = (c.length === 1 && c[0].score >= 60) || (c.length > 1 && c[0].score >= 85 && c[1].score < c[0].score - 25);
-    if (sur && !j.refuse){ lier([j], c[0].op, true); auto++; }
-    else enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map(x => ({op: x.op.id, score: x.score}))}));
+    if (sur && !j.refuse && !rapprochementModifie([j], c[0].op)){ lier([j], c[0].op, true); auto++; continue; }
+    enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map((x, i) => ({op: x.op.id, score: x.score, sur: sur && !j.refuse && i === 0}))}));
   }
   // 3. Achats groupés devinés (jamais appliqués d'office)
   const restants = vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && !(j.propositions || []).length);
@@ -3038,7 +3344,7 @@ function libelleMoyen(carte){
 }
 function encoursSaisis(){
   const m = new Map();
-  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES")){
+  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES" && !estNoteFrais(x))){
     const k = libelleMoyen(j.carte); const g = m.get(k) || m.set(k, {moyen: k, n: 0, montant: 0, depuis: j.date}).get(k);
     g.n++; g.montant += j.montant || 0; if (j.date && j.date < g.depuis) g.depuis = j.date;
   }
@@ -3061,20 +3367,18 @@ async function creerJustificatif(donnees, piece){
   // qu'à la validation sur le PC (« Enregistrer la saisie »). Une saisie du téléphone ne modifie aucune fiche.
   if (j.commercantNom || j.raisonSociale){
     const mobile = j.origine === "mobile";
-    const c = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)))
-      || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    const sur = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)));
+    const c = sur || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    if (c && !sur && !commercantSur({raisonSociale: j.raisonSociale, enseigne: j.commercantNom})) j.fournisseurDevine = true;
     if (c){
-      if (!mobile){
-        if (j.raisonSociale && nomPlausible(j.raisonSociale)) ajouterAlias(c, j.raisonSociale);
-        if (j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; }
-        enregistrer("commercants", c); invaliderIndex();
-      }
+      // Aucune fiche n'est modifiée d'office (ni alias ni nature) : cela se fait à la validation, avec votre accord
+      if (!mobile && !j.fournisseurDevine && j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; enregistrer("commercants", c); invaliderIndex(); }
       Object.assign(j, {commercant: c.id, commercantNom: c.nom, fournisseurProvisoire: false});
       if (!j.categorie && c.categorie) Object.assign(j, {categorie: c.categorie, sousCategorie: c.sousCategorie || "", lieu: j.lieu || c.lieu || ""});
     } else j.fournisseurProvisoire = true;
     enregistrer("justificatifs", j);
   }
-  if (j.carte === "ESPECES" && !j.aValider) creerOperationEspeces(j);
+  if (j.carte === "ESPECES" && !j.aValider && !estNoteFrais(j)) creerOperationEspeces(j);
   return j;
 }
 function compteEspeces(){
@@ -3114,6 +3418,431 @@ async function fusionnerBoite(elements){
   }
   const auto = rapprocherTout();
   return {justificatifs: n, auto};
+}
+
+/* ===== 11b-notes-frais.js ===== */
+/* ================= Notes de frais : détail, rangement, dépenses avancées =================
+   Une note de frais exportée par l'outil de l'employeur (« NDF #2681 : Novembre 2026,
+   déclarée le 02/11/2026 ») porte la liste des dépenses avancées : date, nature, montant.
+   - Lecture : numéro, période, date de déclaration, entité, lignes, total.
+   - Rangement : dans le dossier des notes de frais de l'appareil, sans sous-dossier
+     d'année, sous le nom « 2026 Note de frais 2681 novembre 2026 - 02-11.pdf ».
+   - Dépenses avancées : chaque ligne est rapprochée du débit de même montant (achat
+     jusqu'à 60 jours avant la date de la ligne, ou 5 jours après), un débit ne sert
+     qu'une fois ; le libellé (SNCF, hôtel, autoroute…) départage. Un débit du double
+     du montant est admis (deux billets payés ensemble, un seul remboursé) : il est
+     alors ventilé, la part remboursée avec la note, l'autre gardant son classement. Les débits trouvés
+     prennent la catégorie de la note (par exemple « Transfert », hors budget), sans
+     rien apprendre au fournisseur : un billet de train personnel reste classé à part.
+     Le classement d'avant est gardé, pour pouvoir le rétablir. */
+
+const FENETRE_LIGNE_NDF = [60, 5];
+const MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+
+function extraireNoteFrais(texte){
+  const T = String(texte || "").replace(/[   ]/g, " ");
+  const tete = T.match(/NDF\s*#\s*(\d+)\s*:\s*([^,\n]+?)\s*,\s*d[ée]clar[ée]e le (\d{2}\/\d{2}\/\d{4})/i);
+  if (!tete) return null;
+  const lignes = [];
+  const re = /(?:^|\n)\s*(\d{1,3})\s+(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s+(-?\d[\d .]*,\d{2})\s*€\s+(-?\d[\d .]*,\d{2})\s*€/g;
+  let m;
+  while ((m = re.exec(T))){
+    const n = +m[1];
+    if (lignes.some(l => l.n === n)) continue;   // en-tête répété sur la page suivante
+    lignes.push({n, date: lireDate(m[2]), nature: m[3].trim(), tva: lireMontant(m[4]), montant: lireMontant(m[5])});
+  }
+  const total = lireMontant((T.match(/Total\s+(\d[\d .]*,\d{2})\s*€/) || [])[1] || "");
+  const declarant = ((T.match(/D[ée]clarant\s*:\s*([^\n]+?)\s*(?:Etat|État|\n|$)/i) || [])[1] || "").trim();
+  // Le lecteur PDF met parfois « Contrôlé : Oui » sur la même ligne que l'entité : on s'arrête avant
+  const entite = ((T.match(/Entit[ée] l[ée]gale\s*:\s*(.+?)\s*(?:Contr[ôo]l[ée]\s*:.*)?$/im) || [])[1] || "").trim();
+  return {numero: tete[1], periode: tete[2].trim(), declaree: lireDate(tete[3]), entite, declarant, lignes, total: total || somme(lignes, l => l.montant)};
+}
+/* Lignes d'une note : enregistrées à l'import, sinon relues dans le texte de la pièce. */
+function lignesNoteFrais(j){
+  if (!estNoteFrais(j)) return [];
+  if (j.lignesNdf && j.lignesNdf.length) return j.lignesNdf;
+  return extraireNoteFrais(j.texteOCR)?.lignes || [];
+}
+/* Nom de rangement, sur le modèle des notes déjà classées. */
+function nomNoteFrais(ndf){
+  const d = ndf.declaree || aujourdhui();
+  return d.slice(0, 4) + " Note de frais " + ndf.numero + " " + ndf.periode.toLowerCase() + " - " + d.slice(8, 10) + "-" + d.slice(5, 7) + ".pdf";
+}
+
+/* ---------- Dépenses avancées ---------- */
+const MOTS_NATURE_NDF = [
+  [/train|sncf|tgv/i, /SNCF|TGV|OUIGO|TRAINLINE|INOUI|\bTER\b|INTERCITES|SNCF CONNECT/i],
+  [/h[ôo]tel|nuit|h[ée]bergement/i, /HOTEL|HÔTEL|BOOKING|IBIS|NOVOTEL|MERCURE|ACCOR|B&B|KYRIAD|CAMPANILE|AIRBNB/i],
+  [/p[ée]age|tunnel/i, /AUTOROUTE|PEAGE|PÉAGE|APRR|AREA|VINCI|SANEF|ASF|ESCOTA|BIP.?GO|ULYS|TUNNEL|TOL\b|WESTERSCHELDE|KILTUNNEL/i],
+  [/taxi|vtc/i, /TAXI|UBER|G7|HEETCH|BOLT/i],
+  [/d[ée]jeuner|d[îi]ner|repas|restaurant/i, /RESTAU|BRASSERIE|CAFE|BISTRO/i],
+  [/carburant|essence|kilom/i, /TOTAL|ESSO|SHELL|BP |AVIA|INTERMARCHE|LECLERC|CARREFOUR/i]
+];
+function libelleColleNature(nature, op){
+  const lib = (op.libelle || "") + " " + (op.detail || "");
+  const c = op.commercant ? obtenir("commercants", op.commercant) : null;
+  const tout = lib + " " + (c ? c.nom + " " + (c.alias || []).join(" ") : "");
+  // Un parking de gare (« EFFIA VALENCE TGV ») n'est pas un billet de train
+  if (/train|sncf|tgv/i.test(nature) && /EFFIA|PARKING|INDIGO|ONEPARK|Q-PARK|ZENPARK|SAEMES/i.test(tout)) return false;
+  return MOTS_NATURE_NDF.some(([n, l]) => n.test(nature) && l.test(tout));
+}
+/* Débit pris par une autre note (ou une autre ligne de celle-ci). */
+function debitPrisAilleurs(op, j){ return op.ndf && op.ndf.justificatif !== j.id; }
+
+/* Proposition ligne → débit. Un débit ne sert qu'une fois, sauf à couvrir plusieurs lignes ;
+   facteur 2 : deux billets payés ensemble (le vôtre et un autre), seul le vôtre est sur la note.
+   0. Choix faits à la main (j.ndfManuel : n° de ligne → id du débit, ou null pour « aucun ») : ils priment.
+   1. Débits déjà classés avec cette note : repris tels quels.
+   2. Un débit par ligne, au montant égal ; meilleurs scores d'abord.
+   3. Plusieurs lignes en un paiement (2 à 8 trajets, éventuellement à deux) : la somme des lignes, ou son
+      double, égale le débit. Exigé : un libellé cohérent avec la nature (SNCF pour un train…), pour ne pas
+      prendre une coïncidence de montant ; à défaut d'autre critère, les dates les plus resserrées l'emportent.
+   4. Enfin, une ligne sur un débit du double (billets pour deux), libellé cohérent exigé. */
+/* ---------- Justificatifs d'achat (SNCF Connect) ----------
+   Enregistrés à l'import (collection « documents », genre achat_sncf), sans doublon. Chacun désigne un
+   paiement et ses trajets : une ligne « Train » de la note dont le déclarant a voyagé ce jour-là est
+   rattachée au débit de ce paiement (même jour ou jusqu'à 4 jours après, montant égal à 1 % près,
+   libellé de train), quel que soit le nombre de trajets et de voyageurs du paiement. */
+function enregistrerAchatsSncf(lu){
+  let n = 0;
+  const cle = a => a.transaction || (a.date + "|" + a.montant + "|" + (a.references || []).join(","));
+  const existants = vivants("documents").filter(d => d.genre === "achat_sncf");
+  const deja = new Set(existants.map(cle));
+  // Une commande déjà connue par une autre source (PDF puis e-mail) : même référence de commande
+  const refs = new Set(existants.flatMap(d => d.references || []));
+  for (const a of lu.achats || []){
+    if (deja.has(cle(a)) || (a.references || []).some(r => refs.has(r))) continue;
+    (a.references || []).forEach(r => refs.add(r));
+    enregistrer("documents", Object.assign({genre: "achat_sncf", fichier: lu.nom, titre: a.trajets.length + " trajet(s)"}, a)); deja.add(cle(a)); n++;
+  }
+  return n;
+}
+function achatsSncf(){ return vivants("documents").filter(d => d.genre === "achat_sncf" && d.date && d.montant); }
+const motsNomVoyageur = s => norm(s).replace(/[^a-z ]/g, " ").split(/\s+/).filter(x => x.length > 1);
+function voyageurEstDeclarant(voyageur, declarant){
+  const d = motsNomVoyageur(declarant), v = motsNomVoyageur(voyageur);
+  return d.length ? d.every(x => v.includes(x)) : false;
+}
+/* Paiement → débit : un débit par paiement, le plus proche en montant puis en date. */
+function debitsDesAchats(j){
+  const paires = [];
+  const ops = vivants("operations").filter(op => debitUtilisable(op, j) && libelleColleNature("Train", op));
+  for (const a of achatsSncf()){
+    for (const op of ops){
+      const dj = ecartJours(a.date, op.date), ecart = Math.abs(-op.montant - a.montant);
+      if (dj < -1 || dj > 4 || ecart > Math.max(1, a.montant * 0.01)) continue;
+      paires.push({a, op, score: -ecart * 10 - Math.abs(dj)});
+    }
+  }
+  paires.sort((x, y) => y.score - x.score);
+  const res = new Map(), pris = new Set();
+  for (const p of paires){ if (res.has(p.a.id) || pris.has(p.op.id)) continue; res.set(p.a.id, p.op); pris.add(p.op.id); }
+  // Commandes passées le même jour et payées en une fois (relevées une par une dans les e-mails) : leur somme
+  const restants = regrouper(achatsSncf().filter(a => !res.has(a.id)), a => a.date);
+  for (const [jour, liste] of restants){
+    if (liste.length < 2) continue;
+    const total = somme(liste, a => a.montant);
+    const op = ops.filter(o => !pris.has(o.id) && ecartJours(jour, o.date) >= -1 && ecartJours(jour, o.date) <= 4 && Math.abs(-o.montant - total) <= Math.max(1, total * 0.01))
+      .sort((x, y) => Math.abs(-x.montant - total) - Math.abs(-y.montant - total) || Math.abs(ecartJours(jour, x.date)) - Math.abs(ecartJours(jour, y.date)))[0];
+    if (op){ for (const a of liste) res.set(a.id, op); pris.add(op.id); }
+  }
+  return res;
+}
+function debitUtilisable(op, j){ return op && !op.supprime && op.montant < 0 && !debitPrisAilleurs(op, j) && (!op.ventilation || op.ndf?.justificatif === j.id); }
+function rapprochementLignesNdf(j){
+  const lignes = lignesNoteFrais(j).filter(l => l.date && l.montant);
+  const [avant, apres] = FENETRE_LIGNE_NDF;
+  const dansFenetre = (l, op) => { const dj = ecartJours(l.date, op.date); return dj >= -avant && dj <= apres; };
+  const res = new Map();   // n de ligne → {op, manuel}
+  const prises = new Set();
+  const manuel = j.ndfManuel || {};
+  // 0. Choix à la main
+  for (const [n, id] of Object.entries(manuel)){
+    if (id === null){ res.set(+n, {op: null, manuel: true}); continue; }
+    const op = obtenir("operations", id);
+    if (debitUtilisable(op, j)){ res.set(+n, {op, manuel: true}); prises.add(op.id); }
+  }
+  // 0 bis. Justificatifs d'achat : le trajet du déclarant à la date de la ligne désigne le paiement
+  const declarant = extraireNoteFrais(j.texteOCR)?.declarant || "";
+  if (declarant && achatsSncf().length){
+    const debitDe = debitsDesAchats(j);
+    const achats = achatsSncf().filter(x => debitDe.has(x.id));
+    const reste = new Map(achats.map(a => [a.id, versCentimes(a.montant)]));   // place restante dans chaque paiement
+    // Plusieurs paiements pour un même jour : d'abord celui qui égale la ligne, puis le plus juste qui la contient encore
+    const candidatsDe = l => achats.filter(x => (x.trajets || []).some(t => t.date === l.date && (t.voyageurs || []).some(v => voyageurEstDeclarant(v, declarant))));
+    const aTraiter = lignes.filter(l => !res.has(l.n) && /train|sncf|tgv/i.test(l.nature) && candidatsDe(l).length)
+      .sort((x, y) => candidatsDe(x).some(a => versCentimes(a.montant) === versCentimes(x.montant)) ? -1 : candidatsDe(y).some(a => versCentimes(a.montant) === versCentimes(y.montant)) ? 1 : 0);
+    for (const l of aTraiter){
+      const c = versCentimes(l.montant);
+      const a = candidatsDe(l).filter(x => reste.get(x.id) >= c).sort((x, y) => (reste.get(x.id) === c ? -1 : 0) - (reste.get(y.id) === c ? -1 : 0) || reste.get(x.id) - reste.get(y.id))[0];
+      if (!a) continue;
+      const op = debitDe.get(a.id); res.set(l.n, {op, achat: a}); prises.add(op.id); reste.set(a.id, reste.get(a.id) - c);
+    }
+  }
+  // 1. Déjà classés
+  for (const op of vivants("operations").filter(o => o.ndf && o.ndf.justificatif === j.id)){
+    for (const n of op.ndf.lignes || [op.ndf.ligne]) if (!res.has(n)) res.set(n, {op});
+    prises.add(op.id);
+  }
+  const libres = () => lignes.filter(l => !res.has(l.n));
+  const ops = vivants("operations").filter(op => op.montant < 0 && !op.ndf && !op.ventilation && !prises.has(op.id));
+  // 2. Une ligne, un débit
+  const paires = [];
+  for (const l of libres()){
+    const c = versCentimes(l.montant);
+    for (const op of ops){
+      const d = -versCentimes(op.montant);
+      const facteur = d === c ? 1 : d === 2 * c ? 2 : 0;
+      // Le double (billets pour deux) n'est retenu que si le libellé va avec la nature : pas de coïncidence de montant
+      if (!facteur || !dansFenetre(l, op) || (facteur === 2 && !libelleColleNature(l.nature, op))) continue;
+      const dj = ecartJours(l.date, op.date);
+      paires.push({l, op, facteur, score: (libelleColleNature(l.nature, op) ? 100 : 0) - Math.abs(dj) - (dj > 0 ? 3 : 0) - (facteur === 2 ? 20 : 0)});
+    }
+  }
+  paires.sort((a, b) => b.score - a.score);
+  for (const p of paires.filter(x => x.facteur === 1)){
+    if (res.has(p.l.n) || prises.has(p.op.id)) continue;
+    res.set(p.l.n, {op: p.op}); prises.add(p.op.id);
+  }
+  // 3. Plusieurs lignes, un débit (répété : deux débits identiques ne se disputent pas les mêmes lignes)
+  for (let tour = 0; tour < 20; tour++){
+  const propositions = [];
+  for (const op of ops.filter(o => !prises.has(o.id))){
+    const d = -versCentimes(op.montant);
+    const proches = libres().filter(l => dansFenetre(l, op) && libelleColleNature(l.nature, op) && versCentimes(l.montant) < d)
+      .sort((a, b) => Math.abs(ecartJours(a.date, op.date)) - Math.abs(ecartJours(b.date, op.date))).slice(0, 12);
+    if (proches.length < 2) continue;
+    let meilleur = null;
+    const essayer = (choix) => {
+      const t = somme(choix, l => versCentimes(l.montant));
+      const facteur = t === d ? 1 : 2 * t === d ? 2 : 0;
+      if (!facteur) return;
+      const dates = choix.map(l => l.date).sort();
+      const score = -ecartJours(dates[0], dates[dates.length - 1]) - somme(choix, l => Math.abs(ecartJours(l.date, op.date))) / choix.length - (facteur === 2 ? 5 : 0);
+      if (!meilleur || score > meilleur.score) meilleur = {op, choix: choix.slice(), score};
+    };
+    const parcourir = (debut, choix, total) => {
+      if (choix.length >= 2) essayer(choix);
+      if (choix.length >= 8) return;
+      for (let i = debut; i < proches.length; i++){
+        const t = total + versCentimes(proches[i].montant);
+        if (t > d) continue;
+        choix.push(proches[i]); parcourir(i + 1, choix, t); choix.pop();
+      }
+    };
+    parcourir(0, [], 0);
+    if (meilleur) propositions.push(meilleur);
+  }
+  propositions.sort((a, b) => b.score - a.score);
+  let pris = 0;
+  for (const p of propositions){
+    if (prises.has(p.op.id) || p.choix.some(l => res.has(l.n))) continue;
+    for (const l of p.choix) res.set(l.n, {op: p.op});
+    prises.add(p.op.id); pris++;
+  }
+  if (!pris) break;
+  }
+  // 4. En dernier, une ligne sur un débit du double (deux billets) : après les groupes, pour ne pas prendre
+  //    pour « à deux » un aller-retour payé en une fois (99 + 99 = 198)
+  for (const p of paires.filter(x => x.facteur === 2)){
+    if (res.has(p.l.n) || prises.has(p.op.id)) continue;
+    res.set(p.l.n, {op: p.op}); prises.add(p.op.id);
+  }
+  // Groupes et facteur, d'après l'ensemble des lignes rattachées à chaque débit
+  const parOp = new Map();
+  for (const l of lignes){ const r = res.get(l.n); if (r?.op) (parOp.get(r.op.id) || parOp.set(r.op.id, []).get(r.op.id)).push(l); }
+  return lignesNoteFrais(j).map(l => {
+    const r = res.get(l.n);
+    if (!r?.op) return {ligne: l, op: null, manuel: !!r?.manuel, aucun: !!r?.manuel, facteur: 1, groupe: null, ecart: null, nom: false, achat: null};
+    const ls = parOp.get(r.op.id) || [l];
+    const t = somme(ls, x => versCentimes(x.montant)), d = -versCentimes(r.op.montant);
+    return {ligne: l, op: r.op, manuel: !!r.manuel, achat: r.achat || null, facteur: t === d ? 1 : 2 * t === d ? 2 : 0, groupe: ls.length > 1 ? ls.map(x => x.n) : null,
+      ecart: ecartJours(l.date, r.op.date), nom: libelleColleNature(l.nature, r.op)};
+  });
+}
+/* Le débit est-il classé avec la note pour exactement ces lignes-là ? */
+function debitDejaClasse(op, j, ns){
+  if (!op.ndf || op.ndf.justificatif !== j.id) return false;
+  const a = (op.ndf.lignes || [op.ndf.ligne]).slice().sort((x, y) => x - y).join(","), b = ns.slice().sort((x, y) => x - y).join(",");
+  return a === b;
+}
+function retablirDebit(op, j){
+  const a = op.ndf.avant || {};
+  Object.assign(op, {categorie: a.categorie || "À préciser", sousCategorie: a.sousCategorie || "", nature: a.nature || natureParDefaut(a.categorie), statut: a.statut || "a_preciser", verrou: !!a.verrou, natureExacte: a.natureExacte || ""});
+  op.justificatifs = (op.justificatifs || []).filter(x => x !== j.id);
+  if (op.ndf.partiel) delete op.ventilation;
+  delete op.ndf;
+}
+/* Classe les débits trouvés avec la note. Un débit qui couvre exactement une ligne prend la catégorie de la note ;
+   un débit plus large (deux billets, plusieurs trajets, billet d'un autre prix) est ventilé : une part par ligne
+   avec la note, le reste gardant le classement du débit. Renvoie le nombre de débits touchés. */
+function classerDepensesNdf(j, rapprochement){
+  if (!j.categorie) return 0;
+  const parOp = new Map();
+  for (const r of rapprochement) if (r.op) (parOp.get(r.op.id) || parOp.set(r.op.id, []).get(r.op.id)).push(r);
+  const nature = j.nature || natureParDefaut(j.categorie);
+  const num = (j.numero || "").replace(/^NDF\s*/i, "");
+  let n = 0;
+  for (const rs of parOp.values()){
+    const op = rs[0].op;
+    const lignesOp = rs.map(r => r.ligne.n);
+    if (debitDejaClasse(op, j, lignesOp)) continue;
+    if (versCentimes(somme(rs, r => Math.abs(r.ligne.montant))) > -versCentimes(op.montant)) continue;   // lignes au-delà du débit : choix incohérent, rien n'est touché
+    if (op.ndf && op.ndf.justificatif === j.id) retablirDebit(op, j);   // lignes changées : on repart du classement d'avant
+    const avant = {categorie: op.categorie, sousCategorie: op.sousCategorie, nature: op.nature, statut: op.statut, verrou: !!op.verrou, natureExacte: op.natureExacte || ""};
+    const libNote = r => ("Note de frais n° " + num + " · ligne " + r.ligne.n + " · " + r.ligne.nature).trim();
+    const couvert = somme(rs, r => Math.abs(r.ligne.montant));
+    if (rs.length === 1 && versCentimes(couvert) === -versCentimes(op.montant)){
+      Object.assign(op, {categorie: j.categorie, sousCategorie: j.sousCategorie || "", nature, statut: "classe", verrou: true,
+        natureExacte: op.natureExacte || libNote(rs[0]), ndf: {justificatif: j.id, ligne: lignesOp[0], lignes: lignesOp, avant}});
+    } else {
+      const reste = Math.round((op.montant + couvert) * 100) / 100;
+      Object.assign(op, {statut: "classe", verrou: true, ndf: {justificatif: j.id, ligne: lignesOp[0], lignes: lignesOp, avant, partiel: true},
+        ventilation: rs.map(r => ({montant: -Math.abs(r.ligne.montant), categorie: j.categorie, sousCategorie: j.sousCategorie || "", nature, lieu: op.lieu || "",
+          natureExacte: libNote(r), justificatif: j.id}))
+          .concat(reste < -0.004 ? [{montant: reste, categorie: avant.categorie, sousCategorie: avant.sousCategorie || "", nature: avant.nature || natureParDefaut(avant.categorie), lieu: op.lieu || "",
+            natureExacte: avant.natureExacte || "Part non remboursée"}] : [])});
+    }
+    op.justificatifs = [...new Set([...(op.justificatifs || []), j.id])];
+    enregistrer("operations", op); n++;
+  }
+  return n;
+}
+/* Rétablit le classement d'avant pour les débits rattachés à la note. */
+function declasserDepensesNdf(j){
+  let n = 0;
+  for (const op of vivants("operations").filter(o => o.ndf && o.ndf.justificatif === j.id)){ retablirDebit(op, j); enregistrer("operations", op); n++; }
+  return n;
+}
+/* Choix à la main : débits dont le libellé va avec la nature, d'un montant au moins égal à la ligne,
+   achetés jusqu'à 120 jours avant (ou 5 jours après) ; les plus proches d'abord. */
+/* Montant des autres lignes de la note déjà portées par un débit (pour ne jamais dépasser le débit). */
+function dejaPorteNdf(j, op, saufLigne, rap){
+  return somme((rap || rapprochementLignesNdf(j)).filter(r => r.op && r.op.id === op.id && r.ligne.n !== saufLigne), r => Math.abs(r.ligne.montant));
+}
+function debitsPossiblesNdf(j, ligne){
+  const rap = rapprochementLignesNdf(j);
+  // Nature sans mot connu (« Petit équipement », « Divers »…) : pas de filtre de libellé ; les montants les plus proches
+  // d'abord, sur une fenêtre plus courte (achat de quelques semaines avant à quelques jours après)
+  const connue = MOTS_NATURE_NDF.some(([n]) => n.test(ligne.nature));
+  const [avant, apres] = connue ? [120, 5] : [60, 10];
+  return vivants("operations").filter(op => debitUtilisable(op, j) && -op.montant >= ligne.montant + dejaPorteNdf(j, op, ligne.n, rap) - 0.005
+    && (!connue || libelleColleNature(ligne.nature, op)) && ecartJours(ligne.date, op.date) >= -avant && ecartJours(ligne.date, op.date) <= apres)
+    .sort((a, b) => connue ? Math.abs(ecartJours(ligne.date, a.date)) - Math.abs(ecartJours(ligne.date, b.date)) : (-a.montant) - (-b.montant))
+    .slice(0, 10);
+}
+function choisirDebitNdf(j, n, opId){
+  const m = Object.assign({}, j.ndfManuel || {});
+  if (opId === undefined) delete m[n]; else m[n] = opId;
+  j.ndfManuel = m; enregistrer("justificatifs", j);
+}
+
+/* ---------- Fiche « Détail de la note » (écran Justificatifs) ---------- */
+let NDF_CHOIX_OUVERT = null;   // « id de note:n° de ligne » dont la liste de débits est dépliée
+function blocDetailNoteFrais(j, avantClasser){
+  const lignes = lignesNoteFrais(j);
+  if (!lignes.length) return null;
+  const rap = rapprochementLignesNdf(j);
+  const trouves = rap.filter(r => r.op);
+  const classee = r => r.op && debitDejaClasse(r.op, j, r.groupe || [r.ligne.n]);
+  const dejaClasses = rap.filter(classee), aClasser = trouves.filter(r => !classee(r)).length;
+  const totalLignes = somme(lignes, l => l.montant);
+  const bloc = h("details", {class: "detail-ndf", open: true, style: {marginTop: ".8rem"}},
+    h("summary", null, h("strong", null, "Détail de la note · " + lignes.length + " dépense(s) avancée(s)"),
+      " · " + trouves.length + " retrouvée(s) au relevé" + (dejaClasses.length ? ", " + dejaClasses.length + " classée(s) avec la note" : "")));
+  if (Math.abs(totalLignes - (j.montant || 0)) >= 0.01) bloc.appendChild(h("p", {class: "note neg"}, "Somme des lignes : " + euros(totalLignes) + ", montant de la note : " + euros(j.montant || 0) + ". Vérifiez la lecture."));
+  const ouvrir = n => { NDF_CHOIX_OUVERT = NDF_CHOIX_OUVERT === j.id + ":" + n ? null : j.id + ":" + n; rafraichirEcran(); };
+  const celluleDebit = r => {
+    const n = r.ligne.n, ouvert = NDF_CHOIX_OUVERT === j.id + ":" + n, fige = classee(r);
+    const contenu = [];
+    if (r.op){
+      contenu.push(fige ? h("span", {class: "pos"}, "✓ ") : null, dateCourte(r.op.date) + " · " + r.op.libelle + " · " + libelleCompte(r.op.compte),
+        h("span", {class: "discret"}, " (" + (r.ecart > 0 ? "+" : "") + r.ecart + " j" + (r.nom ? ", libellé cohérent" : "") + (r.manuel ? ", choisi à la main" : "") + ")"),
+        r.achat ? h("div", {class: "petit pos"}, "d'après le justificatif SNCF Connect du " + dateCourte(r.achat.date) + " (" + euros(r.achat.montant) + ", " + (r.achat.trajets || []).length + " trajet(s))") : null);
+      if (r.groupe || r.facteur !== 1) contenu.push(h("div", {class: "petit"}, "un paiement de " + euros(-r.op.montant) + (r.groupe ? " pour les lignes " + r.groupe.join(", ") : "")
+        + (r.facteur === 2 ? ", à deux (billets payés pour deux personnes)" : r.facteur === 0 ? ", dont " + euros(-r.op.montant - somme(rap.filter(x => x.op === r.op), x => x.ligne.montant)) + " hors note" : "")
+        + " : ventilé, la part de la note d'un côté, le reste garde son classement"));
+    } else contenu.push(h("span", {class: "discret"}, r.aucun ? "aucun débit (payé autrement), choisi à la main" : "non retrouvé : billet d'un autre prix pour la seconde personne, achat plus ancien, autre moyen de paiement ?"));
+    if (!fige) contenu.push(" ", h("button", {class: "mini discret", onclick: () => ouvrir(n)}, ouvert ? "Fermer" : r.op ? "Changer…" : "Choisir le débit…"),
+      r.manuel ? h("button", {class: "mini discret", onclick: () => { choisirDebitNdf(j, n, undefined); rafraichirEcran(); }}, "Annuler le choix") : null);
+    if (ouvert){
+      const possibles = debitsPossiblesNdf(j, r.ligne);
+      const liste = h("div", {class: "choix-ndf", style: {margin: ".3rem 0 .2rem", paddingLeft: ".6rem", borderLeft: "2px solid var(--trait, #ccc)"}});
+      if (!possibles.length) liste.appendChild(h("div", {class: "discret"}, "Aucun débit « " + r.ligne.nature + " » d'au moins " + euros(r.ligne.montant) + " entre le " + dateCourte(ajouterJours(r.ligne.date, -120)) + " et le " + dateCourte(ajouterJours(r.ligne.date, 5)) + " : relevé non importé ?"));
+      for (const op of possibles){
+        const autres = rap.filter(x => x.op === op && x.ligne.n !== n).map(x => x.ligne.n);
+        // Débit déjà pris par d'autres lignes : elles le gardent (un même paiement pour plusieurs trajets)
+        liste.appendChild(h("div", null, h("button", {class: "mini", onclick: () => { for (const k of autres) choisirDebitNdf(j, k, op.id); choisirDebitNdf(j, n, op.id); NDF_CHOIX_OUVERT = null; rafraichirEcran(); }}, "Prendre"), " ",
+          dateCourte(op.date) + " · " + op.libelle + " · " + euros(-op.montant) + " · " + libelleCompte(op.compte),
+          h("span", {class: "discret"}, " (" + ecartJours(r.ligne.date, op.date) + " j" + (autres.length ? ", déjà pour la ligne " + autres.join(", ") : "") + ")")));
+      }
+      liste.appendChild(h("div", {style: {marginTop: ".2rem"}}, h("button", {class: "mini discret", onclick: () => { choisirDebitNdf(j, n, null); NDF_CHOIX_OUVERT = null; rafraichirEcran(); }}, "Aucun : payé autrement")));
+      contenu.push(liste);
+    }
+    return h("td", {class: "petit"}, contenu);
+  };
+  bloc.appendChild(tableau([{titre: "N°", num: true}, {titre: "Date"}, {titre: "Nature"}, {titre: "Montant", num: true}, {titre: "Débit retrouvé"}], rap, {classe: "serre", ligne: r => h("tr", null,
+    h("td", {class: "num"}, String(r.ligne.n)), h("td", null, dateCourte(r.ligne.date)), h("td", null, r.ligne.nature), h("td", {class: "num"}, euros(r.ligne.montant)), celluleDebit(r))}));
+  const cat = j.categorie ? j.categorie + (j.sousCategorie ? " › " + j.sousCategorie : "") : "";
+  bloc.appendChild(h("p", {class: "note"}, "Débit de même montant, acheté jusqu'à " + FENETRE_LIGNE_NDF[0] + " jours avant la date de la ligne ou " + FENETRE_LIGNE_NDF[1]
+    + " jours après ; un paiement peut aussi couvrir plusieurs lignes, ou le double (billets pour deux personnes), si son libellé est cohérent : il sera ventilé. Sinon, « Choisir le débit… » propose les débits proches au libellé cohérent ; la part au-delà de la ligne garde son classement. Vérifiez les correspondances avant de classer."));
+  bloc.appendChild(h("div", {class: "outils", style: {marginTop: ".4rem"}},
+    h("button", {class: "mini" + (aClasser ? " primaire" : ""), disabled: !aClasser, title: cat ? "" : "Choisissez d'abord la catégorie de la note",
+      onclick: async () => {
+        if (avantClasser && avantClasser() === false) return;
+        if (!j.categorie){ message("Choisissez d'abord la catégorie de la note (par exemple Transfert › Notes de frais), puis enregistrez.", true); return; }
+        if (!(await confirmer("Classer " + aClasser + " dépense(s) en « " + (j.categorie + (j.sousCategorie ? " › " + j.sousCategorie : "")) + " » et y joindre la note ? Le classement actuel des débits est gardé pour pouvoir le rétablir.", "Classer"))) return;
+        const n = classerDepensesNdf(j, rapprochementLignesNdf(j)); message(n + " débit(s) classé(s) avec la note."); rafraichirEcran();
+      }}, aClasser ? "Classer les " + aClasser + " dépense(s) retrouvée(s)" + (cat ? " en « " + cat + " »" : "") : "Rien à classer"),
+    dejaClasses.length ? h("button", {class: "mini discret", onclick: async () => {
+      if (!(await confirmer("Rendre leur classement d'avant aux débits rattachés à cette note ?", "Rétablir"))) return;
+      const n = declasserDepensesNdf(j); message(n + " débit(s) rétabli(s)."); rafraichirEcran(); }}, "Rétablir leur classement d'avant") : null));
+  return bloc;
+}
+
+/* ---------- Rangement de la pièce ---------- */
+const DOSSIER_NOTES_FRAIS = {cle: "notes_frais_racine", libelle: "Dossier des notes de frais"};
+async function dossierNotesFrais(interactif){
+  let d = await reglage(DOSSIER_NOTES_FRAIS.cle, null);
+  if (d){
+    let p = await d.queryPermission({mode: "readwrite"});
+    if (p !== "granted" && interactif) p = await d.requestPermission({mode: "readwrite"});
+    return p === "granted" ? d : null;
+  }
+  if (!interactif || !window.showDirectoryPicker) return null;
+  if (!(await confirmer("Où ranger les notes de frais sur cet appareil ? Choisissez le dossier où elles sont déjà classées (par exemple « Notes de frais » de l'activité professionnelle).", "Choisir…"))) return null;
+  try {
+    d = await window.showDirectoryPicker({id: "bf-notes-frais", mode: "readwrite", startIn: "documents"});
+    const depot = await reglage(DOSSIERS_IMPORT.depot.cle, null);
+    if (depot && await d.isSameEntry(depot)) throw new Error("Ce dossier est le dossier de dépôt : choisissez-en un autre.");
+    await definirReglage(DOSSIER_NOTES_FRAIS.cle, d);
+    return d;
+  } catch (e){ if (e.name !== "AbortError") message(e.message, true); return null; }
+}
+async function choisirDossierNotesFrais(){
+  const d = await window.showDirectoryPicker({id: "bf-notes-frais", mode: "readwrite", startIn: "documents"});
+  const depot = await reglage(DOSSIERS_IMPORT.depot.cle, null);
+  if (depot && await d.isSameEntry(depot)) throw new Error("Ce dossier est le dossier de dépôt : choisissez-en un autre.");
+  await definirReglage(DOSSIER_NOTES_FRAIS.cle, d);
+  return d;
+}
+/* Copie la note dans son dossier sous son nom de rangement, relit la copie, puis libère le dépôt. */
+async function rangerNoteFrais(f){
+  const d = await dossierNotesFrais(true);
+  if (!d){ f.rangement = {reste: "dossier des notes de frais non désigné"}; return; }
+  try {
+    const octets = new Uint8Array(await (await f.source.poignee.getFile()).arrayBuffer());
+    const deja = await copieIdentique(d, octets, d.name, 3);
+    if (deja){ await f.source.dossier.removeEntry(f.source.nom); f.rangement = {chemin: deja, identique: true}; return; }
+    const pris = new Set();
+    for await (const [nom] of d.entries()) pris.add(nom);
+    const final = nomLibre(nomNoteFrais(f.lu.noteFrais), pris);
+    const fh = await d.getFileHandle(final, {create: true});
+    const w = await fh.createWritable(); await w.write(octets); await w.close();
+    if (!memesOctets(new Uint8Array(await (await fh.getFile()).arrayBuffer()), octets)) throw new Error("copie non conforme, le fichier reste au dépôt");
+    await f.source.dossier.removeEntry(f.source.nom);
+    f.rangement = {chemin: d.name + "/" + final, identique: false};
+  } catch (e){ f.rangement = {erreur: e.message}; console.error(e); }
 }
 
 /* ===== 12-ocr.js ===== */
@@ -3203,7 +3932,8 @@ function extraireTicket(texte){
   const facturette = N.some(l => /TICKET CLIENT|A CONSERVER|NO AUTO|N° AUTO|AUTOR|SANS CONTACT|CONTACTLESS|DEBIT|CARTE BANCAIRE|VISA|MASTERCARD|CB EMV|AID A0/.test(l))
     && N.length < 40 && !N.some(l => /TVA \d|QTE|QUANTITE/.test(l));
   const facture = N.some(l => /^FACTURE|FACTURE N|N° DE FACTURE|DATE DE FACTURE|ECHEANCE|CONDITIONS DE PAIEMENT/.test(l));
-  res.type = facture ? "facture" : facturette ? "facturette" : "ticket";
+  const noteFrais = N.some(l => /NOTE DE FRAIS|NOTES DE FRAIS|NOTE DE DEPENSES|EXPENSE REPORT|EXPENSE CLAIM|^NDF ?# ?\d/.test(l));
+  res.type = noteFrais ? "notefrais" : facture ? "facture" : facturette ? "facturette" : "ticket";
 
   /* Montant : ligne « TOTAL / À PAYER / NET / MONTANT », sinon le plus grand montant */
   const motsTotal = /(TOTAL TTC|NET A PAYER|A PAYER|TOTAL|MONTANT( TTC)?|SOMME|TTC|PAYE|CB )/;
@@ -3287,16 +4017,30 @@ const cleNumero = s => norm(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").sli
    y figurent. Les fiches de la famille, des virements internes et des revenus sont écartées. */
 const MOTS_GENERIQUES = new Set(["sarl", "sas", "sasu", "eurl", "cedex", "france", "societe", "chez", "prlv", "sepa", "virement", "carte", "facture", "architecte"]);
 const motsNom = s => [...new Set(norm(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !MOTS_GENERIQUES.has(w)))];
+/* Mots de lieu et d'adresse : ils figurent aussi dans l'adresse du client (la vôtre) imprimée sur la facture ; seuls,
+   ils ne prouvent rien (le 04/11, un alias fait de lieux avait fait prendre des factures d'hébergeur pour la charcuterie). */
+const MOTS_LIEUX = new Set(["paris", "lyon", "valence", "saint", "sainte", "germain", "boulevard", "avenue", "place", "route",
+  "chemin", "quai", "allee", "impasse", "centre", "ville", "gare", "marche"]);
 function commercantDansTexte(texte, fiches){
   const mots = new Set(motsNom(texte)); let meilleur = null, score = 0;
   for (const f of fiches){
     if (["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne"].includes(f.categorie)) continue;
     for (const nom of [f.nom, ...(f.alias || [])]){
       const m = motsNom(nom);
-      if (m.length >= 2 && m.every(w => mots.has(w)) && m.length > score){ meilleur = f; score = m.length; }
+      if (m.length >= 2 && m.some(w => !MOTS_LIEUX.has(w)) && m.every(w => mots.has(w)) && m.length > score){ meilleur = f; score = m.length; }
     }
   }
   return meilleur;
+}
+/* Reconnaissance sûre : alias (raison sociale, enseigne) ou SIRET. Le reste n'est qu'une supposition, à faire confirmer. */
+function commercantSur(t, liste){
+  const fiches = liste || vivants("commercants");
+  const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
+  for (const f of fiches){
+    if (t.siret && f.siret === t.siret) return f;
+    for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
+  }
+  return null;
 }
 /* Commerçant connu pour un ticket : par alias (raison sociale, enseigne) ou SIRET, sinon par son nom dans le texte. */
 function commercantPourTicket(t, liste){
@@ -3306,7 +4050,16 @@ function commercantPourTicket(t, liste){
     if (t.siret && f.siret === t.siret) return f;
     for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
   }
-  return t.texte ? commercantDansTexte(t.texte, fiches) : null;
+  if (!t.texte) return null;
+  const parTexte = commercantDansTexte(t.texte, fiches);
+  // Émetteur lisible sur la pièce et inconnu des fiches : une fiche trouvée ailleurs dans le texte n'est retenue que si
+  // l'un de ses mots figure dans ce nom (sinon, nouveau fournisseur à ce nom plutôt qu'un rapprochement de hasard)
+  const emetteur = [t.raisonSociale, t.enseigne].filter(s => s && nomPlausible(s)).join(" ");
+  if (parTexte && emetteur){
+    const motsEmetteur = new Set(motsNom(emetteur));
+    if (![parTexte.nom, ...(parTexte.alias || [])].some(n => motsNom(n).some(w => !MOTS_LIEUX.has(w) && motsEmetteur.has(w)))) return null;
+  }
+  return parTexte;
 }
 
 /* ===== 13-calculs.js ===== */
@@ -4250,7 +5003,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
   const tb = somme(lignes.filter(l => l.ligne), l => l.budget), tr = somme(lignes, l => l.realise) - depensesProjets(borneB(an + "-" + pad2(mo) + "-01"), finMo, regP);
   // Dépenses du mois saisies (tickets, factures, chèques) dont l'opération n'est pas encore au relevé,
   // retenues selon la même règle que le réalisé (hors « Hors budget » et revenus)
-  const taEnAttente = somme(vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && j.carte !== "ESPECES" && (j.date || "").slice(0, 7) === an + "-" + pad2(mo) && !estDepenseProjet(j, regP, true)
+  const taEnAttente = somme(vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && j.carte !== "ESPECES" && !estNoteFrais(j) && (j.date || "").slice(0, 7) === an + "-" + pad2(mo) && !estDepenseProjet(j, regP, true)
     && (n => !NATURES_HORS_RESULTAT.includes(n) && n !== "Revenu")((budget?.lignes || []).find(x => x.categorie === j.categorie && (x.sousCategorie || "") === (j.sousCategorie || ""))?.nature || natureParDefaut(j.categorie))), j => j.montant || 0);
   const cumulB = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.budget) : 0;
   const cumulR = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.realise) - depensesProjets(borneB(an + "-01-01"), finMo, regP) : 0;
@@ -4426,7 +5179,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
   const aClasser = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose").sort((a, b) => a.date < b.date ? 1 : -1);
   const surs = aClasser.filter(o => o.statut === "propose" && o.categorie !== "À préciser");
   etat.coches = etat.coches || new Set(surs.map(o => o.id));
-  c.appendChild(entete("À traiter", "Ce qui attend une décision. Les cas sans ambiguïté ont été appliqués d'office et restent réversibles (en bas de page).",
+  c.appendChild(entete("À traiter", "Ce qui attend une décision. Les cas sans ambiguïté qui ne changent rien sont appliqués d'office et restent réversibles (en bas de page) ; ceux qui changeraient fournisseur ou catégorie attendent votre clic.",
     surs.length ? h("button", {class: "primaire", onclick: () => {
       let n = 0; for (const o of aClasser) if (etat.coches.has(o.id) && o.categorie !== "À préciser"){ validerClassement(o, false); n++; }
       etat.coches = null; message(n + " classement(s) validé(s)."); rafraichirEcran();
@@ -4736,11 +5489,11 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
     gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
-        reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+        corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
         csv_libre: "CSV d'une autre banque", releve_pdf_libre: "Relevé PDF (lecture générale)",
-        document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
+        document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : lu.sousGenre === "achat_sncf" ? "Justificatif SNCF Connect · " + lu.titre : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
-      const nouvelles = p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
+      const nouvelles = p?.nb != null ? p.nb : p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
       const controle = f.erreur ? h("span", {class: "neg"}, f.erreur) : lu.genre === "inconnu" ? h("span", {class: "neg"}, lu.raison)
         : f.statut === "modele" ? h("span", null, "colonnes à décrire une fois")
         : f.statut === "verifier" ? h("span", null, lu.lignes.length + " ligne(s) lue(s), à vérifier")
@@ -4762,8 +5515,9 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       for (const f of FICHIERS_EN_COURS.filter(x => x.statut === "pret")) await enregistrerFichier(f, true);
       if (FICHIERS_EN_COURS.some(f => f.source)) await nettoyerDepot();
       rafraichirEcran();
-    }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs s'appliqueront d'office.")));
-    const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.statut === "pret");
+    }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs sans changement de fournisseur ni de catégorie s'appliqueront d'office, les autres seront proposés.")));
+    // Aperçu des opérations nouvelles : seulement pour les fichiers qui en proposent un classement (relevés)
+    const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.prep.nouvelles[0]?.proposition && f.statut === "pret");
     if (detail){
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Aperçu : " + detail.lu.nom));
       gauche.appendChild(tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Classement proposé"}, {titre: "Lieu"}, {titre: "Origine"}], detail.prep.nouvelles, {classe: "serre", limite: 60, ligne: l =>
@@ -4851,6 +5605,8 @@ function preparerFichier(f){
       else if (lu.genre !== "valorisation") f.prep = preparerReleve(lu, f.compte);
       f.statut = "pret";
     } else if (lu.genre === "reprise_v7"){ f.prep = preparerReprise(lu); f.statut = "pret"; }
+    else if (lu.genre === "cartes_lcl"){ f.prep = preparerCartesPdf(lu); f.statut = "pret"; }
+    else if (lu.genre === "corrections"){ f.prep = preparerCorrections(lu); f.statut = "pret"; }
     else if (["regles", "plan", "justificatif_pdf", "image", "document"].includes(lu.genre)) f.statut = "pret";
     else f.statut = "erreur";
   } catch (e){ f.erreur = e.message; f.statut = "erreur"; console.error(e); }
@@ -4877,6 +5633,11 @@ async function enregistrerFichier(f, enLot){
     const lu = f.lu;
     if (lu.genre === "compte" || lu.genre === "carte"){ const imp = appliquerReleve(f.prep); f.resultat = imp.nouvelles + " opération(s)"; }
     else if (lu.genre === "facture_cb") appliquerFacture(f.prep);
+    else if (lu.genre === "cartes_lcl"){ const n = appliquerCartesPdf(f.prep); f.resultat = n + " opération(s)"; }
+    else if (lu.genre === "corrections"){
+      if (!enLot && !(await confirmer("Appliquer les " + lu.actions.length + " correction(s) du lot « " + lu.nom + " » ?", "Appliquer"))) return;
+      const n = appliquerCorrections(lu); f.resultat = n + " correction(s)"; message(n + " correction(s) appliquée(s).");
+    }
     else if (lu.genre === "valorisation") appliquerValorisation(lu, f.compte);
     else if (lu.genre === "reprise_v7"){
       const ok = enLot ? true : await confirmer("Reprendre " + f.prep.operations.length + " opérations, le budget " + (f.prep.budget?.annee || "") + " (" + euros(f.prep.budget?.total || 0) + ") et " + f.prep.echeances.length + " échéances à confirmer ? Le classeur n'est pas modifié.", "Reprendre");
@@ -4888,6 +5649,7 @@ async function enregistrerFichier(f, enLot){
     else if (lu.genre === "regles"){ const n = appliquerRegles(lu.contenu); message(n + " règle(s) importée(s).");
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
     else if (lu.genre === "justificatif_pdf" || lu.genre === "image") await importerJustificatifPc(lu, !!f.source);
+    else if (lu.genre === "document" && lu.sousGenre === "achat_sncf"){ const n = enregistrerAchatsSncf(lu); f.resultat = n + " paiement(s) nouveau(x)"; message(n + " justificatif(s) SNCF Connect enregistré(s) : ils serviront au rapprochement des notes de frais."); }
     else if (lu.genre === "document") enregistrer("documents", {genre: lu.sousGenre, fichier: lu.nom, date: lu.date, titre: lu.titre, quantite: lu.quantite, montant: lu.montant, sens: lu.sens, isin: lu.isin});
     f.statut = "fait";
     if (f.source) await rangerFichier(f);
@@ -4900,14 +5662,22 @@ async function enregistrerFichier(f, enLot){
 async function importerJustificatifPc(lu, depuisDepot){
   let t;
   if (lu.genre === "image"){ message("Lecture du ticket « " + lu.nom + " »…"); t = await lireTicket(new Blob([lu.octets], {type: lu.mime})); }
-  else { t = Object.assign(extraireTicket(lu.texte), {photo: {mime: "application/pdf", octets: lu.octets}}); if (!/facturette/.test(t.type)) t.type = "facture"; }
-  const c = commercantPourTicket(t);
+  else { t = Object.assign(extraireTicket(lu.texte), {photo: {mime: "application/pdf", octets: lu.octets}}); if (!/facturette|notefrais/.test(t.type)) t.type = "facture"; }
+  // Note de frais détaillée : montant, date de déclaration, numéro et créancier lus sur la note ; classement repris de la note précédente
+  const ndf = lu.noteFrais;
+  if (ndf) Object.assign(t, {type: "notefrais", montant: ndf.total, date: ndf.declaree, numero: "NDF " + ndf.numero, raisonSociale: ndf.entite || t.raisonSociale, enseigne: ndf.entite || t.enseigne});
+  const precedente = ndf ? vivants("justificatifs").filter(x => estNoteFrais(x) && !x.aValider && x.id).sort((a, b) => a.date < b.date ? 1 : -1)[0] || null : null;
+  const c = commercantPourTicket(t) || (precedente?.commercant ? obtenir("commercants", precedente.commercant) : null);
+  // Fournisseur trouvé autrement que par un alias ou un SIRET : simple supposition, affichée comme telle
+  const devine = !!c && !commercantSur(t) && !(ndf && precedente && c.id === precedente.commercant);
   // Même pièce déjà enregistrée (même montant, même date, même fournisseur) : on demande avant de l'ajouter
   const double = justificatifDejaLa({montant: t.montant, date: t.date, commercant: c?.id, raisonSociale: t.raisonSociale, numero: t.numero});
   if (double && !(await confirmer("Une pièce identique est déjà enregistrée : " + (double.commercantNom || double.raisonSociale || "fournisseur ?") + (double.numero ? ", facture n° " + double.numero : "") + ", " + euros(double.montant) + " du " + dateFr(double.date)
     + ". L'ajouter quand même ?", "Ajouter quand même"))) return;
   const j = await creerJustificatif({type: t.type, date: t.date || aujourdhui(), heure: t.heure, montant: t.montant || 0, raisonSociale: t.raisonSociale, commercantNom: c ? c.nom : nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")),
-    commercant: c ? c.id : null, carte4: t.carte4, carte: carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc", categorie: c?.categorie || "", sousCategorie: c?.sousCategorie || "", lieu: c?.lieu || "", aVerifier: true,
+    commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
+    categorie: precedente?.categorie || c?.categorie || "", sousCategorie: precedente ? precedente.sousCategorie || "" : c?.sousCategorie || "", lieu: precedente?.lieu || c?.lieu || "", aVerifier: true,
+    fournisseurDevine: devine, natureExacte: ndf ? "Note de frais n° " + ndf.numero + " (" + ndf.periode.toLowerCase() + ")" : "", lignesNdf: ndf ? ndf.lignes : undefined,
     aValider: !!depuisDepot}, t.photo);
   rapprocherTout();
   ETAT_ECRAN.justificatifs = Object.assign(ETAT_ECRAN.justificatifs || {}, {choisi: j.id});
@@ -4958,14 +5728,16 @@ async function dossierImport(quoi, interactif){
 function reglesRangement(){ return LIVRE.parametres.rangement || {}; }
 /* Clé de la règle qui s'applique au fichier : un compte, ou une famille de pièces. */
 function cleRangement(lu, compte){
+  if (lu.genre === "cartes_lcl") return "releves_pdf_lcl";
   if (["compte", "carte", "valorisation"].includes(lu.genre)) return compte ? "compte:" + compte.id : null;
   if (lu.genre === "facture_cb") return "factures_cb";
+  if (lu.genre === "document" && lu.sousGenre === "achat_sncf") return "justificatifs";
   if (lu.genre === "document") return lu.sousGenre === "avis_impot" ? "avis_impot" : "avis_opere";
   if (lu.genre === "justificatif_pdf" || lu.genre === "image") return "justificatifs";
-  if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "plans";
+  if (["plan", "regles", "reprise_v7", "corrections"].includes(lu.genre)) return "plans";
   return null;
 }
-const LIBELLES_RANGEMENT = {factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
+const LIBELLES_RANGEMENT = {releves_pdf_lcl: "Relevés PDF du compte LCL", factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
 function libelleRangement(cle){ return cle.startsWith("compte:") ? libelleCompte(cle.slice(7)) : LIBELLES_RANGEMENT[cle] || cle; }
 
 /* Année du fichier : fin de période, date de valeur, arrêté, sinon aujourd'hui. */
@@ -4988,6 +5760,7 @@ function proposerRangement(lu, compte, index){
   const enfant = (base, re) => base && index.find(c => c.startsWith(base + "/") && c.split("/").length === base.split("/").length + 1 && re.test(c.split("/").pop()));
   const courant = () => { const c = compteCourantLcl(); return c ? parNumero(c.numero) : null; };
   if (lu.genre === "compte"){ const b = parNumero(compte?.numero); return b ? b + "/Historiques CSV" : (compte ? compte.nom : null); }
+  if (lu.genre === "cartes_lcl"){ const b = courant(); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés" : "Relevés PDF LCL"); }
   if (lu.genre === "carte"){
     if (lu.banque === "Amex"){ const b = parNom(/^amex$/i); return (b || "Amex") + "/Relevés"; }
     const debit = compte?.compteDebit ? vivants("comptes").find(c => c.id === compte.compteDebit) : null;
@@ -5000,10 +5773,11 @@ function proposerRangement(lu, compte, index){
     return enfant(b, /relev[ée]s? et [ée]valuations?/i) || b;
   }
   if (lu.genre === "facture_cb"){ const b = courant(); const e = enfant(b, /avis d[ée]bit diff[ée]r[ée]/i); return e || (b ? b + "/Avis débit différé cartes" : "Factures des cartes LCL"); }
+  if (lu.genre === "document" && lu.sousGenre === "achat_sncf") return parNom(/^justificatifs$/i) || "Justificatifs";
   if (lu.genre === "document" && lu.sousGenre === "avis_impot") return parNom(/^imp[ôo]ts?$/i) || "Impôts";
   if (lu.genre === "document") return parNom(/^avis d.op[ée]r[ée]$/i) || "Avis d'opéré";
   if (lu.genre === "justificatif_pdf" || lu.genre === "image") return parNom(/^justificatifs$/i) || "Justificatifs";
-  if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "Budget/Plans importés";
+  if (["plan", "regles", "reprise_v7", "corrections"].includes(lu.genre)) return "Budget/Plans importés";
   return null;
 }
 
@@ -5097,6 +5871,7 @@ async function copieIdentique(d, octets, prefixe, niveau){
 }
 
 async function rangerFichier(f){
+  if (f.lu.noteFrais) return rangerNoteFrais(f);   // dossier propre, nom normalisé, sans sous-dossier d'année
   const archives = await dossierImport("archives", true);
   if (!archives){ f.rangement = {reste: "archives non désignées"}; return; }
   const r = dossierRangement(f);
@@ -5155,6 +5930,7 @@ function celluleRangement(f){
   if (f.rangement?.erreur) return h("span", {class: "neg"}, "reste au dépôt : " + f.rangement.erreur);
   if (f.rangement?.reste) return h("span", {class: "discret"}, "reste au dépôt (" + f.rangement.reste + ")");
   if (f.statut === "erreur" || f.lu.genre === "inconnu") return h("span", {class: "discret"}, "reste au dépôt");
+  if (f.lu.noteFrais) return h("span", null, "→ " + DOSSIER_NOTES_FRAIS.libelle.toLowerCase() + " : « " + nomNoteFrais(f.lu.noteFrais) + " »");
   const r = dossierRangement(f);
   if (!r) return h("span", {class: "discret"}, "reste au dépôt");
   if (!r.dossier) return h("button", {class: "mini discret", onclick: () => modifierRangement(r.cle, "")}, "Définir le rangement…");
@@ -5171,7 +5947,13 @@ function sectionDossiersImport(){
     return h("li", null, h("span", null, DOSSIERS_IMPORT[quoi].libelle + " : ", zone),
       h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierImport(quoi); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
   };
-  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives")));
+  const ligneNdf = (() => {
+    const zone = h("span", {class: "discret"}, "…");
+    reglage(DOSSIER_NOTES_FRAIS.cle, null).then(d => { zone.textContent = d ? "« " + d.name + " »" : "non désigné (demandé au premier rangement)"; zone.className = d ? "" : "discret"; });
+    return h("li", null, h("span", null, DOSSIER_NOTES_FRAIS.libelle + " : ", zone),
+      h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierNotesFrais(); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
+  })();
+  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives"), ligneNdf));
   const regles = Object.entries(reglesRangement()).sort((a, b) => libelleRangement(a[0]).localeCompare(libelleRangement(b[0])));
   if (regles.length) corps.appendChild(tableau([{titre: "Pièces"}, {titre: "Rangées dans (+ année)"}, {titre: ""}], regles, {classe: "serre", ligne: ([cle, d]) =>
     h("tr", null, h("td", null, libelleRangement(cle)), h("td", {class: "petit"}, d), h("td", null, h("button", {class: "mini discret", onclick: () => modifierRangement(cle, d)}, "Modifier")))}));
@@ -5188,19 +5970,23 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   // File de travail : saisies à valider, sinon justificatifs ayant au moins une opération candidate à trancher
   const attente = nbValider ? aRapprocher.filter(j => j.aValider) : aRapprocher.filter(j => !j.reporte && candidats([j]).length);
   // Fiche refermée : on ne la rouvre pas d'office ; les autres restent proposées
-  let j = etat.choisi ? obtenir("justificatifs", etat.choisi) : attente.find(x => x.id !== etat.ferme);
+  // Après « Fermer », l'écran reste sur la liste (plus d'ouverture d'office) jusqu'à ce qu'une ligne soit choisie
+  let j = etat.choisi ? obtenir("justificatifs", etat.choisi) : etat.listeSeule ? null : attente.find(x => x.id !== etat.ferme);
   c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " pièce(s) à valider (téléphone ou dépôt) · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
-     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s)."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
-  if (!j){
+     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office ; ceux qui changeraient fournisseur ou catégorie sont proposés, à confirmer."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
+  if (!j && etat.listeSeule && attente.length){
+    c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("span", {class: "discret"}, attente.length + " pièce(s) " + (nbValider ? "à valider" : "avec une opération candidate à trancher") + ". Cliquez sur une ligne pour l'ouvrir, ou "),
+      h("button", {class: "mini", onclick: () => { etat.listeSeule = false; etat.ferme = null; rafraichirEcran(); }}, "Reprendre la file")));
+  } else if (!j){
     c.appendChild(h("p", {class: "vide"}, aRapprocher.length ? "Rien à valider ni à trancher : " + aRapprocher.length + " justificatif(s) attendent leur opération au relevé. Cliquez sur une ligne pour l'ouvrir." : "Aucun justificatif à rapprocher."));
   } else c.appendChild(ecranRapprochement(j, etat, attente));
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Tous les justificatifs"));
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : "à rapprocher")))}));
 }});
 
 /* Pièces déjà enregistrées qui pourraient être la même : même montant à 45 jours près, ou même fournisseur
@@ -5221,7 +6007,7 @@ function ecranRapprochement(j, etat, attente){
     idx >= 0 ? h("div", {class: "outils"}, h("button", {class: "discret", disabled: idx <= 0, onclick: () => { etat.choisi = attente[idx - 1].id; rafraichirEcran(); }}, "‹ Précédent"),
       h("span", {class: "discret"}, (idx + 1) + " sur " + attente.length),
       h("button", {class: "discret", disabled: idx >= attente.length - 1, onclick: () => { etat.choisi = attente[idx + 1].id; rafraichirEcran(); }}, "Suivant ›")) : null,
-    h("button", {class: "discret", title: "Refermer la fiche sans rien enregistrer", onclick: () => { etat.choisi = null; etat.ferme = j.id; rafraichirEcran(); }}, "Fermer ✕")));
+    h("button", {class: "discret", title: "Refermer la fiche sans rien enregistrer", onclick: () => { etat.choisi = null; etat.ferme = j.id; etat.listeSeule = true; rafraichirEcran(); }}, "Fermer ✕")));
   const grille = h("div", {class: "trois rappro"});
   // 1. Pièces
   const pieces = h("section", null, h("h2", null, groupe.length > 1 ? "Tickets" : "Pièce"));
@@ -5278,13 +6064,18 @@ function ecranRapprochement(j, etat, attente){
     const ligneCheque = h("div", {class: "champ-ocr", hidden: !String(x.carte || "").startsWith("CHQ:")}, h("label", null, "N° de chèque"), cheque, h("span", {class: "confiance"}, "pour le rapprochement"));
     carte.addEventListener("change", () => { ligneCheque.hidden = !carte.value.startsWith("CHQ:"); });
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
+    // Note de frais : le moyen de paiement devient le compte sur lequel le remboursement est attendu
+    const libPaye = () => estNoteFrais({type: type.value}) ? "Remboursé sur" : "Payé avec";
+    const ligneCarte = ligneOcr(libPaye(), carte, x.carte4 ? "carte ****" + x.carte4 : "");
+    type.addEventListener("change", () => { ligneCarte.querySelector("label").textContent = libPaye(); });
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
-      ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""), ligneCheque);
-    champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte, cheque, num});
+      ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque);
+    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num});
   });
   const enregistrerSaisie = () => {
+    const aliasAProposer = [];
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
@@ -5292,20 +6083,37 @@ function ecranRapprochement(j, etat, attente){
         lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
       // Le fournisseur est créé (ou rattaché) à la validation, y compris un nom resté provisoire
-      if (f.x.commercantNom && (f.x.commercantNom !== ancienNom || !f.x.commercant)){
-        let fiche = vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom)) || (f.x.commercant ? obtenir("commercants", f.x.commercant) : null);
+      // Fiche choisie dans la liste : prise telle quelle. « Nouveau fournisseur… » : fiche de ce nom, sinon une
+      // fiche NEUVE ; jamais le renommage de la fiche attachée jusque-là (le 04/11, une fiche proposée à tort pour
+      // une note de frais avait ainsi pris le nom de l'employeur). Renommer une fiche se fait dans Fournisseurs.
+      const choisie = f.selF.value && f.selF.value !== "__nouveau__" ? obtenir("commercants", f.selF.value) : null;
+      if (choisie){ f.x.commercantNom = choisie.nom; }
+      if (f.x.commercantNom && (f.x.commercantNom !== ancienNom || !f.x.commercant || (choisie && choisie.id !== f.x.commercant) || f.selF.value === "__nouveau__")){
+        let fiche = choisie || vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom));
         if (!fiche) fiche = enregistrer("commercants", {nom: f.x.commercantNom, alias: [], stats: {}, natures: {}});
-        else if (norm(fiche.nom) !== norm(f.x.commercantNom) && f.x.commercant === fiche.id) { fiche.nom = f.x.commercantNom; enregistrer("commercants", fiche); }
-        if (f.x.raisonSociale && nomPlausible(f.x.raisonSociale) && ajouterAlias(fiche, f.x.raisonSociale)) message("Mémorisé : « " + f.x.raisonSociale + " » = " + fiche.nom + ".");
         f.x.commercant = fiche.id; invaliderIndex();
       }
+      // Nom lu sur la pièce, nouveau pour la fiche : proposé comme alias, jamais ajouté sans accord
+      const ficheFinale = f.x.commercant ? obtenir("commercants", f.x.commercant) : null;
+      if (ficheFinale && f.x.raisonSociale && nomPlausible(f.x.raisonSociale) && !estBanqueTerminal(f.x.raisonSociale) && cleLibelle(f.x.raisonSociale)
+        && !(ficheFinale.alias || []).includes(cleLibelle(f.x.raisonSociale)) && norm(ficheFinale.nom) !== norm(f.x.raisonSociale) && !f.x.aliasRefuse)
+        aliasAProposer.push({fiche: ficheFinale, nom: f.x.raisonSociale, x: f.x});
+      f.x.fournisseurDevine = false;
       enregistrer("justificatifs", f.x);
       if (apprendreChiffresCarte(f.x.carte4, f.x.carte)) message("Mémorisé : carte ****" + String(f.x.carte4).slice(-4) + " = " + libelleMoyen(f.x.carte) + ".");
-      if (f.x.carte === "ESPECES" && !(f.x.operations || []).length) creerOperationEspeces(f.x);
+      if (f.x.carte === "ESPECES" && !estNoteFrais(f.x) && !(f.x.operations || []).length) creerOperationEspeces(f.x);
     }
+    // Questions posées après l'enregistrement (la saisie est déjà sauvée, quelle que soit la réponse)
+    (async () => {
+      for (const p of aliasAProposer){
+        if (await confirmer("Retenir « " + p.nom + " » comme autre nom de « " + p.fiche.nom + " » ? Les prochaines pièces portant ce nom seront rattachées d'office à cette fiche.", "Retenir")){
+          if (ajouterAlias(p.fiche, p.nom)) message("Retenu : « " + p.nom + " » = " + p.fiche.nom + ".");
+        } else enregistrer("justificatifs", Object.assign(p.x, {aliasRefuse: true}));
+      }
+    })();
   };
   saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini" + (j.aValider ? " primaire" : ""), onclick: () => { const v = groupe.some(x => x.aValider); if (enregistrerSaisie() === false) return;
-      if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s)." : "."));
+      if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s) d'office." : "."));
         // Saisie suivante à valider, sinon justificatif suivant
         const suivant = attente.find(x => x.aValider && !groupe.includes(x)) || attente[idx + 1]; etat.choisi = suivant ? suivant.id : null;
       } else { message("Saisie enregistrée."); etat.choisi = null; } rafraichirEcran(); }}, j.aValider ? "Valider la saisie" : "Enregistrer la saisie"),
@@ -5334,15 +6142,22 @@ function ecranRapprochement(j, etat, attente){
         h("span", {class: "petit"}, euros(x.op.montant) + " · écart de date " + (x.ecart > 0 ? "+" : "") + x.ecart + " j" + (x.sim > 0.4 ? " · nom proche" : ""))),
         h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, x.score + " %"), h("button", {class: "mini" + (i === 0 ? " primaire" : ""), onclick: () => { if (enregistrerSaisie() === false) return; lier(groupe, x.op, false); rafraichirEcran(); }}, "Rapprocher"))));
     });
-    if (!liste.length && !propositionsGroupe.length) cand.appendChild(h("p", {class: "vide"}, "Aucune opération de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates. Le relevé n'est peut-être pas encore importé."));
+    const nf = estNoteFrais(j);
+    if (!liste.length && !propositionsGroupe.length) cand.appendChild(h("p", {class: "vide"}, nf
+      ? "Aucun virement reçu de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates : le remboursement n'est pas encore arrivé, ou le relevé n'est pas importé."
+      : "Aucune opération de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates. Le relevé n'est peut-être pas encore importé."));
     const [av, ap] = fenetre(j);
-    cand.appendChild(h("p", {class: "note"}, "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" || j.type === "devis" ? "facture ou devis" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office."));
+    cand.appendChild(h("p", {class: "note"}, nf
+      ? "Note de frais : on attend un crédit (virement de remboursement) du montant exact, date −" + av + " / +" + ap + " jours. Les dépenses avancées restent rapprochées de leurs propres débits. Un seul candidat sûr : proposé en tête, à confirmer (le virement change de catégorie)."
+      : "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" || j.type === "devis" ? "facture ou devis" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office s'il ne change ni fournisseur ni catégorie, sinon proposé en tête."));
     cand.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}},
-      h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => { if (!(x.operations || []).length) creerOperationEspeces(x); }); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
+      nf ? null : h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => { if (!(x.operations || []).length) creerOperationEspeces(x); }); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
       h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) enregistrer("justificatifs", Object.assign(x, {reporte: aujourdhui()})); const suivant = attente[idx + 1]; etat.choisi = suivant ? suivant.id : null; rafraichirEcran(); }}, "Reporter")));
   }
   grille.appendChild(cand);
   bloc.appendChild(grille);
+  // Note de frais détaillée : dépenses avancées retrouvées au relevé, à classer avec la note (la saisie est enregistrée d'abord), sur toute la largeur
+  if (groupe.length === 1 && estNoteFrais(j)){ const d = blocDetailNoteFrais(j, enregistrerSaisie); if (d) bloc.appendChild(d); }
   return bloc;
 }
 
@@ -6874,7 +7689,12 @@ async function autotest(){
     /* --- Export « encours » d'une carte, puis facture --- */
     const csvCarte = ["28/02/2027;45,40;;09999 000099Z", "03/03/2027;-33,10;Carte;;LIBRAIRIE TEST PARIS;;5942;Loisirs/culture", "05/03/2027;-12,30;Carte;;CAFE TEST PARIS;;5812;Alimentation:Restaurant", "27/03/2027;0;;09999 000099Z"].join("\n");
     const luc = lireCsv("T_cpte_09999_000099Z_carte_Carte_Premier_X333_du_28-02-2027_au_27-03-2027.csv", csvCarte);
-    v("export carte reconnu", [luc.genre, luc.carte, luc.controle.ok], ["carte", "X333", true]);
+    {
+      // Export CSV Amex enregistré dans Excel : une seule colonne contenant les lignes CSV
+      const ux = amexCsvDansFeuille("amex.xlsx", [["Date,Description,Montant"], ["10/31/2026,RELAIS ESSAI,\"87,00\""], ["10/19/2026,AVOIR ESSAI,\"-6,99\""], [null]]);
+      v("export Amex CSV enregistré en Excel reconnu", [ux?.genre, ux?.carte, ux?.lignes.length, ux?.lignes[0].date, ux?.lignes[0].montant, ux?.lignes[1].montant], ["carte", "AMEX", 2, "2026-10-31", -87, 6.99]);
+    }
+    v("export carte reconnu",[luc.genre, luc.carte, luc.controle.ok], ["carte", "X333", true]);
     const carte = enregistrer("comptes", {nom: "Carte X333", type: "carte", banque: "LCL", carte: "X333", compteDebit: cj.id});
     const pc = preparerReleve(luc, carte);
     v("ligne déjà venue du compte : réattribuée", pc.reattribuees.length, 1);
@@ -7015,6 +7835,15 @@ async function autotest(){
       const tk = extraireTicket("Jean Dupont, architecte essai\nFacture\nn° Date\n2 6 – 0 7 – 10 2 12 / 10 /202 6\nMontant à régler TTC\n980 €");
       v("facture : date fragmentée et fournisseur nommé dans le texte", [tk.date, commercantPourTicket(tk)?.id === fp.id], ["2026-10-12", true]);
       {
+        // L'adresse du client (« avenue de Valence, Paris ») ne doit pas faire reconnaître une boutique dont l'alias n'est fait que de lieux
+        const fc = enregistrer("commercants", {nom: "Traiteur essai (place essai)", alias: ["RPG ST VALENCE PARIS"], stats: {}, natures: {}, categorie: "Alimentation"});
+        const fh = extraireTicket("Hebergeur Essai Network SA\nFacture N° 12345\nClient : Jean Dupont\n10 avenue de Valence\n75005 Paris\nTotal TTC 13,68 €");
+        const fh2 = Object.assign({}, fh, {raisonSociale: "Hebergeur Essai Network SA", enseigne: "Hebergeur Essai Network SA"});
+        v("fournisseur : reconnaissance sûre (alias) distinguée de la supposition (texte)", [commercantSur({raisonSociale: "RPG ST VALENCE PARIS"}, [fc])?.id === fc.id, commercantSur({raisonSociale: "Autre nom"}, [fc])], [true, null]);
+        v("facture : l'adresse du client ne désigne pas un commerçant", [commercantDansTexte(fh.texte, [fc]), commercantPourTicket(fh2, [fc])], [null, null]);
+        supprimer("commercants", fc.id);
+      }
+      {
         const nb0 = vivants("commercants").length;
         const jm = await creerJustificatif({type: "ticket", date: "2027-03-10", montant: 12, commercantNom: "Boulangrie Nouvele", origine: "mobile"});
         v("téléphone : fournisseur inconnu laissé provisoire, aucune fiche créée", [vivants("commercants").length - nb0, jm.fournisseurProvisoire], [0, true]);
@@ -7025,6 +7854,185 @@ async function autotest(){
           apprendreChiffresCarte("7998", "X111");
           v("carte : 4 chiffres de la facturette appris puis reconnus", carteDesChiffres("############7998"), "X111");
           supprimer("comptes", ck.id);
+        }
+        {
+          // Note de frais : rapprochée du virement de remboursement (crédit), jamais d'un débit de même montant
+          const cc = enregistrer("comptes", {nom: "Courant essai NF", type: "courant", banque: "Essai", actif: true});
+          const deb = enregistrer("operations", {compte: cc.id, date: "2027-04-02", montant: -1735.61, libelle: "CB ESSAI DEBIT"});
+          const cre = enregistrer("operations", {compte: cc.id, date: "2027-05-20", montant: 1735.61, libelle: "VIR EMPLOYEUR ESSAI REMB NDF"});
+          const nf = await creerJustificatif({type: "notefrais", date: "2027-04-01", montant: 1735.61, commercantNom: "Employeur essai", origine: "pc"});
+          const c = candidats([nf]).map(x => x.op.id);
+          v("note de frais : candidat = le crédit, pas le débit", [c.includes(cre.id), c.includes(deb.id)], [true, false]);
+          v("note de frais : lue sur la pièce, hors en-cours", [extraireTicket("EMPLOYEUR ESSAI" + String.fromCharCode(10) + "NOTE DE FRAIS" + String.fromCharCode(10) + "Collaborateur" + String.fromCharCode(10) + "Total 1 735,61").type, encoursSaisis().lignes.some(l => l.montant === 1735.61)], ["notefrais", false]);
+          delier(nf); supprimer("justificatifs", nf.id); supprimer("operations", deb.id); supprimer("operations", cre.id); supprimer("comptes", cc.id);
+        }
+        {
+          // Note de frais détaillée : lecture des lignes, nom de rangement, débits retrouvés (un débit par ligne), classement réversible
+          const L = String.fromCharCode(10);
+          const texte = ["NDF #2681 : Novembre 2026, déclarée le 02/11/2026 Imprimé le 02/11/2026 à 16:44", " Entité légale : EMPLOYEUR ESSAI Contrôlé : Oui", "N° Date Nature TVA Montant TTC",
+            "1 28/05/2026 Train 0,00 € 99,00 €", "2 01/06/2026 Train 0,00 € 99,00 €", "3 17/06/2026 Hôtel 0,00 € 25,01 €", "4 08/09/2026 Péages 0,00 € 6,20 €", "Total 229,21 €"].join(L);
+          const x = extraireNoteFrais(texte);
+          v("note de frais détaillée : numéro, date, lignes, total", [x.numero, x.declaree, x.lignes.length, x.lignes[2].nature, x.total, x.entite], ["2681", "2026-11-02", 4, "Hôtel", 229.21, "EMPLOYEUR ESSAI"]);
+          v("note de frais : nom de rangement des notes déjà classées", nomNoteFrais(x), "2026 Note de frais 2681 novembre 2026 - 02-11.pdf");
+          const cc = enregistrer("comptes", {nom: "Carte essai NDF", type: "carte", carte: "X919", actif: true});
+          const o1 = enregistrer("operations", {compte: cc.id, date: "2026-05-27", montant: -99, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          const o2 = enregistrer("operations", {compte: cc.id, date: "2026-05-30", montant: -99, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          const o3 = enregistrer("operations", {compte: cc.id, date: "2026-06-17", montant: -25.01, libelle: "HOTEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});
+          const jn = enregistrer("justificatifs", {type: "notefrais", date: "2026-11-02", montant: 229.21, texteOCR: texte, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+          const rap = rapprochementLignesNdf(jn);
+          v("note de frais : chaque ligne trouve son débit, sans doublon", rap.map(r => r.op ? r.op.id : null), [o1.id, o2.id, o3.id, null]);
+          const n = classerDepensesNdf(jn, rap);
+          v("note de frais : débits classés avec la note", [n, obtenir("operations", o3.id).categorie, (obtenir("operations", o1.id).justificatifs || []).includes(jn.id)], [3, "Transfert", true]);
+          declasserDepensesNdf(jn);
+          v("note de frais : classement d'avant rétabli", [obtenir("operations", o3.id).categorie, obtenir("operations", o3.id).sousCategorie, !!obtenir("operations", o1.id).ndf], ["Voyages", "Hôtels", false]);
+          // Deux billets payés ensemble, un seul sur la note : débit ventilé, l'autre moitié garde son classement
+          {
+            // Deux commandes de 198 € le même jour : chacune est un aller-retour seul (99 + 99), pas un billet « à deux »
+            const t3 = ["NDF #2701 : Septembre 2026, déclarée le 30/09/2026", "1 07/09/2026 Train 0,00 € 99,00 €", "2 09/09/2026 Train 0,00 € 99,00 €", "3 14/09/2026 Train 0,00 € 99,00 €", "4 19/09/2026 Train 0,00 € 99,00 €", "Total 396,00 €"].join(L);
+            const a1 = enregistrer("operations", {compte: cc.id, date: "2026-08-27", montant: -198, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const a2 = enregistrer("operations", {compte: cc.id, date: "2026-08-27", montant: -198, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const j4 = enregistrer("justificatifs", {type: "notefrais", date: "2026-09-30", montant: 396, texteOCR: t3, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            const rr = rapprochementLignesNdf(j4);
+            v("note de frais : allers-retours payés en une fois préférés au billet « à deux »", [rr.every(r => r.op && r.facteur === 1 && r.groupe && r.groupe.length === 2), rr[0].op === rr[1].op, rr[2].op === rr[3].op, rr[0].op !== rr[2].op], [true, true, true, true]);
+            supprimer("operations", a1.id); supprimer("operations", a2.id); supprimer("justificatifs", j4.id);
+          }
+          {
+            // Justificatif d'achat SNCF Connect : un paiement, plusieurs trajets et voyageurs ; la ligne du déclarant s'y rattache
+            const pdf = ["Justificatif d'achat", "Résumé de la commande", "Montant total (TTC) : 396,00 €", "Société SNCF Connect", "Détail des transactions", "Date de transaction : 10/05/2026 à 11:01:27",
+              "Aller 01/06/2026 à 10:05:00", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "Voyageur 2 : MARIE ESSAI - Carte Liberté", "198,00 €", "Réf: AAA111",
+              "Aller 15/06/2026 à 10:05:00", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "Retour 18/06/2026 à 16:56:00", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "198,00 €", "Réf: BBB222",
+              "Montant de la transaction (TTC) : 396,00 €", "Transaction n° 0099", "Référence commande AAA111, BBB222", "Numéro de carte : #######1234"].join(L);
+            const ach = extraireAchatSncf(pdf);
+            v("justificatif SNCF Connect lu (paiement, trajets, voyageurs)", [ach.date, ach.montant, ach.trajets.length, ach.trajets[0].voyageurs.join("/"), ach.trajets[2].sens, ach.carte4], ["2026-05-10", 396, 3, "JEAN ESSAI/MARIE ESSAI", "Retour", "1234"]);
+            v("justificatif SNCF Connect reconnu à l'import", reconnaitrePdf("x.pdf", pdf, null).sousGenre, "achat_sncf");
+            // Texte tel que le lecteur PDF du navigateur le rend : ligature coupée, prix avant les voyageurs
+            const brut = extraireAchatSncf(["Justi fi catif d'achat", "Montant total (TTC) : 114,20 €", "Aller 09/07/2026 à 19:00:00", "88,00 €", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "176,00 €", "Voyageur 2 : MARIE ESSAI - Carte Liberté", "Réf: AAA",
+              "Aller 09/07/2026 à 21:12:00", "26,20 €", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "Date de transaction : 01/07/2026 à 11:44:31", "Montant de la transaction (TTC) : 114,20 €", "Société SNCF Connect - 1-3 Rue"].join(L));
+            v("justificatif SNCF Connect lu dans le texte du navigateur", [brut?.date, brut?.montant, brut?.trajets.map(t => t.heure + " " + t.voyageurs.join("/")).join(" | ")], ["2026-07-01", 114.2, "19:00 JEAN ESSAI/MARIE ESSAI | 21:12 JEAN ESSAI"]);
+            const deb = enregistrer("operations", {compte: cc.id, date: "2026-05-11", montant: -396, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const nAch = enregistrerAchatsSncf({nom: "x.pdf", achats: [ach]}), nAch2 = enregistrerAchatsSncf({nom: "x.pdf", achats: [ach]});
+            const t5 = ["NDF #2702 : Juin 2026, déclarée le 30/06/2026", " Déclarant : ESSAI Jean", "1 01/06/2026 Train 0,00 € 99,00 €", "2 15/06/2026 Train 0,00 € 99,00 €", "3 18/06/2026 Train 0,00 € 99,00 €", "4 20/12/2026 Train 0,00 € 99,00 €", "Total 396,00 €"].join(L);
+            const j5 = enregistrer("justificatifs", {type: "notefrais", date: "2026-06-30", montant: 396, texteOCR: t5, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            const r5 = rapprochementLignesNdf(j5);
+            v("note de frais : lignes rattachées par le justificatif d'achat (doublon ignoré)", [nAch, nAch2, r5.map(r => r.op ? (r.op.id === deb.id ? "J" : "autre") : "-").join("")], [1, 0, "JJJ-"]);
+            classerDepensesNdf(j5, r5);
+            v("note de frais : paiement du justificatif ventilé (3 trajets avec la note, le reste au foyer)", (obtenir("operations", deb.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-99 Transfert", "-99 Transfert", "-99 Transports"]);
+            declasserDepensesNdf(j5);
+            supprimer("operations", deb.id); supprimer("justificatifs", j5.id); for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && d.transaction === "0099")) supprimer("documents", d.id);
+            // Achats relevés dans les e-mails (JSON) : reconnus, dédoublonnés par référence ; deux commandes du jour payées ensemble
+            const js = JSON.stringify({format: "budget-foyer-achats-sncf", source: "e-mails", achats: [
+              {date: "2025-05-12", montant: 128, references: ["RRR001"], trajets: [{sens: "Aller", date: "2025-05-15", voyageurs: ["Jean Essai", "Marie Essai"]}]},
+              {date: "2025-05-12", montant: 95, references: ["RRR002"], trajets: [{sens: "Aller", date: "2025-05-29", voyageurs: ["Jean Essai"]}]},
+              {date: "2025-05-12", montant: 95, references: ["RRR002"], trajets: [{sens: "Aller", date: "2025-05-29", voyageurs: ["Jean Essai"]}]}]});
+            const lj = lireJson("achats.json", js);
+            const nj = enregistrerAchatsSncf(lj);
+            const dj = enregistrer("operations", {compte: cc.id, date: "2025-05-13", montant: -223, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const t7 = ["NDF #1700 : Mai 2025, déclarée le 31/05/2025", " Déclarant : ESSAI Jean", "1 15/05/2025 Train 0,00 € 64,00 €", "2 29/05/2025 Train 0,00 € 95,00 €", "Total 159,00 €"].join(L);
+            const j7 = enregistrer("justificatifs", {type: "notefrais", date: "2025-05-31", montant: 159, texteOCR: t7, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            v("achats des e-mails : reconnus, doublon écarté, deux commandes du jour sur un seul débit", [lj.sousGenre, nj, rapprochementLignesNdf(j7).map(r => r.op === dj ? "J" : "-").join("")], ["achat_sncf", 2, "JJ"]);
+            supprimer("operations", dj.id); supprimer("justificatifs", j7.id);
+            for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && (d.references || []).some(r => /^RRR/.test(r)))) supprimer("documents", d.id);
+            // Deux paiements avec un trajet le même jour (97 € seul ; 88 € + 26,20 €) : chaque ligne va au bon paiement
+            const achat = (tx, mt, heures) => ["Justificatif d'achat", "SNCF Connect", "Date de transaction : 01/07/2026 à 11:00:00"].concat(heures.flatMap(hh => ["Aller 09/07/2026 à " + hh + ":00", "Voyageur 1 : JEAN ESSAI - Carte Liberté"]),
+              ["Montant de la transaction (TTC) : " + mt + " €", "Transaction n° " + tx]).join(L);
+            enregistrerAchatsSncf({nom: "a.pdf", achats: [extraireAchatSncf(achat("0201", "97,00", ["07:08"])), extraireAchatSncf(achat("0202", "114,20", ["19:00", "21:12"]))]});
+            const d97 = enregistrer("operations", {compte: cc.id, date: "2026-07-01", montant: -97, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const d114 = enregistrer("operations", {compte: cc.id, date: "2026-07-01", montant: -114.2, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const t6 = ["NDF #2703 : Juillet 2026, déclarée le 31/07/2026", " Déclarant : ESSAI Jean", "1 09/07/2026 Train 0,00 € 88,00 €", "2 09/07/2026 Train 0,00 € 97,00 €", "3 09/07/2026 Train 0,00 € 26,20 €", "Total 211,20 €"].join(L);
+            const j6 = enregistrer("justificatifs", {type: "notefrais", date: "2026-07-31", montant: 211.2, texteOCR: t6, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            v("note de frais : même jour, deux paiements : chaque ligne au bon justificatif", rapprochementLignesNdf(j6).map(r => r.op === d97 ? "97" : r.op === d114 ? "114" : "-"), ["114", "97", "114"]);
+            supprimer("operations", d97.id); supprimer("operations", d114.id); supprimer("justificatifs", j6.id);
+            for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && ["0201", "0202"].includes(d.transaction))) supprimer("documents", d.id);
+          }
+          {
+            // Nature sans mot connu : le choix à la main propose les débits proches en montant, quel que soit le libellé
+            const pe = enregistrer("operations", {compte: cc.id, date: "2025-10-20", montant: -1599, libelle: "BOUTIQUE ESSAI", categorie: "Maison", sousCategorie: "Équipement, électroménager", statut: "classe"});
+            const t8 = ["NDF #1800 : Octobre 2025, déclarée le 24/11/2025", "1 22/10/2025 Petit équipement 0,00 € 1 581,00 €", "Total 1 581,00 €"].join(L);
+            const j8 = enregistrer("justificatifs", {type: "notefrais", date: "2025-11-24", montant: 1581, texteOCR: t8, statut: "a_rapprocher", operations: []});
+            v("note de frais : nature sans mot connu, débit proposé au choix à la main", debitsPossiblesNdf(j8, lignesNoteFrais(j8)[0]).some(o => o.id === pe.id), true);
+            supprimer("operations", pe.id); supprimer("justificatifs", j8.id);
+          }
+          {
+            // Relevé PDF LCL : détail des cartes, carte reconnue, devise ignorée, année de janvier, remboursement, doublons
+            const ck = enregistrer("comptes", {nom: "Carte essai PDF", type: "carte", banque: "LCL", carte: "X456", actif: true});
+            const rel = ["RELEVE DE COMPTE", "Indicatif : 8208 Compte : 99 Z", "PAIEMENTS PAR CARTE DE JANVIER 2027", "LIBELLE VALEUR DEBIT CREDIT",
+              "CARTE N° 12 3456 M JEAN ESSAI", "SOUS TOTAL : 1 608,50", "BOUTIQUE ESSAI LE 30/12 1 581,00", "Rotterdam 1581,00 EUR", "CAFE ESSAI LE 03/01 20,00", "CAFE ESSAI LE 03/01 20,00", "AVOIR ESSAI LE 05/01 12,50",
+              "CARTE N° 34 5678 MME MARIE ESSAI", "SOUS TOTAL : 8,00", "PAIN ESSAI LE 04/01 8,00", "TOTAUX 1 616,50", "MONTANT COMPTABILISE LE 31/01/2027"].join(L);
+            const lc = extraireCartesReleveLcl(rel);
+            v("relevé PDF LCL : cartes, dates, devise ignorée, remboursement reconnu", [lc.cartes.length, lc.cartes[0].carte, lc.cartes[0].lignes.map(l => l.date + " " + l.montant).join(" | "), lc.cartes[0].controle.ok, lc.cartes[1].carte],
+              [2, "X456", "2026-12-30 -1581 | 2027-01-03 -20 | 2027-01-03 -20 | 2027-01-05 12.5", true, "X678"]);
+            const p1 = preparerCartesPdf(lc); appliquerCartesPdf(p1);
+            const p2 = preparerCartesPdf(extraireCartesReleveLcl(rel));
+            v("relevé PDF LCL : deux achats identiques gardés, réimport sans doublon, carte inconnue sans titulaire", [p1.nouvelles.length, p2.nouvelles.length, vivants("operations").filter(o => o.compte === ck.id && o.date === "2027-01-03").length, p1.cartes[1].sansTitulaire], [5, 0, 2, true]);
+            for (const o of vivants("operations").filter(o => /ESSAI/.test(o.libelle) && o.date >= "2026-12-30" && o.date <= "2027-01-05")) supprimer("operations", o.id);
+            for (const i of vivants("imports").filter(i => /2027-01|2026-12-30/.test(JSON.stringify(i.periode || {})))) supprimer("imports", i.id);
+            supprimer("comptes", ck.id);
+          }
+          {
+            // Lot de corrections : aperçu sans effet, puis application sur clic
+            const fa = enregistrer("commercants", {nom: "Etude Essai", alias: [], stats: {}, natures: {}});
+            const fb = enregistrer("commercants", {nom: "Doublon Essai A", alias: ["DOUBLON A"], stats: {}, natures: {}});
+            const fc2 = enregistrer("commercants", {nom: "Doublon Essai B", alias: ["DOUBLON B"], stats: {}, natures: {}});
+            const o1 = enregistrer("operations", {compte: cc.id, date: "2027-02-01", montant: -500, libelle: "VIR DEMENAGEUR ESSAI", commercant: fa.id, categorie: "Logement", sousCategorie: "Entretien"});
+            const o2 = enregistrer("operations", {compte: cc.id, date: "2027-02-02", montant: -5, libelle: "DOUBLON B", commercant: fc2.id, categorie: "Culture et loisirs", sousCategorie: "Livres, presse, sorties, jeux"});
+            const jd = enregistrer("justificatifs", {type: "devis", date: "2027-02-01", montant: 99, commercant: fa.id, commercantNom: fa.nom, natureExacte: "Étude de sol essai", statut: "a_rapprocher", operations: []});
+            const lot = lireJson("c.json", JSON.stringify({format: "budget-foyer-corrections", actions: [
+              {type: "renommerFiche", de: "Etude Essai", vers: "Demenageur Essai"}, {type: "creerFiche", nom: "Etude Essai", depuis: "Demenageur Essai", natureJustificatifs: "sol"},
+              {type: "fusionnerFiches", garder: "Doublon Essai A", absorber: ["Doublon Essai B", "Inconnue Essai"]},
+              {type: "reclasser", fournisseur: "Doublon Essai A", de: ["Culture et loisirs", "Livres, presse, sorties, jeux"], vers: ["Abonnements", "Abonnements numériques"], ficheParDefaut: true}]}));
+            const ap = preparerCorrections(lot);
+            // Aperçu enchaîné : une fusion avec nouveau nom, puis un reclassement sous ce nom, compte les opérations absorbées
+            const ap2 = preparerCorrections({actions: [{type: "fusionnerFiches", garder: "Doublon Essai A", absorber: ["Doublon Essai B"], nom: "Doublon Essai"},
+              {type: "reclasser", fournisseur: "Doublon Essai", de: ["Culture et loisirs", "Livres, presse, sorties, jeux"], vers: ["Abonnements", "Abonnements numériques"]},
+              {type: "categorieFiche", fiche: "Doublon Essai", categorie: "Abonnements", sousCategorie: "Abonnements numériques"}]});
+            v("lot de corrections : fiche retrouvée malgré espaces et ponctuation", ficheNommee("Doublon  essai A.")?.id, fb.id);
+            v("lot de corrections : aperçu d'une fusion renommée puis reclassée", ap2.lignes.map(l => l.ok + ":" + (l.n || 0)), ["true:1", "true:1", "true:0"]);
+            v("lot de corrections : aperçu sans effet, actions enchaînées (renommage puis recréation)", [lot.genre, ap.lignes.length, obtenir("commercants", fa.id).nom, !!obtenir("commercants", fc2.id), ap.lignes[1].ok, ap.lignes[1].n], ["corrections", 4, "Etude Essai", true, true, 1]);
+            appliquerCorrections(lot);
+            const etude = ficheNommee("Etude Essai");
+            v("lot de corrections : renommage, fiche recréée avec son devis, fusion, reclassement", [obtenir("commercants", fa.id).nom, obtenir("justificatifs", jd.id).commercant === etude?.id, obtenir("operations", o1.id).commercant === fa.id,
+              obtenir("operations", o2.id).commercant === fb.id, !obtenir("commercants", fc2.id), obtenir("operations", o2.id).categorie, obtenir("commercants", fb.id).categorie],
+              ["Demenageur Essai", true, true, true, true, "Abonnements", "Abonnements"]);
+            for (const x of [o1, o2]) supprimer("operations", x.id); supprimer("justificatifs", jd.id);
+            for (const f of [fa, fb, etude].filter(Boolean)) supprimer("commercants", f.id);
+          }
+          v("note de frais : un parking de gare n'est pas un billet de train", [libelleColleNature("Train", {libelle: "EFFIA VALENCE TGV"}), libelleColleNature("Train", {libelle: "SNCF-VOYAGEURS PARIS"})], [false, true]);
+          const o4 = enregistrer("operations", {compte: cc.id, date: "2026-09-01", montant: -12.4, libelle: "TUNNEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});
+          const r4 = rapprochementLignesNdf(jn).find(r => r.ligne.n === 4);
+          classerDepensesNdf(jn, [r4]);
+          const v4 = obtenir("operations", o4.id).ventilation || [];
+          v("note de frais : débit du double ventilé (part remboursée / part du foyer)", [r4.facteur === 2, v4.map(x => x.montant + " " + x.categorie)], [true, ["-6.2 Transfert", "-6.2 Voyages"]]);
+          declasserDepensesNdf(jn);
+          v("note de frais : ventilation retirée au rétablissement", !!obtenir("operations", o4.id).ventilation, false);
+          // Un paiement pour plusieurs trajets à deux : 4 billets (2 lignes × 2 personnes) = 396 €
+          const texte2 = ["NDF #2700 : Décembre 2026, déclarée le 05/12/2026", "1 03/12/2026 Train 0,00 € 99,00 €", "2 05/12/2026 Train 0,00 € 99,00 €", "3 05/12/2026 Taxi 0,00 € 30,00 €", "Total 228,00 €"].join(L);
+          const o5 = enregistrer("operations", {compte: cc.id, date: "2026-11-20", montant: -396, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          const o6 = enregistrer("operations", {compte: cc.id, date: "2026-12-05", montant: -60, libelle: "BOULANGERIE ESSAI", categorie: "Alimentation", sousCategorie: "Courses", statut: "classe"});
+          const j2 = enregistrer("justificatifs", {type: "notefrais", date: "2026-12-05", montant: 228, texteOCR: texte2, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+          const rap2 = rapprochementLignesNdf(j2);
+          v("note de frais : un paiement pour plusieurs trajets à deux, sans coïncidence de montant", rap2.map(r => r.op ? r.op.id + "×" + r.facteur : null), [o5.id + "×2", o5.id + "×2", null]);
+          classerDepensesNdf(j2, rap2);
+          v("note de frais : paiement groupé ventilé (deux parts avec la note, le reste au foyer)", (obtenir("operations", o5.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-99 Transfert", "-198 Transports"]);
+          v("note de frais : groupe repris tel quel une fois classé", rapprochementLignesNdf(j2).map(r => r.op ? r.op.id : null), [o5.id, o5.id, null]);
+          declasserDepensesNdf(j2);
+          // Choix à la main : paiement mêlant d'autres billets (247 €), puis ligne ajoutée au même débit
+          const o7 = enregistrer("operations", {compte: cc.id, date: "2026-11-25", montant: -247, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          choisirDebitNdf(j2, 1, null); choisirDebitNdf(j2, 2, null);
+          v("note de frais : débit d'un autre prix proposé au choix à la main", debitsPossiblesNdf(j2, lignesNoteFrais(j2)[0]).map(o => o.id).includes(o7.id), true);
+          choisirDebitNdf(j2, 1, o7.id);
+          classerDepensesNdf(j2, rapprochementLignesNdf(j2));
+          v("note de frais : choix à la main ventilé (part de la note, reste au foyer)", (obtenir("operations", o7.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-148 Transports"]);
+          choisirDebitNdf(j2, 2, o7.id);
+          v("note de frais : autre ligne ajoutée au même débit, reventilé", [classerDepensesNdf(j2, rapprochementLignesNdf(j2)), (obtenir("operations", o7.id).ventilation || []).map(x => x.montant + " " + x.categorie)], [1, ["-99 Transfert", "-99 Transfert", "-49 Transports"]]);
+          declasserDepensesNdf(j2);
+          const j3 = enregistrer("justificatifs", {type: "notefrais", date: "2026-12-05", montant: 228, texteOCR: texte2, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: [], ndfManuel: {1: o7.id, 2: o7.id}});
+          const o8 = enregistrer("operations", {compte: cc.id, date: "2026-11-26", montant: -100, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          choisirDebitNdf(j3, 1, o8.id); choisirDebitNdf(j3, 2, o8.id);
+          v("note de frais : lignes au-delà du débit refusées", [classerDepensesNdf(j3, rapprochementLignesNdf(j3)), !!obtenir("operations", o8.id).ventilation, debitsPossiblesNdf(j3, lignesNoteFrais(j3)[1]).some(o => o.id === o8.id)], [0, false, false]);
+          supprimer("operations", o8.id); supprimer("justificatifs", j3.id);
+          v("note de frais : rétabli après reventilation", [obtenir("operations", o7.id).categorie, !!obtenir("operations", o7.id).ventilation], ["Transports", false]);
+          for (const o of [o5, o6, o7]) supprimer("operations", o.id); supprimer("justificatifs", j2.id);
+          for (const o of [o1, o2, o3, o4]) supprimer("operations", o.id); supprimer("justificatifs", jn.id); supprimer("comptes", cc.id);
         }
         v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
         v("téléphone : fournisseur retrouvé par un morceau du nom ou de l'alias", rechercherFournisseurs(["savour"], [{nom: "La Savoureine Eurre", alias: []}, {nom: "Autre", alias: ["SAVOUREINE SARL"]}, {nom: "Sans rapport", alias: []}]).map(f => f.nom), ["La Savoureine Eurre", "Autre"]);
@@ -7155,10 +8163,20 @@ async function autotest(){
     const opCafe = vivants("operations").find(o => /CAFE/.test(o.libelle) && o.compte === carte.id);
     const j1 = enregistrer("justificatifs", {type: "facturette", date: "2027-03-04", montant: 12.3, carte: "X333", carte4: "0333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
-    v("facturette rapprochée d'office (−1 jour, carte ****0333)", [obtenir("justificatifs", j1.id).statut, obtenir("justificatifs", j1.id).operations[0]], ["rapproche", opCafe.id]);
+    // Pièce sans fournisseur ni catégorie à imposer : rapprochée d'office
+    v("facturette rapprochée d'office (−1 jour, carte ****0333, rien ne change)", [obtenir("justificatifs", j1.id).statut, obtenir("justificatifs", j1.id).operations[0]], ["rapproche", opCafe.id]);
     const j2 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-04", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
     v("ticket du même achat : rattaché à la même opération", obtenir("justificatifs", j2.id).operations[0], opCafe.id);
+    {
+      // Pièce qui changerait la catégorie de l'opération : seulement proposée
+      const opX = enregistrer("operations", {compte: carte.id, date: "2027-03-20", montant: -44.4, libelle: "LIBRAIRIE CHANGE", categorie: "Culture et loisirs", sousCategorie: "Livres, presse, sorties, jeux", statut: "classe"});
+      const jx = enregistrer("justificatifs", {type: "ticket", date: "2027-03-20", montant: 44.4, carte: "X333", categorie: "Maison", sousCategorie: "Bricolage et jardin", statut: "a_rapprocher", operations: []});
+      rapprocherTout();
+      const px = obtenir("justificatifs", jx.id);
+      v("rapprochement qui changerait la catégorie : proposé, pas appliqué", [px.statut, (px.propositions || [])[0]?.op, obtenir("operations", opX.id).categorie], ["a_rapprocher", opX.id, "Culture et loisirs"]);
+      supprimer("justificatifs", jx.id); supprimer("operations", opX.id);
+    }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
     v("hors tolérance (opération 5 jours avant le ticket) : pas de rapprochement d'office", obtenir("justificatifs", j3.id).statut, "a_rapprocher");

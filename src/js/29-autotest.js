@@ -40,7 +40,12 @@ async function autotest(){
     /* --- Export « encours » d'une carte, puis facture --- */
     const csvCarte = ["28/02/2027;45,40;;09999 000099Z", "03/03/2027;-33,10;Carte;;LIBRAIRIE TEST PARIS;;5942;Loisirs/culture", "05/03/2027;-12,30;Carte;;CAFE TEST PARIS;;5812;Alimentation:Restaurant", "27/03/2027;0;;09999 000099Z"].join("\n");
     const luc = lireCsv("T_cpte_09999_000099Z_carte_Carte_Premier_X333_du_28-02-2027_au_27-03-2027.csv", csvCarte);
-    v("export carte reconnu", [luc.genre, luc.carte, luc.controle.ok], ["carte", "X333", true]);
+    {
+      // Export CSV Amex enregistré dans Excel : une seule colonne contenant les lignes CSV
+      const ux = amexCsvDansFeuille("amex.xlsx", [["Date,Description,Montant"], ["10/31/2026,RELAIS ESSAI,\"87,00\""], ["10/19/2026,AVOIR ESSAI,\"-6,99\""], [null]]);
+      v("export Amex CSV enregistré en Excel reconnu", [ux?.genre, ux?.carte, ux?.lignes.length, ux?.lignes[0].date, ux?.lignes[0].montant, ux?.lignes[1].montant], ["carte", "AMEX", 2, "2026-10-31", -87, 6.99]);
+    }
+    v("export carte reconnu",[luc.genre, luc.carte, luc.controle.ok], ["carte", "X333", true]);
     const carte = enregistrer("comptes", {nom: "Carte X333", type: "carte", banque: "LCL", carte: "X333", compteDebit: cj.id});
     const pc = preparerReleve(luc, carte);
     v("ligne déjà venue du compte : réattribuée", pc.reattribuees.length, 1);
@@ -181,6 +186,15 @@ async function autotest(){
       const tk = extraireTicket("Jean Dupont, architecte essai\nFacture\nn° Date\n2 6 – 0 7 – 10 2 12 / 10 /202 6\nMontant à régler TTC\n980 €");
       v("facture : date fragmentée et fournisseur nommé dans le texte", [tk.date, commercantPourTicket(tk)?.id === fp.id], ["2026-10-12", true]);
       {
+        // L'adresse du client (« avenue de Valence, Paris ») ne doit pas faire reconnaître une boutique dont l'alias n'est fait que de lieux
+        const fc = enregistrer("commercants", {nom: "Traiteur essai (place essai)", alias: ["RPG ST VALENCE PARIS"], stats: {}, natures: {}, categorie: "Alimentation"});
+        const fh = extraireTicket("Hebergeur Essai Network SA\nFacture N° 12345\nClient : Jean Dupont\n10 avenue de Valence\n75005 Paris\nTotal TTC 13,68 €");
+        const fh2 = Object.assign({}, fh, {raisonSociale: "Hebergeur Essai Network SA", enseigne: "Hebergeur Essai Network SA"});
+        v("fournisseur : reconnaissance sûre (alias) distinguée de la supposition (texte)", [commercantSur({raisonSociale: "RPG ST VALENCE PARIS"}, [fc])?.id === fc.id, commercantSur({raisonSociale: "Autre nom"}, [fc])], [true, null]);
+        v("facture : l'adresse du client ne désigne pas un commerçant", [commercantDansTexte(fh.texte, [fc]), commercantPourTicket(fh2, [fc])], [null, null]);
+        supprimer("commercants", fc.id);
+      }
+      {
         const nb0 = vivants("commercants").length;
         const jm = await creerJustificatif({type: "ticket", date: "2027-03-10", montant: 12, commercantNom: "Boulangrie Nouvele", origine: "mobile"});
         v("téléphone : fournisseur inconnu laissé provisoire, aucune fiche créée", [vivants("commercants").length - nb0, jm.fournisseurProvisoire], [0, true]);
@@ -191,6 +205,185 @@ async function autotest(){
           apprendreChiffresCarte("7998", "X111");
           v("carte : 4 chiffres de la facturette appris puis reconnus", carteDesChiffres("############7998"), "X111");
           supprimer("comptes", ck.id);
+        }
+        {
+          // Note de frais : rapprochée du virement de remboursement (crédit), jamais d'un débit de même montant
+          const cc = enregistrer("comptes", {nom: "Courant essai NF", type: "courant", banque: "Essai", actif: true});
+          const deb = enregistrer("operations", {compte: cc.id, date: "2027-04-02", montant: -1735.61, libelle: "CB ESSAI DEBIT"});
+          const cre = enregistrer("operations", {compte: cc.id, date: "2027-05-20", montant: 1735.61, libelle: "VIR EMPLOYEUR ESSAI REMB NDF"});
+          const nf = await creerJustificatif({type: "notefrais", date: "2027-04-01", montant: 1735.61, commercantNom: "Employeur essai", origine: "pc"});
+          const c = candidats([nf]).map(x => x.op.id);
+          v("note de frais : candidat = le crédit, pas le débit", [c.includes(cre.id), c.includes(deb.id)], [true, false]);
+          v("note de frais : lue sur la pièce, hors en-cours", [extraireTicket("EMPLOYEUR ESSAI" + String.fromCharCode(10) + "NOTE DE FRAIS" + String.fromCharCode(10) + "Collaborateur" + String.fromCharCode(10) + "Total 1 735,61").type, encoursSaisis().lignes.some(l => l.montant === 1735.61)], ["notefrais", false]);
+          delier(nf); supprimer("justificatifs", nf.id); supprimer("operations", deb.id); supprimer("operations", cre.id); supprimer("comptes", cc.id);
+        }
+        {
+          // Note de frais détaillée : lecture des lignes, nom de rangement, débits retrouvés (un débit par ligne), classement réversible
+          const L = String.fromCharCode(10);
+          const texte = ["NDF #2681 : Novembre 2026, déclarée le 02/11/2026 Imprimé le 02/11/2026 à 16:44", " Entité légale : EMPLOYEUR ESSAI Contrôlé : Oui", "N° Date Nature TVA Montant TTC",
+            "1 28/05/2026 Train 0,00 € 99,00 €", "2 01/06/2026 Train 0,00 € 99,00 €", "3 17/06/2026 Hôtel 0,00 € 25,01 €", "4 08/09/2026 Péages 0,00 € 6,20 €", "Total 229,21 €"].join(L);
+          const x = extraireNoteFrais(texte);
+          v("note de frais détaillée : numéro, date, lignes, total", [x.numero, x.declaree, x.lignes.length, x.lignes[2].nature, x.total, x.entite], ["2681", "2026-11-02", 4, "Hôtel", 229.21, "EMPLOYEUR ESSAI"]);
+          v("note de frais : nom de rangement des notes déjà classées", nomNoteFrais(x), "2026 Note de frais 2681 novembre 2026 - 02-11.pdf");
+          const cc = enregistrer("comptes", {nom: "Carte essai NDF", type: "carte", carte: "X919", actif: true});
+          const o1 = enregistrer("operations", {compte: cc.id, date: "2026-05-27", montant: -99, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          const o2 = enregistrer("operations", {compte: cc.id, date: "2026-05-30", montant: -99, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          const o3 = enregistrer("operations", {compte: cc.id, date: "2026-06-17", montant: -25.01, libelle: "HOTEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});
+          const jn = enregistrer("justificatifs", {type: "notefrais", date: "2026-11-02", montant: 229.21, texteOCR: texte, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+          const rap = rapprochementLignesNdf(jn);
+          v("note de frais : chaque ligne trouve son débit, sans doublon", rap.map(r => r.op ? r.op.id : null), [o1.id, o2.id, o3.id, null]);
+          const n = classerDepensesNdf(jn, rap);
+          v("note de frais : débits classés avec la note", [n, obtenir("operations", o3.id).categorie, (obtenir("operations", o1.id).justificatifs || []).includes(jn.id)], [3, "Transfert", true]);
+          declasserDepensesNdf(jn);
+          v("note de frais : classement d'avant rétabli", [obtenir("operations", o3.id).categorie, obtenir("operations", o3.id).sousCategorie, !!obtenir("operations", o1.id).ndf], ["Voyages", "Hôtels", false]);
+          // Deux billets payés ensemble, un seul sur la note : débit ventilé, l'autre moitié garde son classement
+          {
+            // Deux commandes de 198 € le même jour : chacune est un aller-retour seul (99 + 99), pas un billet « à deux »
+            const t3 = ["NDF #2701 : Septembre 2026, déclarée le 30/09/2026", "1 07/09/2026 Train 0,00 € 99,00 €", "2 09/09/2026 Train 0,00 € 99,00 €", "3 14/09/2026 Train 0,00 € 99,00 €", "4 19/09/2026 Train 0,00 € 99,00 €", "Total 396,00 €"].join(L);
+            const a1 = enregistrer("operations", {compte: cc.id, date: "2026-08-27", montant: -198, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const a2 = enregistrer("operations", {compte: cc.id, date: "2026-08-27", montant: -198, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const j4 = enregistrer("justificatifs", {type: "notefrais", date: "2026-09-30", montant: 396, texteOCR: t3, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            const rr = rapprochementLignesNdf(j4);
+            v("note de frais : allers-retours payés en une fois préférés au billet « à deux »", [rr.every(r => r.op && r.facteur === 1 && r.groupe && r.groupe.length === 2), rr[0].op === rr[1].op, rr[2].op === rr[3].op, rr[0].op !== rr[2].op], [true, true, true, true]);
+            supprimer("operations", a1.id); supprimer("operations", a2.id); supprimer("justificatifs", j4.id);
+          }
+          {
+            // Justificatif d'achat SNCF Connect : un paiement, plusieurs trajets et voyageurs ; la ligne du déclarant s'y rattache
+            const pdf = ["Justificatif d'achat", "Résumé de la commande", "Montant total (TTC) : 396,00 €", "Société SNCF Connect", "Détail des transactions", "Date de transaction : 10/05/2026 à 11:01:27",
+              "Aller 01/06/2026 à 10:05:00", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "Voyageur 2 : MARIE ESSAI - Carte Liberté", "198,00 €", "Réf: AAA111",
+              "Aller 15/06/2026 à 10:05:00", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "Retour 18/06/2026 à 16:56:00", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "198,00 €", "Réf: BBB222",
+              "Montant de la transaction (TTC) : 396,00 €", "Transaction n° 0099", "Référence commande AAA111, BBB222", "Numéro de carte : #######1234"].join(L);
+            const ach = extraireAchatSncf(pdf);
+            v("justificatif SNCF Connect lu (paiement, trajets, voyageurs)", [ach.date, ach.montant, ach.trajets.length, ach.trajets[0].voyageurs.join("/"), ach.trajets[2].sens, ach.carte4], ["2026-05-10", 396, 3, "JEAN ESSAI/MARIE ESSAI", "Retour", "1234"]);
+            v("justificatif SNCF Connect reconnu à l'import", reconnaitrePdf("x.pdf", pdf, null).sousGenre, "achat_sncf");
+            // Texte tel que le lecteur PDF du navigateur le rend : ligature coupée, prix avant les voyageurs
+            const brut = extraireAchatSncf(["Justi fi catif d'achat", "Montant total (TTC) : 114,20 €", "Aller 09/07/2026 à 19:00:00", "88,00 €", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "176,00 €", "Voyageur 2 : MARIE ESSAI - Carte Liberté", "Réf: AAA",
+              "Aller 09/07/2026 à 21:12:00", "26,20 €", "Voyageur 1 : JEAN ESSAI - Carte Liberté", "Date de transaction : 01/07/2026 à 11:44:31", "Montant de la transaction (TTC) : 114,20 €", "Société SNCF Connect - 1-3 Rue"].join(L));
+            v("justificatif SNCF Connect lu dans le texte du navigateur", [brut?.date, brut?.montant, brut?.trajets.map(t => t.heure + " " + t.voyageurs.join("/")).join(" | ")], ["2026-07-01", 114.2, "19:00 JEAN ESSAI/MARIE ESSAI | 21:12 JEAN ESSAI"]);
+            const deb = enregistrer("operations", {compte: cc.id, date: "2026-05-11", montant: -396, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const nAch = enregistrerAchatsSncf({nom: "x.pdf", achats: [ach]}), nAch2 = enregistrerAchatsSncf({nom: "x.pdf", achats: [ach]});
+            const t5 = ["NDF #2702 : Juin 2026, déclarée le 30/06/2026", " Déclarant : ESSAI Jean", "1 01/06/2026 Train 0,00 € 99,00 €", "2 15/06/2026 Train 0,00 € 99,00 €", "3 18/06/2026 Train 0,00 € 99,00 €", "4 20/12/2026 Train 0,00 € 99,00 €", "Total 396,00 €"].join(L);
+            const j5 = enregistrer("justificatifs", {type: "notefrais", date: "2026-06-30", montant: 396, texteOCR: t5, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            const r5 = rapprochementLignesNdf(j5);
+            v("note de frais : lignes rattachées par le justificatif d'achat (doublon ignoré)", [nAch, nAch2, r5.map(r => r.op ? (r.op.id === deb.id ? "J" : "autre") : "-").join("")], [1, 0, "JJJ-"]);
+            classerDepensesNdf(j5, r5);
+            v("note de frais : paiement du justificatif ventilé (3 trajets avec la note, le reste au foyer)", (obtenir("operations", deb.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-99 Transfert", "-99 Transfert", "-99 Transports"]);
+            declasserDepensesNdf(j5);
+            supprimer("operations", deb.id); supprimer("justificatifs", j5.id); for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && d.transaction === "0099")) supprimer("documents", d.id);
+            // Achats relevés dans les e-mails (JSON) : reconnus, dédoublonnés par référence ; deux commandes du jour payées ensemble
+            const js = JSON.stringify({format: "budget-foyer-achats-sncf", source: "e-mails", achats: [
+              {date: "2025-05-12", montant: 128, references: ["RRR001"], trajets: [{sens: "Aller", date: "2025-05-15", voyageurs: ["Jean Essai", "Marie Essai"]}]},
+              {date: "2025-05-12", montant: 95, references: ["RRR002"], trajets: [{sens: "Aller", date: "2025-05-29", voyageurs: ["Jean Essai"]}]},
+              {date: "2025-05-12", montant: 95, references: ["RRR002"], trajets: [{sens: "Aller", date: "2025-05-29", voyageurs: ["Jean Essai"]}]}]});
+            const lj = lireJson("achats.json", js);
+            const nj = enregistrerAchatsSncf(lj);
+            const dj = enregistrer("operations", {compte: cc.id, date: "2025-05-13", montant: -223, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const t7 = ["NDF #1700 : Mai 2025, déclarée le 31/05/2025", " Déclarant : ESSAI Jean", "1 15/05/2025 Train 0,00 € 64,00 €", "2 29/05/2025 Train 0,00 € 95,00 €", "Total 159,00 €"].join(L);
+            const j7 = enregistrer("justificatifs", {type: "notefrais", date: "2025-05-31", montant: 159, texteOCR: t7, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            v("achats des e-mails : reconnus, doublon écarté, deux commandes du jour sur un seul débit", [lj.sousGenre, nj, rapprochementLignesNdf(j7).map(r => r.op === dj ? "J" : "-").join("")], ["achat_sncf", 2, "JJ"]);
+            supprimer("operations", dj.id); supprimer("justificatifs", j7.id);
+            for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && (d.references || []).some(r => /^RRR/.test(r)))) supprimer("documents", d.id);
+            // Deux paiements avec un trajet le même jour (97 € seul ; 88 € + 26,20 €) : chaque ligne va au bon paiement
+            const achat = (tx, mt, heures) => ["Justificatif d'achat", "SNCF Connect", "Date de transaction : 01/07/2026 à 11:00:00"].concat(heures.flatMap(hh => ["Aller 09/07/2026 à " + hh + ":00", "Voyageur 1 : JEAN ESSAI - Carte Liberté"]),
+              ["Montant de la transaction (TTC) : " + mt + " €", "Transaction n° " + tx]).join(L);
+            enregistrerAchatsSncf({nom: "a.pdf", achats: [extraireAchatSncf(achat("0201", "97,00", ["07:08"])), extraireAchatSncf(achat("0202", "114,20", ["19:00", "21:12"]))]});
+            const d97 = enregistrer("operations", {compte: cc.id, date: "2026-07-01", montant: -97, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const d114 = enregistrer("operations", {compte: cc.id, date: "2026-07-01", montant: -114.2, libelle: "SNCF-VOYAGEURS ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+            const t6 = ["NDF #2703 : Juillet 2026, déclarée le 31/07/2026", " Déclarant : ESSAI Jean", "1 09/07/2026 Train 0,00 € 88,00 €", "2 09/07/2026 Train 0,00 € 97,00 €", "3 09/07/2026 Train 0,00 € 26,20 €", "Total 211,20 €"].join(L);
+            const j6 = enregistrer("justificatifs", {type: "notefrais", date: "2026-07-31", montant: 211.2, texteOCR: t6, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+            v("note de frais : même jour, deux paiements : chaque ligne au bon justificatif", rapprochementLignesNdf(j6).map(r => r.op === d97 ? "97" : r.op === d114 ? "114" : "-"), ["114", "97", "114"]);
+            supprimer("operations", d97.id); supprimer("operations", d114.id); supprimer("justificatifs", j6.id);
+            for (const d of vivants("documents").filter(d => d.genre === "achat_sncf" && ["0201", "0202"].includes(d.transaction))) supprimer("documents", d.id);
+          }
+          {
+            // Nature sans mot connu : le choix à la main propose les débits proches en montant, quel que soit le libellé
+            const pe = enregistrer("operations", {compte: cc.id, date: "2025-10-20", montant: -1599, libelle: "BOUTIQUE ESSAI", categorie: "Maison", sousCategorie: "Équipement, électroménager", statut: "classe"});
+            const t8 = ["NDF #1800 : Octobre 2025, déclarée le 24/11/2025", "1 22/10/2025 Petit équipement 0,00 € 1 581,00 €", "Total 1 581,00 €"].join(L);
+            const j8 = enregistrer("justificatifs", {type: "notefrais", date: "2025-11-24", montant: 1581, texteOCR: t8, statut: "a_rapprocher", operations: []});
+            v("note de frais : nature sans mot connu, débit proposé au choix à la main", debitsPossiblesNdf(j8, lignesNoteFrais(j8)[0]).some(o => o.id === pe.id), true);
+            supprimer("operations", pe.id); supprimer("justificatifs", j8.id);
+          }
+          {
+            // Relevé PDF LCL : détail des cartes, carte reconnue, devise ignorée, année de janvier, remboursement, doublons
+            const ck = enregistrer("comptes", {nom: "Carte essai PDF", type: "carte", banque: "LCL", carte: "X456", actif: true});
+            const rel = ["RELEVE DE COMPTE", "Indicatif : 8208 Compte : 99 Z", "PAIEMENTS PAR CARTE DE JANVIER 2027", "LIBELLE VALEUR DEBIT CREDIT",
+              "CARTE N° 12 3456 M JEAN ESSAI", "SOUS TOTAL : 1 608,50", "BOUTIQUE ESSAI LE 30/12 1 581,00", "Rotterdam 1581,00 EUR", "CAFE ESSAI LE 03/01 20,00", "CAFE ESSAI LE 03/01 20,00", "AVOIR ESSAI LE 05/01 12,50",
+              "CARTE N° 34 5678 MME MARIE ESSAI", "SOUS TOTAL : 8,00", "PAIN ESSAI LE 04/01 8,00", "TOTAUX 1 616,50", "MONTANT COMPTABILISE LE 31/01/2027"].join(L);
+            const lc = extraireCartesReleveLcl(rel);
+            v("relevé PDF LCL : cartes, dates, devise ignorée, remboursement reconnu", [lc.cartes.length, lc.cartes[0].carte, lc.cartes[0].lignes.map(l => l.date + " " + l.montant).join(" | "), lc.cartes[0].controle.ok, lc.cartes[1].carte],
+              [2, "X456", "2026-12-30 -1581 | 2027-01-03 -20 | 2027-01-03 -20 | 2027-01-05 12.5", true, "X678"]);
+            const p1 = preparerCartesPdf(lc); appliquerCartesPdf(p1);
+            const p2 = preparerCartesPdf(extraireCartesReleveLcl(rel));
+            v("relevé PDF LCL : deux achats identiques gardés, réimport sans doublon, carte inconnue sans titulaire", [p1.nouvelles.length, p2.nouvelles.length, vivants("operations").filter(o => o.compte === ck.id && o.date === "2027-01-03").length, p1.cartes[1].sansTitulaire], [5, 0, 2, true]);
+            for (const o of vivants("operations").filter(o => /ESSAI/.test(o.libelle) && o.date >= "2026-12-30" && o.date <= "2027-01-05")) supprimer("operations", o.id);
+            for (const i of vivants("imports").filter(i => /2027-01|2026-12-30/.test(JSON.stringify(i.periode || {})))) supprimer("imports", i.id);
+            supprimer("comptes", ck.id);
+          }
+          {
+            // Lot de corrections : aperçu sans effet, puis application sur clic
+            const fa = enregistrer("commercants", {nom: "Etude Essai", alias: [], stats: {}, natures: {}});
+            const fb = enregistrer("commercants", {nom: "Doublon Essai A", alias: ["DOUBLON A"], stats: {}, natures: {}});
+            const fc2 = enregistrer("commercants", {nom: "Doublon Essai B", alias: ["DOUBLON B"], stats: {}, natures: {}});
+            const o1 = enregistrer("operations", {compte: cc.id, date: "2027-02-01", montant: -500, libelle: "VIR DEMENAGEUR ESSAI", commercant: fa.id, categorie: "Logement", sousCategorie: "Entretien"});
+            const o2 = enregistrer("operations", {compte: cc.id, date: "2027-02-02", montant: -5, libelle: "DOUBLON B", commercant: fc2.id, categorie: "Culture et loisirs", sousCategorie: "Livres, presse, sorties, jeux"});
+            const jd = enregistrer("justificatifs", {type: "devis", date: "2027-02-01", montant: 99, commercant: fa.id, commercantNom: fa.nom, natureExacte: "Étude de sol essai", statut: "a_rapprocher", operations: []});
+            const lot = lireJson("c.json", JSON.stringify({format: "budget-foyer-corrections", actions: [
+              {type: "renommerFiche", de: "Etude Essai", vers: "Demenageur Essai"}, {type: "creerFiche", nom: "Etude Essai", depuis: "Demenageur Essai", natureJustificatifs: "sol"},
+              {type: "fusionnerFiches", garder: "Doublon Essai A", absorber: ["Doublon Essai B", "Inconnue Essai"]},
+              {type: "reclasser", fournisseur: "Doublon Essai A", de: ["Culture et loisirs", "Livres, presse, sorties, jeux"], vers: ["Abonnements", "Abonnements numériques"], ficheParDefaut: true}]}));
+            const ap = preparerCorrections(lot);
+            // Aperçu enchaîné : une fusion avec nouveau nom, puis un reclassement sous ce nom, compte les opérations absorbées
+            const ap2 = preparerCorrections({actions: [{type: "fusionnerFiches", garder: "Doublon Essai A", absorber: ["Doublon Essai B"], nom: "Doublon Essai"},
+              {type: "reclasser", fournisseur: "Doublon Essai", de: ["Culture et loisirs", "Livres, presse, sorties, jeux"], vers: ["Abonnements", "Abonnements numériques"]},
+              {type: "categorieFiche", fiche: "Doublon Essai", categorie: "Abonnements", sousCategorie: "Abonnements numériques"}]});
+            v("lot de corrections : fiche retrouvée malgré espaces et ponctuation", ficheNommee("Doublon  essai A.")?.id, fb.id);
+            v("lot de corrections : aperçu d'une fusion renommée puis reclassée", ap2.lignes.map(l => l.ok + ":" + (l.n || 0)), ["true:1", "true:1", "true:0"]);
+            v("lot de corrections : aperçu sans effet, actions enchaînées (renommage puis recréation)", [lot.genre, ap.lignes.length, obtenir("commercants", fa.id).nom, !!obtenir("commercants", fc2.id), ap.lignes[1].ok, ap.lignes[1].n], ["corrections", 4, "Etude Essai", true, true, 1]);
+            appliquerCorrections(lot);
+            const etude = ficheNommee("Etude Essai");
+            v("lot de corrections : renommage, fiche recréée avec son devis, fusion, reclassement", [obtenir("commercants", fa.id).nom, obtenir("justificatifs", jd.id).commercant === etude?.id, obtenir("operations", o1.id).commercant === fa.id,
+              obtenir("operations", o2.id).commercant === fb.id, !obtenir("commercants", fc2.id), obtenir("operations", o2.id).categorie, obtenir("commercants", fb.id).categorie],
+              ["Demenageur Essai", true, true, true, true, "Abonnements", "Abonnements"]);
+            for (const x of [o1, o2]) supprimer("operations", x.id); supprimer("justificatifs", jd.id);
+            for (const f of [fa, fb, etude].filter(Boolean)) supprimer("commercants", f.id);
+          }
+          v("note de frais : un parking de gare n'est pas un billet de train", [libelleColleNature("Train", {libelle: "EFFIA VALENCE TGV"}), libelleColleNature("Train", {libelle: "SNCF-VOYAGEURS PARIS"})], [false, true]);
+          const o4 = enregistrer("operations", {compte: cc.id, date: "2026-09-01", montant: -12.4, libelle: "TUNNEL ESSAI", categorie: "Voyages", sousCategorie: "Hôtels", statut: "classe"});
+          const r4 = rapprochementLignesNdf(jn).find(r => r.ligne.n === 4);
+          classerDepensesNdf(jn, [r4]);
+          const v4 = obtenir("operations", o4.id).ventilation || [];
+          v("note de frais : débit du double ventilé (part remboursée / part du foyer)", [r4.facteur === 2, v4.map(x => x.montant + " " + x.categorie)], [true, ["-6.2 Transfert", "-6.2 Voyages"]]);
+          declasserDepensesNdf(jn);
+          v("note de frais : ventilation retirée au rétablissement", !!obtenir("operations", o4.id).ventilation, false);
+          // Un paiement pour plusieurs trajets à deux : 4 billets (2 lignes × 2 personnes) = 396 €
+          const texte2 = ["NDF #2700 : Décembre 2026, déclarée le 05/12/2026", "1 03/12/2026 Train 0,00 € 99,00 €", "2 05/12/2026 Train 0,00 € 99,00 €", "3 05/12/2026 Taxi 0,00 € 30,00 €", "Total 228,00 €"].join(L);
+          const o5 = enregistrer("operations", {compte: cc.id, date: "2026-11-20", montant: -396, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          const o6 = enregistrer("operations", {compte: cc.id, date: "2026-12-05", montant: -60, libelle: "BOULANGERIE ESSAI", categorie: "Alimentation", sousCategorie: "Courses", statut: "classe"});
+          const j2 = enregistrer("justificatifs", {type: "notefrais", date: "2026-12-05", montant: 228, texteOCR: texte2, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: []});
+          const rap2 = rapprochementLignesNdf(j2);
+          v("note de frais : un paiement pour plusieurs trajets à deux, sans coïncidence de montant", rap2.map(r => r.op ? r.op.id + "×" + r.facteur : null), [o5.id + "×2", o5.id + "×2", null]);
+          classerDepensesNdf(j2, rap2);
+          v("note de frais : paiement groupé ventilé (deux parts avec la note, le reste au foyer)", (obtenir("operations", o5.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-99 Transfert", "-198 Transports"]);
+          v("note de frais : groupe repris tel quel une fois classé", rapprochementLignesNdf(j2).map(r => r.op ? r.op.id : null), [o5.id, o5.id, null]);
+          declasserDepensesNdf(j2);
+          // Choix à la main : paiement mêlant d'autres billets (247 €), puis ligne ajoutée au même débit
+          const o7 = enregistrer("operations", {compte: cc.id, date: "2026-11-25", montant: -247, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          choisirDebitNdf(j2, 1, null); choisirDebitNdf(j2, 2, null);
+          v("note de frais : débit d'un autre prix proposé au choix à la main", debitsPossiblesNdf(j2, lignesNoteFrais(j2)[0]).map(o => o.id).includes(o7.id), true);
+          choisirDebitNdf(j2, 1, o7.id);
+          classerDepensesNdf(j2, rapprochementLignesNdf(j2));
+          v("note de frais : choix à la main ventilé (part de la note, reste au foyer)", (obtenir("operations", o7.id).ventilation || []).map(x => x.montant + " " + x.categorie), ["-99 Transfert", "-148 Transports"]);
+          choisirDebitNdf(j2, 2, o7.id);
+          v("note de frais : autre ligne ajoutée au même débit, reventilé", [classerDepensesNdf(j2, rapprochementLignesNdf(j2)), (obtenir("operations", o7.id).ventilation || []).map(x => x.montant + " " + x.categorie)], [1, ["-99 Transfert", "-99 Transfert", "-49 Transports"]]);
+          declasserDepensesNdf(j2);
+          const j3 = enregistrer("justificatifs", {type: "notefrais", date: "2026-12-05", montant: 228, texteOCR: texte2, categorie: "Transfert", sousCategorie: "Notes de frais essai", statut: "a_rapprocher", operations: [], ndfManuel: {1: o7.id, 2: o7.id}});
+          const o8 = enregistrer("operations", {compte: cc.id, date: "2026-11-26", montant: -100, libelle: "SNCF CONNECT ESSAI", categorie: "Transports", sousCategorie: "Train et transports en commun", statut: "classe"});
+          choisirDebitNdf(j3, 1, o8.id); choisirDebitNdf(j3, 2, o8.id);
+          v("note de frais : lignes au-delà du débit refusées", [classerDepensesNdf(j3, rapprochementLignesNdf(j3)), !!obtenir("operations", o8.id).ventilation, debitsPossiblesNdf(j3, lignesNoteFrais(j3)[1]).some(o => o.id === o8.id)], [0, false, false]);
+          supprimer("operations", o8.id); supprimer("justificatifs", j3.id);
+          v("note de frais : rétabli après reventilation", [obtenir("operations", o7.id).categorie, !!obtenir("operations", o7.id).ventilation], ["Transports", false]);
+          for (const o of [o5, o6, o7]) supprimer("operations", o.id); supprimer("justificatifs", j2.id);
+          for (const o of [o1, o2, o3, o4]) supprimer("operations", o.id); supprimer("justificatifs", jn.id); supprimer("comptes", cc.id);
         }
         v("facturette : la banque du terminal n'est pas le commerçant", [extraireTicket("BANQUE POPULAIRE\nFOURNIL ESSAI\n12/03/27 10:02\nMONTANT 3,20 EUR").enseigne, ajouterAlias({nom: "x", alias: []}, "Banque Populaire")], ["FOURNIL ESSAI", false]);
         v("téléphone : fournisseur retrouvé par un morceau du nom ou de l'alias", rechercherFournisseurs(["savour"], [{nom: "La Savoureine Eurre", alias: []}, {nom: "Autre", alias: ["SAVOUREINE SARL"]}, {nom: "Sans rapport", alias: []}]).map(f => f.nom), ["La Savoureine Eurre", "Autre"]);
@@ -321,10 +514,20 @@ async function autotest(){
     const opCafe = vivants("operations").find(o => /CAFE/.test(o.libelle) && o.compte === carte.id);
     const j1 = enregistrer("justificatifs", {type: "facturette", date: "2027-03-04", montant: 12.3, carte: "X333", carte4: "0333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
-    v("facturette rapprochée d'office (−1 jour, carte ****0333)", [obtenir("justificatifs", j1.id).statut, obtenir("justificatifs", j1.id).operations[0]], ["rapproche", opCafe.id]);
+    // Pièce sans fournisseur ni catégorie à imposer : rapprochée d'office
+    v("facturette rapprochée d'office (−1 jour, carte ****0333, rien ne change)", [obtenir("justificatifs", j1.id).statut, obtenir("justificatifs", j1.id).operations[0]], ["rapproche", opCafe.id]);
     const j2 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-04", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
     v("ticket du même achat : rattaché à la même opération", obtenir("justificatifs", j2.id).operations[0], opCafe.id);
+    {
+      // Pièce qui changerait la catégorie de l'opération : seulement proposée
+      const opX = enregistrer("operations", {compte: carte.id, date: "2027-03-20", montant: -44.4, libelle: "LIBRAIRIE CHANGE", categorie: "Culture et loisirs", sousCategorie: "Livres, presse, sorties, jeux", statut: "classe"});
+      const jx = enregistrer("justificatifs", {type: "ticket", date: "2027-03-20", montant: 44.4, carte: "X333", categorie: "Maison", sousCategorie: "Bricolage et jardin", statut: "a_rapprocher", operations: []});
+      rapprocherTout();
+      const px = obtenir("justificatifs", jx.id);
+      v("rapprochement qui changerait la catégorie : proposé, pas appliqué", [px.statut, (px.propositions || [])[0]?.op, obtenir("operations", opX.id).categorie], ["a_rapprocher", opX.id, "Culture et loisirs"]);
+      supprimer("justificatifs", jx.id); supprimer("operations", opX.id);
+    }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
     v("hors tolérance (opération 5 jours avant le ticket) : pas de rapprochement d'office", obtenir("justificatifs", j3.id).statut, "a_rapprocher");

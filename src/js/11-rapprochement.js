@@ -1,19 +1,29 @@
 /* ================= Justificatifs et rapprochement =================
    Un justificatif (ticket de caisse, facture, facturette CB) est rapproché de
    l'opération bancaire de même montant, dans une fenêtre de dates qui dépend de
-   son type. Un cas sans ambiguïté est appliqué d'office, réversible ; les autres
+   son type. Un cas sans ambiguïté qui ne change ni le fournisseur ni la catégorie de l'opération est rapproché
+   d'office (réversible) ; s'il les changerait, il est seulement proposé en tête, à confirmer d'un clic ; les autres
    attendent dans « À traiter ». Facture et facturette d'un même achat se
    rattachent à la même opération sans double compte. Plusieurs tickets réglés en
-   un seul paiement forment un « achat groupé » et ventilent l'opération. */
+   un seul paiement forment un « achat groupé » et ventilent l'opération.
+   Une note de frais est une créance : elle se rapproche du virement reçu (crédit de
+   même montant), pas d'un débit, et n'entre ni dans les dépenses en attente ni dans
+   les en-cours de cartes. */
 
-const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", facturette: "Facturette CB", autre: "Autre"};
+const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", facturette: "Facturette CB", notefrais: "Note de frais (à rembourser)", autre: "Autre"};
+const estNoteFrais = j => j && j.type === "notefrais";
+/* Note de frais : remboursement attendu de quelques jours avant (date de la dernière dépense) à 120 jours après. */
+const FENETRE_NOTE_FRAIS = [7, 120];
 
 function fenetre(j){
   const p = LIVRE.parametres;
+  if (estNoteFrais(j)) return FENETRE_NOTE_FRAIS;
   return j.type === "facture" || j.type === "devis" ? [p.tolFactureAvant, p.tolFactureApres] : [p.tolTicketAvant, p.tolTicketApres];
 }
 function compteCompatible(j, compte){
   if (!j.carte) return true;
+  // Note de frais : seul un compte de réception désigné (« Virement · compte ») restreint la recherche
+  if (estNoteFrais(j)) return !j.carte.startsWith("CPT:") || compte.id === j.carte.slice(4);
   if (j.carte === "ESPECES") return compte.type === "especes";
   if (j.carte.startsWith("CPT:") || j.carte.startsWith("CHQ:")) return compte.id === j.carte.slice(4);
   if (j.carte === "AMEX") return compte.carte === "AMEX";
@@ -46,9 +56,10 @@ function candidats(js){
   if (!j.carte && j.carte4) j.carte = carteDesChiffres(j.carte4);
   const [avant, apres] = fenetre(j);
   const nomJ = js.map(x => [x.commercantNom, x.raisonSociale].filter(Boolean).join(" ")).join(" ");
+  const credit = estNoteFrais(j);   // remboursement attendu : on cherche un crédit
   const r = [];
   for (const op of vivants("operations")){
-    if (op.montant >= 0 || -versCentimes(op.montant) !== cents) continue;
+    if ((credit ? op.montant <= 0 : op.montant >= 0) || Math.abs(versCentimes(op.montant)) !== cents) continue;
     const dj = ecartJours(j.date, op.date);
     if (dj < -avant || dj > apres) continue;
     const compte = obtenir("comptes", op.compte); if (!compte || !compteCompatible(j, compte)) continue;
@@ -68,7 +79,7 @@ function candidats(js){
 /* Combinaisons de 2 ou 3 justificatifs du même jour et de la même carte dont la somme égale une opération. */
 function achatsGroupes(libres){
   const r = [];
-  const parJour = regrouper(libres.filter(j => j.type !== "facture"), j => j.date + "|" + (j.carte || ""));
+  const parJour = regrouper(libres.filter(j => j.type !== "facture" && !estNoteFrais(j)), j => j.date + "|" + (j.carte || ""));
   for (const liste of parJour.values()){
     if (liste.length < 2) continue;
     const combos = [];
@@ -115,7 +126,18 @@ function delier(j){
   enregistrer("justificatifs", Object.assign(j, {operations: [], statut: "a_rapprocher", auto: false, rapprocheLe: null, refuse: true}));
 }
 
-/* Passe automatique, après chaque import ou fusion de la boîte. */
+/* Le rapprochement modifierait-il l'opération ? Fournisseur différent, catégorie différente, ou ventilation
+   (plusieurs pièces) : oui. Une pièce sans fournisseur ni catégorie, ou conforme à l'opération : non. */
+function rapprochementModifie(js, op){
+  if (js.length > 1) return true;
+  const j = js[0];
+  if (j.commercant && op.commercant && j.commercant !== op.commercant) return true;
+  if (j.categorie && j.categorie !== "À préciser" && (j.categorie !== op.categorie || (j.sousCategorie && j.sousCategorie !== op.sousCategorie))) return true;
+  return false;
+}
+/* Passe automatique, après chaque import ou fusion de la boîte. Décision de Frédéric (04/11/2026) : l'application
+   ne change rien d'elle-même sur une déduction. Un cas sûr qui ne modifie pas l'opération est rapproché d'office ;
+   sinon il est proposé en tête (« sur »), à confirmer. Renvoie le nombre de rapprochements faits d'office. */
 function rapprocherTout(){
   // Une saisie du téléphone n'est rapprochée qu'une fois validée sur le PC
   const libres = vivants("justificatifs").filter(j => (j.statut === "a_rapprocher" || !j.statut) && !j.aValider);
@@ -125,16 +147,17 @@ function rapprocherTout(){
   for (const js of groupes.values()){
     if (js.length < 2) continue;
     const c = candidats(js);
-    if (c.length === 1 && c[0].score >= 60 && !js.some(j => j.refuse)){ lier(js, c[0].op, true); auto++; }
-    else for (const j of js) enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map(x => ({op: x.op.id, score: x.score, groupe: js.map(y => y.id)}))}));
+    const sur = c.length === 1 && c[0].score >= 60 && !js.some(j => j.refuse);
+    if (sur && !rapprochementModifie(js, c[0].op)){ lier(js, c[0].op, true); auto++; continue; }
+    for (const j of js) enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map((x, i) => ({op: x.op.id, score: x.score, groupe: js.map(y => y.id), sur: sur && i === 0}))}));
   }
   // 2. Justificatifs seuls
   for (const j of libres.filter(j => !j.groupe || (groupes.get(j.groupe) || []).length < 2)){
     if (j.statut === "rapproche") continue;
     const c = candidats([j]);
     const sur = (c.length === 1 && c[0].score >= 60) || (c.length > 1 && c[0].score >= 85 && c[1].score < c[0].score - 25);
-    if (sur && !j.refuse){ lier([j], c[0].op, true); auto++; }
-    else enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map(x => ({op: x.op.id, score: x.score}))}));
+    if (sur && !j.refuse && !rapprochementModifie([j], c[0].op)){ lier([j], c[0].op, true); auto++; continue; }
+    enregistrer("justificatifs", Object.assign(j, {propositions: c.slice(0, 4).map((x, i) => ({op: x.op.id, score: x.score, sur: sur && !j.refuse && i === 0}))}));
   }
   // 3. Achats groupés devinés (jamais appliqués d'office)
   const restants = vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && !(j.propositions || []).length);
@@ -155,7 +178,7 @@ function libelleMoyen(carte){
 }
 function encoursSaisis(){
   const m = new Map();
-  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES")){
+  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES" && !estNoteFrais(x))){
     const k = libelleMoyen(j.carte); const g = m.get(k) || m.set(k, {moyen: k, n: 0, montant: 0, depuis: j.date}).get(k);
     g.n++; g.montant += j.montant || 0; if (j.date && j.date < g.depuis) g.depuis = j.date;
   }
@@ -178,20 +201,18 @@ async function creerJustificatif(donnees, piece){
   // qu'à la validation sur le PC (« Enregistrer la saisie »). Une saisie du téléphone ne modifie aucune fiche.
   if (j.commercantNom || j.raisonSociale){
     const mobile = j.origine === "mobile";
-    const c = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)))
-      || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    const sur = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)));
+    const c = sur || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    if (c && !sur && !commercantSur({raisonSociale: j.raisonSociale, enseigne: j.commercantNom})) j.fournisseurDevine = true;
     if (c){
-      if (!mobile){
-        if (j.raisonSociale && nomPlausible(j.raisonSociale)) ajouterAlias(c, j.raisonSociale);
-        if (j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; }
-        enregistrer("commercants", c); invaliderIndex();
-      }
+      // Aucune fiche n'est modifiée d'office (ni alias ni nature) : cela se fait à la validation, avec votre accord
+      if (!mobile && !j.fournisseurDevine && j.natureExacte){ c.natures = c.natures || {}; c.natures[j.natureExacte] = (c.natures[j.natureExacte] || 0) + 1; enregistrer("commercants", c); invaliderIndex(); }
       Object.assign(j, {commercant: c.id, commercantNom: c.nom, fournisseurProvisoire: false});
       if (!j.categorie && c.categorie) Object.assign(j, {categorie: c.categorie, sousCategorie: c.sousCategorie || "", lieu: j.lieu || c.lieu || ""});
     } else j.fournisseurProvisoire = true;
     enregistrer("justificatifs", j);
   }
-  if (j.carte === "ESPECES" && !j.aValider) creerOperationEspeces(j);
+  if (j.carte === "ESPECES" && !j.aValider && !estNoteFrais(j)) creerOperationEspeces(j);
   return j;
 }
 function compteEspeces(){

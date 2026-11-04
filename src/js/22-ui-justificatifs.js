@@ -6,19 +6,23 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   // File de travail : saisies à valider, sinon justificatifs ayant au moins une opération candidate à trancher
   const attente = nbValider ? aRapprocher.filter(j => j.aValider) : aRapprocher.filter(j => !j.reporte && candidats([j]).length);
   // Fiche refermée : on ne la rouvre pas d'office ; les autres restent proposées
-  let j = etat.choisi ? obtenir("justificatifs", etat.choisi) : attente.find(x => x.id !== etat.ferme);
+  // Après « Fermer », l'écran reste sur la liste (plus d'ouverture d'office) jusqu'à ce qu'une ligne soit choisie
+  let j = etat.choisi ? obtenir("justificatifs", etat.choisi) : etat.listeSeule ? null : attente.find(x => x.id !== etat.ferme);
   c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " pièce(s) à valider (téléphone ou dépôt) · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
-     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s)."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
-  if (!j){
+     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office ; ceux qui changeraient fournisseur ou catégorie sont proposés, à confirmer."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
+  if (!j && etat.listeSeule && attente.length){
+    c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("span", {class: "discret"}, attente.length + " pièce(s) " + (nbValider ? "à valider" : "avec une opération candidate à trancher") + ". Cliquez sur une ligne pour l'ouvrir, ou "),
+      h("button", {class: "mini", onclick: () => { etat.listeSeule = false; etat.ferme = null; rafraichirEcran(); }}, "Reprendre la file")));
+  } else if (!j){
     c.appendChild(h("p", {class: "vide"}, aRapprocher.length ? "Rien à valider ni à trancher : " + aRapprocher.length + " justificatif(s) attendent leur opération au relevé. Cliquez sur une ligne pour l'ouvrir." : "Aucun justificatif à rapprocher."));
   } else c.appendChild(ecranRapprochement(j, etat, attente));
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Tous les justificatifs"));
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : "à rapprocher")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : "à rapprocher")))}));
 }});
 
 /* Pièces déjà enregistrées qui pourraient être la même : même montant à 45 jours près, ou même fournisseur
@@ -39,7 +43,7 @@ function ecranRapprochement(j, etat, attente){
     idx >= 0 ? h("div", {class: "outils"}, h("button", {class: "discret", disabled: idx <= 0, onclick: () => { etat.choisi = attente[idx - 1].id; rafraichirEcran(); }}, "‹ Précédent"),
       h("span", {class: "discret"}, (idx + 1) + " sur " + attente.length),
       h("button", {class: "discret", disabled: idx >= attente.length - 1, onclick: () => { etat.choisi = attente[idx + 1].id; rafraichirEcran(); }}, "Suivant ›")) : null,
-    h("button", {class: "discret", title: "Refermer la fiche sans rien enregistrer", onclick: () => { etat.choisi = null; etat.ferme = j.id; rafraichirEcran(); }}, "Fermer ✕")));
+    h("button", {class: "discret", title: "Refermer la fiche sans rien enregistrer", onclick: () => { etat.choisi = null; etat.ferme = j.id; etat.listeSeule = true; rafraichirEcran(); }}, "Fermer ✕")));
   const grille = h("div", {class: "trois rappro"});
   // 1. Pièces
   const pieces = h("section", null, h("h2", null, groupe.length > 1 ? "Tickets" : "Pièce"));
@@ -96,13 +100,18 @@ function ecranRapprochement(j, etat, attente){
     const ligneCheque = h("div", {class: "champ-ocr", hidden: !String(x.carte || "").startsWith("CHQ:")}, h("label", null, "N° de chèque"), cheque, h("span", {class: "confiance"}, "pour le rapprochement"));
     carte.addEventListener("change", () => { ligneCheque.hidden = !carte.value.startsWith("CHQ:"); });
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
+    // Note de frais : le moyen de paiement devient le compte sur lequel le remboursement est attendu
+    const libPaye = () => estNoteFrais({type: type.value}) ? "Remboursé sur" : "Payé avec";
+    const ligneCarte = ligneOcr(libPaye(), carte, x.carte4 ? "carte ****" + x.carte4 : "");
+    type.addEventListener("change", () => { ligneCarte.querySelector("label").textContent = libPaye(); });
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
-      ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneOcr("Payé avec", carte, x.carte4 ? "carte ****" + x.carte4 : ""), ligneCheque);
-    champsParJ.push({x, type, montant, date, cm, nat, cat, lieu, carte, cheque, num});
+      ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque);
+    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num});
   });
   const enregistrerSaisie = () => {
+    const aliasAProposer = [];
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
@@ -110,20 +119,37 @@ function ecranRapprochement(j, etat, attente){
         lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
       // Le fournisseur est créé (ou rattaché) à la validation, y compris un nom resté provisoire
-      if (f.x.commercantNom && (f.x.commercantNom !== ancienNom || !f.x.commercant)){
-        let fiche = vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom)) || (f.x.commercant ? obtenir("commercants", f.x.commercant) : null);
+      // Fiche choisie dans la liste : prise telle quelle. « Nouveau fournisseur… » : fiche de ce nom, sinon une
+      // fiche NEUVE ; jamais le renommage de la fiche attachée jusque-là (le 04/11, une fiche proposée à tort pour
+      // une note de frais avait ainsi pris le nom de l'employeur). Renommer une fiche se fait dans Fournisseurs.
+      const choisie = f.selF.value && f.selF.value !== "__nouveau__" ? obtenir("commercants", f.selF.value) : null;
+      if (choisie){ f.x.commercantNom = choisie.nom; }
+      if (f.x.commercantNom && (f.x.commercantNom !== ancienNom || !f.x.commercant || (choisie && choisie.id !== f.x.commercant) || f.selF.value === "__nouveau__")){
+        let fiche = choisie || vivants("commercants").find(c => norm(c.nom) === norm(f.x.commercantNom));
         if (!fiche) fiche = enregistrer("commercants", {nom: f.x.commercantNom, alias: [], stats: {}, natures: {}});
-        else if (norm(fiche.nom) !== norm(f.x.commercantNom) && f.x.commercant === fiche.id) { fiche.nom = f.x.commercantNom; enregistrer("commercants", fiche); }
-        if (f.x.raisonSociale && nomPlausible(f.x.raisonSociale) && ajouterAlias(fiche, f.x.raisonSociale)) message("Mémorisé : « " + f.x.raisonSociale + " » = " + fiche.nom + ".");
         f.x.commercant = fiche.id; invaliderIndex();
       }
+      // Nom lu sur la pièce, nouveau pour la fiche : proposé comme alias, jamais ajouté sans accord
+      const ficheFinale = f.x.commercant ? obtenir("commercants", f.x.commercant) : null;
+      if (ficheFinale && f.x.raisonSociale && nomPlausible(f.x.raisonSociale) && !estBanqueTerminal(f.x.raisonSociale) && cleLibelle(f.x.raisonSociale)
+        && !(ficheFinale.alias || []).includes(cleLibelle(f.x.raisonSociale)) && norm(ficheFinale.nom) !== norm(f.x.raisonSociale) && !f.x.aliasRefuse)
+        aliasAProposer.push({fiche: ficheFinale, nom: f.x.raisonSociale, x: f.x});
+      f.x.fournisseurDevine = false;
       enregistrer("justificatifs", f.x);
       if (apprendreChiffresCarte(f.x.carte4, f.x.carte)) message("Mémorisé : carte ****" + String(f.x.carte4).slice(-4) + " = " + libelleMoyen(f.x.carte) + ".");
-      if (f.x.carte === "ESPECES" && !(f.x.operations || []).length) creerOperationEspeces(f.x);
+      if (f.x.carte === "ESPECES" && !estNoteFrais(f.x) && !(f.x.operations || []).length) creerOperationEspeces(f.x);
     }
+    // Questions posées après l'enregistrement (la saisie est déjà sauvée, quelle que soit la réponse)
+    (async () => {
+      for (const p of aliasAProposer){
+        if (await confirmer("Retenir « " + p.nom + " » comme autre nom de « " + p.fiche.nom + " » ? Les prochaines pièces portant ce nom seront rattachées d'office à cette fiche.", "Retenir")){
+          if (ajouterAlias(p.fiche, p.nom)) message("Retenu : « " + p.nom + " » = " + p.fiche.nom + ".");
+        } else enregistrer("justificatifs", Object.assign(p.x, {aliasRefuse: true}));
+      }
+    })();
   };
   saisie.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}}, h("button", {class: "mini" + (j.aValider ? " primaire" : ""), onclick: () => { const v = groupe.some(x => x.aValider); if (enregistrerSaisie() === false) return;
-      if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s)." : "."));
+      if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s) d'office." : "."));
         // Saisie suivante à valider, sinon justificatif suivant
         const suivant = attente.find(x => x.aValider && !groupe.includes(x)) || attente[idx + 1]; etat.choisi = suivant ? suivant.id : null;
       } else { message("Saisie enregistrée."); etat.choisi = null; } rafraichirEcran(); }}, j.aValider ? "Valider la saisie" : "Enregistrer la saisie"),
@@ -152,15 +178,22 @@ function ecranRapprochement(j, etat, attente){
         h("span", {class: "petit"}, euros(x.op.montant) + " · écart de date " + (x.ecart > 0 ? "+" : "") + x.ecart + " j" + (x.sim > 0.4 ? " · nom proche" : ""))),
         h("div", {style: {textAlign: "right"}}, h("div", {class: "score"}, x.score + " %"), h("button", {class: "mini" + (i === 0 ? " primaire" : ""), onclick: () => { if (enregistrerSaisie() === false) return; lier(groupe, x.op, false); rafraichirEcran(); }}, "Rapprocher"))));
     });
-    if (!liste.length && !propositionsGroupe.length) cand.appendChild(h("p", {class: "vide"}, "Aucune opération de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates. Le relevé n'est peut-être pas encore importé."));
+    const nf = estNoteFrais(j);
+    if (!liste.length && !propositionsGroupe.length) cand.appendChild(h("p", {class: "vide"}, nf
+      ? "Aucun virement reçu de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates : le remboursement n'est pas encore arrivé, ou le relevé n'est pas importé."
+      : "Aucune opération de " + euros(somme(groupe, x => x.montant)) + " dans la fenêtre de dates. Le relevé n'est peut-être pas encore importé."));
     const [av, ap] = fenetre(j);
-    cand.appendChild(h("p", {class: "note"}, "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" || j.type === "devis" ? "facture ou devis" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office."));
+    cand.appendChild(h("p", {class: "note"}, nf
+      ? "Note de frais : on attend un crédit (virement de remboursement) du montant exact, date −" + av + " / +" + ap + " jours. Les dépenses avancées restent rapprochées de leurs propres débits. Un seul candidat sûr : proposé en tête, à confirmer (le virement change de catégorie)."
+      : "Recherche : montant exact (seul ou en somme), carte cohérente, date −" + av + " / +" + ap + " jours (" + (j.type === "facture" || j.type === "devis" ? "facture ou devis" : "ticket ou facturette") + "). Un seul candidat sûr : rapproché d'office s'il ne change ni fournisseur ni catégorie, sinon proposé en tête."));
     cand.appendChild(h("div", {class: "outils", style: {marginTop: ".6rem"}},
-      h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => { if (!(x.operations || []).length) creerOperationEspeces(x); }); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
+      nf ? null : h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) x.carte = "ESPECES"; groupe.forEach(x => { if (!(x.operations || []).length) creerOperationEspeces(x); }); rafraichirEcran(); }}, "Aucune : paiement en espèces"),
       h("button", {class: "discret", onclick: () => { if (enregistrerSaisie() === false) return; for (const x of groupe) enregistrer("justificatifs", Object.assign(x, {reporte: aujourdhui()})); const suivant = attente[idx + 1]; etat.choisi = suivant ? suivant.id : null; rafraichirEcran(); }}, "Reporter")));
   }
   grille.appendChild(cand);
   bloc.appendChild(grille);
+  // Note de frais détaillée : dépenses avancées retrouvées au relevé, à classer avec la note (la saisie est enregistrée d'abord), sur toute la largeur
+  if (groupe.length === 1 && estNoteFrais(j)){ const d = blocDetailNoteFrais(j, enregistrerSaisie); if (d) bloc.appendChild(d); }
   return bloc;
 }
 

@@ -42,14 +42,16 @@ async function dossierImport(quoi, interactif){
 function reglesRangement(){ return LIVRE.parametres.rangement || {}; }
 /* Clé de la règle qui s'applique au fichier : un compte, ou une famille de pièces. */
 function cleRangement(lu, compte){
+  if (lu.genre === "cartes_lcl") return "releves_pdf_lcl";
   if (["compte", "carte", "valorisation"].includes(lu.genre)) return compte ? "compte:" + compte.id : null;
   if (lu.genre === "facture_cb") return "factures_cb";
+  if (lu.genre === "document" && lu.sousGenre === "achat_sncf") return "justificatifs";
   if (lu.genre === "document") return lu.sousGenre === "avis_impot" ? "avis_impot" : "avis_opere";
   if (lu.genre === "justificatif_pdf" || lu.genre === "image") return "justificatifs";
-  if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "plans";
+  if (["plan", "regles", "reprise_v7", "corrections"].includes(lu.genre)) return "plans";
   return null;
 }
-const LIBELLES_RANGEMENT = {factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
+const LIBELLES_RANGEMENT = {releves_pdf_lcl: "Relevés PDF du compte LCL", factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
 function libelleRangement(cle){ return cle.startsWith("compte:") ? libelleCompte(cle.slice(7)) : LIBELLES_RANGEMENT[cle] || cle; }
 
 /* Année du fichier : fin de période, date de valeur, arrêté, sinon aujourd'hui. */
@@ -72,6 +74,7 @@ function proposerRangement(lu, compte, index){
   const enfant = (base, re) => base && index.find(c => c.startsWith(base + "/") && c.split("/").length === base.split("/").length + 1 && re.test(c.split("/").pop()));
   const courant = () => { const c = compteCourantLcl(); return c ? parNumero(c.numero) : null; };
   if (lu.genre === "compte"){ const b = parNumero(compte?.numero); return b ? b + "/Historiques CSV" : (compte ? compte.nom : null); }
+  if (lu.genre === "cartes_lcl"){ const b = courant(); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés" : "Relevés PDF LCL"); }
   if (lu.genre === "carte"){
     if (lu.banque === "Amex"){ const b = parNom(/^amex$/i); return (b || "Amex") + "/Relevés"; }
     const debit = compte?.compteDebit ? vivants("comptes").find(c => c.id === compte.compteDebit) : null;
@@ -84,10 +87,11 @@ function proposerRangement(lu, compte, index){
     return enfant(b, /relev[ée]s? et [ée]valuations?/i) || b;
   }
   if (lu.genre === "facture_cb"){ const b = courant(); const e = enfant(b, /avis d[ée]bit diff[ée]r[ée]/i); return e || (b ? b + "/Avis débit différé cartes" : "Factures des cartes LCL"); }
+  if (lu.genre === "document" && lu.sousGenre === "achat_sncf") return parNom(/^justificatifs$/i) || "Justificatifs";
   if (lu.genre === "document" && lu.sousGenre === "avis_impot") return parNom(/^imp[ôo]ts?$/i) || "Impôts";
   if (lu.genre === "document") return parNom(/^avis d.op[ée]r[ée]$/i) || "Avis d'opéré";
   if (lu.genre === "justificatif_pdf" || lu.genre === "image") return parNom(/^justificatifs$/i) || "Justificatifs";
-  if (["plan", "regles", "reprise_v7"].includes(lu.genre)) return "Budget/Plans importés";
+  if (["plan", "regles", "reprise_v7", "corrections"].includes(lu.genre)) return "Budget/Plans importés";
   return null;
 }
 
@@ -181,6 +185,7 @@ async function copieIdentique(d, octets, prefixe, niveau){
 }
 
 async function rangerFichier(f){
+  if (f.lu.noteFrais) return rangerNoteFrais(f);   // dossier propre, nom normalisé, sans sous-dossier d'année
   const archives = await dossierImport("archives", true);
   if (!archives){ f.rangement = {reste: "archives non désignées"}; return; }
   const r = dossierRangement(f);
@@ -239,6 +244,7 @@ function celluleRangement(f){
   if (f.rangement?.erreur) return h("span", {class: "neg"}, "reste au dépôt : " + f.rangement.erreur);
   if (f.rangement?.reste) return h("span", {class: "discret"}, "reste au dépôt (" + f.rangement.reste + ")");
   if (f.statut === "erreur" || f.lu.genre === "inconnu") return h("span", {class: "discret"}, "reste au dépôt");
+  if (f.lu.noteFrais) return h("span", null, "→ " + DOSSIER_NOTES_FRAIS.libelle.toLowerCase() + " : « " + nomNoteFrais(f.lu.noteFrais) + " »");
   const r = dossierRangement(f);
   if (!r) return h("span", {class: "discret"}, "reste au dépôt");
   if (!r.dossier) return h("button", {class: "mini discret", onclick: () => modifierRangement(r.cle, "")}, "Définir le rangement…");
@@ -255,7 +261,13 @@ function sectionDossiersImport(){
     return h("li", null, h("span", null, DOSSIERS_IMPORT[quoi].libelle + " : ", zone),
       h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierImport(quoi); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
   };
-  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives")));
+  const ligneNdf = (() => {
+    const zone = h("span", {class: "discret"}, "…");
+    reglage(DOSSIER_NOTES_FRAIS.cle, null).then(d => { zone.textContent = d ? "« " + d.name + " »" : "non désigné (demandé au premier rangement)"; zone.className = d ? "" : "discret"; });
+    return h("li", null, h("span", null, DOSSIER_NOTES_FRAIS.libelle + " : ", zone),
+      h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierNotesFrais(); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
+  })();
+  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives"), ligneNdf));
   const regles = Object.entries(reglesRangement()).sort((a, b) => libelleRangement(a[0]).localeCompare(libelleRangement(b[0])));
   if (regles.length) corps.appendChild(tableau([{titre: "Pièces"}, {titre: "Rangées dans (+ année)"}, {titre: ""}], regles, {classe: "serre", ligne: ([cle, d]) =>
     h("tr", null, h("td", null, libelleRangement(cle)), h("td", {class: "petit"}, d), h("td", null, h("button", {class: "mini discret", onclick: () => modifierRangement(cle, d)}, "Modifier")))}));
