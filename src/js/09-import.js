@@ -146,6 +146,78 @@ function appliquerCartesPdf(prep){
   }
   return n;
 }
+/* ---------- Clôture du mois sur le relevé PDF LCL (la pièce qui fait foi) ----------
+   Compare les écritures du relevé à celles de l'application sur la même période : chaque écriture du relevé
+   cherche une opération de même montant à 4 jours près. Restent : les manquantes (à ajouter, cochées d'office)
+   et celles de l'application absentes du relevé (doublons, lignes en trop : à décider, jamais supprimées d'office).
+   Même contrôle pour les cartes sur les dates du détail des cartes. Solde final comparé au centime. */
+function compteDuReleveLcl(numero){
+  const n = String(numero || "").replace(/\s/g, "").replace(/^0+/, "");
+  return vivants("comptes").find(c => c.type === "courant" && c.banque === "LCL" && n && String(c.numero || "").replace(/\s/g, "").replace(/^0+/, "").endsWith(n))
+    || compteCourantLcl();
+}
+function apparier(pdf, app, tolerance){
+  const libres = new Set(app), paires = [];
+  const cands = [];
+  pdf.forEach((l, i) => { for (const o of app) if (versCentimes(o.montant) === versCentimes(l.montant)){ const d = Math.abs(ecartJours(l.date, o.date)); if (d <= tolerance) cands.push({i, o, d}); } });
+  cands.sort((a, b) => a.d - b.d);
+  const prisPdf = new Set();
+  for (const c of cands) if (!prisPdf.has(c.i) && libres.has(c.o)){ prisPdf.add(c.i); libres.delete(c.o); paires.push(c); }
+  return {manquants: pdf.filter((l, i) => !prisPdf.has(i)), enTrop: [...libres], conformes: paires.length};
+}
+function preparerClotureLcl(lu){
+  const r = lu.releveCompte, compte = compteDuReleveLcl(lu.numero);
+  if (!compte) return null;
+  const {debut, fin} = r.periode;
+  const opsCompte = vivants("operations").filter(o => o.compte === compte.id && o.date >= debut && o.date <= fin);
+  const cpt = apparier(r.operations, opsCompte, 4);
+  const emp = empreintes(compte.id, cpt.manquants);
+  const manquants = cpt.manquants.map((l, i) => Object.assign({}, l, {empreinte: "pdf|" + emp[i], proposition: proposerClassement({libelle: l.libelle, montant: l.montant, date: l.date, compte: compte.id})}));
+  // Cartes : lignes du relevé contre les achats des cartes LCL (et « sans titulaire ») sur les mêmes dates
+  const lignesCartes = (lu.cartes || []).flatMap(c => c.lignes);
+  let enTropCartes = [], conformesCartes = 0;
+  if (lignesCartes.length){
+    const d0 = lignesCartes.map(l => l.date).sort()[0], d1 = lignesCartes.map(l => l.date).sort().pop();
+    const lcl = new Set(vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL").map(c => c.id));
+    const app = vivants("operations").filter(o => lcl.has(o.compte) && o.date >= d0 && o.date <= d1);
+    const a = apparier(lignesCartes, app, 1);
+    enTropCartes = a.enTrop; conformesCartes = a.conformes;
+  }
+  const cartes = (lu.cartes || []).length ? preparerCartesPdf(lu) : null;
+  const soldeApp = soldeCompte(compte, fin);
+  const ecartSolde = r.soldeFin === null || soldeApp === null ? null : Math.round((r.soldeFin - (soldeApp + somme(manquants, l => l.montant))) * 100) / 100;
+  const controles = [r.controle,
+    {ok: !manquants.length && !cpt.enTrop.length, texte: "compte : " + cpt.conformes + " écriture(s) conforme(s)" + (manquants.length ? ", " + manquants.length + " manquante(s)" : "") + (cpt.enTrop.length ? ", " + cpt.enTrop.length + " en trop dans l'application" : "")},
+    lignesCartes.length ? {ok: !(cartes?.nouvelles?.length) && !enTropCartes.length, texte: "cartes : " + conformesCartes + " achat(s) conforme(s)" + (cartes?.nouvelles?.length ? ", " + cartes.nouvelles.length + " manquant(s)" : "") + (enTropCartes.length ? ", " + enTropCartes.length + " en trop dans l'application" : "")} : null,
+    ecartSolde === null ? null : {ok: Math.abs(ecartSolde) < 0.01, texte: Math.abs(ecartSolde) < 0.01 ? "solde au " + dateFr(fin) + " : " + euros(r.soldeFin) + ", identique" : "solde au " + dateFr(fin) + " : relevé " + euros(r.soldeFin) + ", application " + euros(r.soldeFin - ecartSolde) + " (après ajouts)"}
+  ].filter(Boolean);
+  return {lu, compte, manquants, enTrop: cpt.enTrop, enTropCartes, conformes: cpt.conformes, cartes, controles, nb: manquants.length + (cartes?.nouvelles?.length || 0),
+    choixManquants: new Set(manquants.map((l, i) => i)), choixEnTrop: new Set()};
+}
+function appliquerClotureLcl(prep){
+  const r = prep.lu.releveCompte, compte = prep.compte;
+  const imp = enregistrer("imports", {genre: "releve_lcl", banque: "LCL", fichier: prep.lu.nom, compte: compte.id, periode: r.periode, date: new Date().toISOString(),
+    nouvelles: prep.choixManquants.size, deja: prep.conformes});
+  let ajoutees = 0, supprimees = 0;
+  prep.manquants.forEach((l, i) => { if (!prep.choixManquants.has(i)) return;
+    const op = creerOperation(compte, l, imp.id); ajoutees++;
+    // Débit mensuel des cartes à débit différé : virement interne vers les comptes cartes, hors budget
+    if (/^RELEVE CB AU/.test(l.libelle)) enregistrer("operations", Object.assign(op, {categorie: "Transfert", sousCategorie: "Facture cartes", nature: natureParDefaut("Transfert"), statut: "classe"}));
+  });
+  for (const o of [...prep.enTrop, ...prep.enTropCartes]) if (prep.choixEnTrop.has(o.id) && obtenir("operations", o.id)){
+    for (const id of o.justificatifs || []){ const j = obtenir("justificatifs", id); if (j) delier(j); }
+    supprimer("operations", o.id); supprimees++;
+  }
+  const cartes = prep.cartes ? appliquerCartesPdf(prep.cartes) : 0;
+  // Les soldes du relevé deviennent la référence du compte
+  enregistrer("soldes", {compte: compte.id, date: r.periode.debut, solde: r.soldeDebut, source: prep.lu.nom, debut: true});
+  if (r.soldeFin !== null) enregistrer("soldes", {compte: compte.id, date: r.periode.fin, solde: r.soldeFin, source: prep.lu.nom});
+  const clotures = Object.assign({}, LIVRE.parametres.clotures || {});
+  clotures[compte.id + "|" + r.periode.fin] = {debut: r.periode.debut, fin: r.periode.fin, le: new Date().toISOString(), fichier: prep.lu.nom, ajoutees, supprimees, cartes,
+    conforme: prep.controles.every(c => c.ok) || (ajoutees === prep.manquants.length && supprimees === prep.enTrop.length + prep.enTropCartes.length)};
+  modifierParametres({clotures});
+  return {ajoutees, supprimees, cartes};
+}
 function periodesCartes(){
   return vivants("imports").filter(i => i.genre === "carte" && i.banque === "LCL").map(i => i.periode);
 }

@@ -20,13 +20,23 @@ async function textePdf(octets, motDePasse){
   for (let p = 1; p <= doc.numPages; p++){
     const contenu = await (await doc.getPage(p)).getTextContent();
     const lignes = new Map();
+    let xDebit = null, xCredit = null;
     for (const it of contenu.items){
       if (!it.str) continue;
       const y = Math.round(it.transform[5] / 2);
       if (!lignes.has(y)) lignes.set(y, []);
-      lignes.get(y).push({x: it.transform[4], t: it.str});
+      const fin = it.transform[4] + (it.width || 0);
+      if (it.str.trim() === "DEBIT") xDebit = fin;
+      if (it.str.trim() === "CREDIT") xCredit = fin;
+      lignes.get(y).push({x: it.transform[4], fin, t: it.str});
     }
-    pages.push([...lignes.entries()].sort((a, b) => b[0] - a[0]).map(([, l]) => l.sort((a, b) => a.x - b.x).map(x => x.t).join(" ")).join("\n"));
+    // Relevé à colonnes DEBIT / CREDIT : sur une ligne d'écriture (« jj.mm … »), un montant aligné sous CREDIT
+    // reçoit la marque « [C] » (le texte seul ne dit pas le sens). Lu par extraireReleveCompteLcl.
+    const marquer = l => {
+      if (xDebit === null || xCredit === null || !/^\d{2}\.\d{2}\b/.test((l[0]?.t || "").trim())) return l;
+      return l.map(x => /\d,\d{2}\s*$/.test(x.t) && Math.abs(x.fin - xCredit) < Math.abs(x.fin - xDebit) ? Object.assign({}, x, {t: x.t.replace(/\s*$/, "") + " [C]"}) : x);
+    };
+    pages.push([...lignes.entries()].sort((a, b) => b[0] - a[0]).map(([, l]) => marquer(l.sort((a, b) => a.x - b.x)).map(x => x.t).join(" ")).join("\n"));
   }
   await doc.destroy();
   return pages.join("\n\f\n").replace(/[   ]/g, " ").replace(/[ \t]+/g, " ");
@@ -147,6 +157,37 @@ function extraireCartesReleveLcl(texte){
     titre: "Détail des cartes " + pleines.map(c => c.carte).join(", ") + " · " + pleines[0].mois};
 }
 
+/* ---------- Relevé de compte LCL (PDF mensuel, la pièce qui fait foi) : écritures du compte et soldes ----------
+   « jj.mm LIBELLE [valeur jj.mm.aa] montant [C] » : le sens vient de la colonne (marque [C] posée par textePdf).
+   Contrôle : ancien solde + crédits − débits = solde final, au centime. */
+function extraireReleveCompteLcl(texte){
+  const T = String(texte || "").replace(/[   ]/g, " ");
+  if (!/ECRITURES DE LA PERIODE/.test(T) || !/ANCIEN SOLDE/.test(T)) return null;
+  const per = T.match(/du (\d{2})\.(\d{2})\.(\d{4}) au (\d{2})\.(\d{2})\.(\d{4})/);
+  if (!per) return null;
+  const debut = per[3] + "-" + per[2] + "-" + per[1], fin = per[6] + "-" + per[5] + "-" + per[4];
+  const dateDe = (j, m) => { for (const an of [+per[6], +per[3], +per[6] + 1, +per[3] - 1]){ const d = an + "-" + m + "-" + j; if (d >= ajouterJours(debut, -10) && d <= ajouterJours(fin, 10)) return d; } return per[6] + "-" + m + "-" + j; };
+  const numero = ((T.match(/Compte\s*:\s*([0-9 ]+[A-Z])\b/) || [])[1] || "").replace(/\s/g, "");
+  const operations = []; let ancien = null, final = null, derniere = null;
+  for (const brut of T.split(/\n/)){
+    const l = brut.trim();
+    if (/^PAIEMENTS PAR CARTE/i.test(l)) break;
+    const m = l.match(/^(\d{2})\.(\d{2}) (.+?) (\d{1,3}(?: \d{3})*,\d{2})( \[C\])?(?: \.)?$/);
+    if (!m){ if (derniere && /^(LIBELLE:|REF\.CLIENT)/.test(l) && !derniere.detail) derniere.detail = l.replace(/^LIBELLE:/, "").trim(); continue; }
+    const montant = lireMontant(m[4]) * (m[5] ? 1 : -1);
+    if (/^ANCIEN SOLDE/.test(m[3])){ ancien = montant; continue; }
+    if (/^SOLDE EN EUROS/.test(m[3])){ final = montant; continue; }
+    const libelle = m[3].replace(/ \d{2}\.\d{2}\.\d{2}$/, "").trim();
+    derniere = {date: dateDe(m[1], m[2]), montant: Math.round(montant * 100) / 100, libelle, type: /^CHQ/.test(libelle) ? "Chèque" : ""};
+    operations.push(derniere);
+  }
+  if (ancien === null || !operations.length) return null;
+  const calc = versCentimes(ancien) + somme(operations, o => versCentimes(o.montant));
+  const ok = final !== null && calc === versCentimes(final);
+  return {numero, periode: {debut, fin}, soldeDebut: ancien, soldeFin: final, operations,
+    controle: {ok, texte: "relevé du compte : " + operations.length + " écriture(s)" + (final === null ? ", solde final illisible" : ok ? ", soldes cohérents au centime" : ", écart de " + euros((versCentimes(final) - calc) / 100) + " entre les écritures et le solde final")}};
+}
+
 /* ---------- Justificatifs d'achat SNCF Connect ----------
    Un PDF par paiement : date de la transaction, montant, carte, et pour chaque trajet sa date, son heure
    et ses voyageurs. Les trajets d'une même commande (aller et retour) partagent un prix de bloc. */
@@ -249,6 +290,10 @@ function reconnaitrePdf(nom, texte, octets){
   const base = {nom, texte: T, octets};
   // Relevé de compte LCL : on n'en garde que le détail des cartes (le compte vient des exports CSV)
   const cartesPdf = extraireCartesReleveLcl(T);
+  // Relevé mensuel complet (écritures du compte + détail des cartes) : clôture du mois, il fait foi
+  const releve = extraireReleveCompteLcl(T);
+  if (releve) return Object.assign(base, cartesPdf || {cartes: []}, {nom, genre: "releve_lcl", banque: "LCL", releveCompte: releve, numero: releve.numero, periode: releve.periode,
+    titre: "Relevé LCL du " + dateFr(releve.periode.debut) + " au " + dateFr(releve.periode.fin)});
   if (cartesPdf) return Object.assign(base, cartesPdf, {nom});
   // Facture des cartes LCL (« RELEVE CB AU jj/mm/aa »)
   if (/RELEVE CB AU/.test(T) && /DIFFERE|Montant/i.test(T)){

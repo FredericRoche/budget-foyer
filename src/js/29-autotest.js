@@ -527,6 +527,27 @@ async function autotest(){
         v("export du compte : achat déjà sur une carte écarté, achat absent gardé (sans titulaire)", [pr.ecartees.length, (pr.cartesSansTitulaire || []).map(l => l.libelle)], [1, ["MANQUANT CARTE"]]);
         supprimer("operations", ox.id);
       }
+      {
+        // Relevé PDF LCL du compte (sens par la colonne, marque [C]) : lecture, contrôle des soldes, clôture
+        const rel = ["RELEVE DE COMPTE", " du 08.04.2027 au 07.05.2027 - N° 12", "Indicatif : 8208 Compte : 99 Z", "ECRITURES DE LA PERIODE", "DATE LIBELLE VALEUR DEBIT CREDIT",
+          "07.04 ANCIEN SOLDE 1 000,00 [C]", "10.04 PRLV SEPA ESSAI EAU 10.04.27 68,00", "REF.CLIENT:X", "12.04 VIREMENT ESSAI PENSION 12.04.27 1 454,82 [C]",
+          "30.04 RELEVE CB AU 30/04/27 30.04.27 120,00", "07.05 SOLDE EN EUROS 2 266,82 [C]"].join(String.fromCharCode(10));
+        const rc = extraireReleveCompteLcl(rel);
+        v("relevé PDF du compte : écritures, sens, années, soldes cohérents", [rc.operations.map(o => o.date + " " + o.montant).join(" | "), rc.soldeDebut, rc.soldeFin, rc.controle.ok, rc.numero],
+          ["2027-04-10 -68 | 2027-04-12 1454.82 | 2027-04-30 -120", 1000, 2266.82, true, "99Z"]);
+        const oDeja = enregistrer("operations", {compte: cj.id, date: "2027-04-11", montant: -68, libelle: "PRLV EAU", dateDebit: "2027-04-11"});
+        const oTrop = enregistrer("operations", {compte: cj.id, date: "2027-04-20", montant: -15, libelle: "DOUBLON ESSAI", dateDebit: "2027-04-20"});
+        const lu = Object.assign({nom: "essai.pdf", cartes: []}, {genre: "releve_lcl", releveCompte: rc, numero: rc.numero, periode: rc.periode});
+        const pc = preparerClotureLcl(lu);
+        v("clôture : conforme à 4 jours près, manquants proposés, ligne en trop signalée (non cochée)", [pc.conformes, pc.manquants.map(l => l.montant), pc.enTrop.map(o => o.id), pc.choixEnTrop.size], [1, [1454.82, -120], [oTrop.id], 0]);
+        const rr = appliquerClotureLcl(pc);
+        const cb = vivants("operations").find(o => o.compte === cj.id && /^RELEVE CB AU/.test(o.libelle) && o.date === "2027-04-30");
+        v("clôture appliquée : ajouts, rien supprimé sans coche, débit des cartes en Transfert, clôture notée", [rr.ajoutees, rr.supprimees, !!obtenir("operations", oTrop.id), cb?.sousCategorie, !!(LIVRE.parametres.clotures || {})[cj.id + "|2027-05-07"]], [2, 0, true, "Facture cartes", true]);
+        for (const o of vivants("operations").filter(o => o.compte === cj.id && o.date >= "2027-04-08" && o.date <= "2027-05-07")) supprimer("operations", o.id);
+        for (const s of vivants("soldes").filter(s => s.source === "essai.pdf")) supprimer("soldes", s.id);
+        for (const i of vivants("imports").filter(i => i.fichier === "essai.pdf")) supprimer("imports", i.id);
+        const cl = Object.assign({}, LIVRE.parametres.clotures); delete cl[cj.id + "|2027-05-07"]; modifierParametres({clotures: cl});
+      }
       const je = enregistrer("justificatifs", {type: "ticket", date: "2027-03-14", montant: 9.5, carte: "ESPECES", statut: "a_rapprocher", operations: []});
       creerOperationEspeces(je); const oe = obtenir("justificatifs", je.id).operations[0];
       delier(obtenir("justificatifs", je.id));

@@ -22,7 +22,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
     gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
-        corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+        corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), releve_lcl: "Relevé LCL (PDF, fait foi)", cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
         document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : lu.sousGenre === "achat_sncf" ? "Justificatif SNCF Connect · " + lu.titre : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nb != null ? p.nb : p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
@@ -56,6 +56,23 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
         (detail.prep.ecartees.length ? detail.prep.ecartees.length + " ligne(s) carte déjà présente(s) sur une carte, écartée(s). " : "") +
         (detail.prep.cartesSansTitulaire?.length ? detail.prep.cartesSansTitulaire.length + " achat(s) carte absent(s) des cartes, ajouté(s) sur « Cartes LCL (sans titulaire) » : " + detail.prep.cartesSansTitulaire.slice(0, 12).map(l => dateCourte(l.date) + " " + l.libelle + " " + euros(l.montant)).join(" · ") + (detail.prep.cartesSansTitulaire.length > 12 ? " …" : "") + ". " : "") +
         (detail.prep.doublonsLcl ? detail.prep.doublonsLcl + " doublon(s) LCL écarté(s) (règle ⌈n/2⌉). " : "")));
+    }
+    // Clôture sur le relevé PDF : écarts à trancher avant d'enregistrer
+    for (const f of FICHIERS_EN_COURS.filter(x => x.lu.genre === "releve_lcl" && x.statut === "pret" && x.prep)){
+      const p = f.prep, enTrop = [...p.enTrop, ...p.enTropCartes];
+      gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Clôture sur le relevé : " + f.lu.titre));
+      if (!p.manquants.length && !enTrop.length && !p.cartes?.nouvelles?.length){ gauche.appendChild(h("p", {class: "note"}, "Tout est conforme au relevé : « Enregistrer » marque le mois comme clôturé.")); continue; }
+      if (p.manquants.length) gauche.append(h("h3", null, "Écritures du relevé absentes de l'application (" + p.manquants.length + ") : à ajouter"),
+        tableau([{titre: ""}, {titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}], p.manquants.map((l, i) => ({l, i})), {classe: "serre", ligne: ({l, i}) => h("tr", null,
+          h("td", null, h("input", {type: "checkbox", checked: p.choixManquants.has(i), onchange: e => { e.target.checked ? p.choixManquants.add(i) : p.choixManquants.delete(i); }})),
+          h("td", null, dateFr(l.date)), h("td", null, l.libelle, l.detail ? h("div", {class: "libbanque"}, l.detail) : null), montantCellule(l.montant))}));
+      if (p.cartes?.nouvelles?.length) gauche.appendChild(h("p", {class: "note"}, p.cartes.nouvelles.length + " achat(s) carte du relevé absent(s) de l'application, ajouté(s) à l'enregistrement : "
+        + p.cartes.nouvelles.slice(0, 15).map(l => dateCourte(l.date) + " " + l.libelle + " " + euros(l.montant)).join(" · ") + (p.cartes.nouvelles.length > 15 ? " …" : "")));
+      if (enTrop.length) gauche.append(h("h3", null, "Dans l'application mais pas sur le relevé (" + enTrop.length + ") : doublons ou lignes en trop ?"),
+        h("p", {class: "note"}, "Rien n'est supprimé sans votre coche. Un achat du dernier jour peut appartenir au relevé suivant."),
+        tableau([{titre: "Supprimer"}, {titre: "Date"}, {titre: "Compte"}, {titre: "Libellé"}, {titre: "Montant", num: true}], enTrop, {classe: "serre", ligne: o => h("tr", null,
+          h("td", null, h("input", {type: "checkbox", checked: p.choixEnTrop.has(o.id), onchange: e => { e.target.checked ? p.choixEnTrop.add(o.id) : p.choixEnTrop.delete(o.id); }})),
+          h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
     }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));
   // Pleine largeur : la routine du mois se replie sous la liste au lieu d'occuper une colonne en permanence
@@ -125,6 +142,7 @@ function preparerFichier(f){
       f.statut = "pret";
     } else if (lu.genre === "reprise_v7"){ f.prep = preparerReprise(lu); f.statut = "pret"; }
     else if (lu.genre === "cartes_lcl"){ f.prep = preparerCartesPdf(lu); f.statut = "pret"; }
+    else if (lu.genre === "releve_lcl"){ f.prep = preparerClotureLcl(lu); if (f.prep) f.compte = f.prep.compte; f.statut = f.prep ? "pret" : "erreur"; if (!f.prep) f.erreur = "compte LCL introuvable"; }
     else if (lu.genre === "corrections"){ f.prep = preparerCorrections(lu); f.statut = "pret"; }
     else if (["regles", "plan", "justificatif_pdf", "image", "document"].includes(lu.genre)) f.statut = "pret";
     else f.statut = "erreur";
@@ -153,6 +171,8 @@ async function enregistrerFichier(f, enLot){
     if (lu.genre === "compte" || lu.genre === "carte"){ const imp = appliquerReleve(f.prep); f.resultat = imp.nouvelles + " opération(s)"; }
     else if (lu.genre === "facture_cb") appliquerFacture(f.prep);
     else if (lu.genre === "cartes_lcl"){ const n = appliquerCartesPdf(f.prep); f.resultat = n + " opération(s)"; }
+    else if (lu.genre === "releve_lcl"){ const r = appliquerClotureLcl(f.prep); f.resultat = r.ajoutees + r.cartes + " ajoutée(s), " + r.supprimees + " supprimée(s)";
+      message("Mois clôturé sur le relevé : " + r.ajoutees + " écriture(s) et " + r.cartes + " achat(s) carte ajoutés, " + r.supprimees + " ligne(s) en trop supprimée(s)."); }
     else if (lu.genre === "corrections"){
       if (!enLot && !(await confirmer("Appliquer les " + lu.actions.length + " correction(s) du lot « " + lu.nom + " » ?", "Appliquer"))) return;
       const n = appliquerCorrections(lu); f.resultat = n + " correction(s)"; message(n + " correction(s) appliquée(s).");
