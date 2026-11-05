@@ -284,6 +284,21 @@ function dateTexte(t){
   return lireDate(t);
 }
 function premier(texte, re){ const m = texte.match(re); return m ? m[1].trim() : ""; }
+/* Échéances prélevées d'un avis d'impôt (DGFiP) : échéancier « 26 octobre 2026 : 1 655,00 € » (impôt sur le revenu),
+   sinon « Somme à payer » avec la date de prélèvement (« prélevée … le jj/mm/aaaa ») ou la date limite + 10 jours. */
+function echeancesAvisImpot(texte, quoi){
+  const T = String(texte || "").replace(/[  ]/g, " ");
+  const r = [];
+  for (const m of T.matchAll(/(\d{1,2}(?:er)? [a-zéû]+ \d{4})\s*:\s*(\d{1,3}(?: \d{3})*,\d{2})\s*€/gi)){ const d = dateTexte(m[1]); if (d) r.push({date: d, montant: lireMontant(m[2])}); }
+  if (r.length) return r;
+  const montant = lireMontant(premier(T, /(?:Somme (?:à|qu.il vous reste à) payer|Montant de votre taxe d.habitation)[\s\S]{0,120}?(\d{1,3}(?: \d{3})*,\d{2})\s*€/i));
+  if (!(montant > 0)) return r;
+  const prelev = lireDate(premier(T, /pr[ée]lev[ée]e? automatiquement le (\d{2}\/\d{2}\/\d{4})/i));
+  const limite = lireDate(premier(T, /Date limite de paiement\s*:\s*(\d{2}\/\d{2}\/\d{4})/i));
+  const date = prelev || (limite ? ajouterJours(limite, 10) : null);
+  if (date) r.push({date, montant});
+  return r;
+}
 
 function reconnaitrePdf(nom, texte, octets){
   const T = texte; const N = norm(texte);
@@ -372,7 +387,9 @@ function reconnaitrePdf(nom, texte, octets){
   if (/\bAVIS_(TF|TH|IR|PS|THRS)_/.test(T) || (/FINANCES PUBLIQUES/.test(T) && /avis d.imp[oô]t|taxes? fonci[eè]res?|taxe d.habitation/i.test(T))){
     const an = premier(N, /(?:avis d.impot|taxes? foncieres?|taxe d.habitation)\s*(\d{4})/) || premier(nom, /(20\d{2})/);
     const quoi = /\bAVIS_TF_|taxes? fonci/i.test(T + nom) ? "Taxe foncière" : /\bAVIS_TH|taxe d.habitation/i.test(T + nom) ? "Taxe d'habitation" : "Impôt sur le revenu";
-    return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : ""), date: an ? an + "-12-31" : null});
+    const echeances = echeancesAvisImpot(T, quoi);
+    return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : "") + (echeances.length === 1 ? " · " + euros(echeances[0].montant) : ""),
+      date: an ? an + "-12-31" : null, quoi, echeances, montant: somme(echeances, e => e.montant) || null});
   }
   if (/^COMPTEDEDEPOTS_/.test(nom)) return Object.assign(base, {genre: "inconnu", raison: "relevé de compte PDF : importez plutôt l'export CSV du compte (plus complet)"});
   // Justificatif d'achat SNCF Connect : paiement et trajets (sert au rapprochement des notes de frais)

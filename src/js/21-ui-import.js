@@ -193,6 +193,14 @@ async function enregistrerFichier(f, enLot){
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
     else if (lu.genre === "justificatif_pdf" || lu.genre === "image") await importerJustificatifPc(lu, !!f.source);
     else if (lu.genre === "document" && lu.sousGenre === "achat_sncf"){ const n = enregistrerAchatsSncf(lu); f.resultat = n + " paiement(s) nouveau(x)"; message(n + " justificatif(s) SNCF Connect enregistré(s) : ils serviront au rapprochement des notes de frais."); }
+    else if (lu.genre === "document" && lu.sousGenre === "avis_impot"){
+      // Un avis réimporté remplace le précédent (même nature, même année, même montant) au lieu de s'ajouter
+      const deja = vivants("documents").find(d => d.genre === "avis_impot" && d.titre === lu.titre && (d.montant || null) === (lu.montant || null))
+        || vivants("documents").find(d => d.genre === "avis_impot" && !d.echeances && d.titre && lu.titre.startsWith(d.titre));
+      enregistrer("documents", Object.assign(deja || {}, {genre: "avis_impot", fichier: lu.nom, date: lu.date, titre: lu.titre, montant: lu.montant, quoi: lu.quoi, echeances: lu.echeances || []}));
+      const n = classerParAvisImpot(); f.resultat = (lu.echeances || []).length + " échéance(s)" + (n ? ", " + n + " prélèvement(s) classé(s)" : "");
+      if (n) message(n + " prélèvement(s) d'impôt classé(s) d'après l'avis.");
+    }
     else if (lu.genre === "document") enregistrer("documents", {genre: lu.sousGenre, fichier: lu.nom, date: lu.date, titre: lu.titre, quantite: lu.quantite, montant: lu.montant, sens: lu.sens, isin: lu.isin});
     f.statut = "fait";
     if (f.source) await rangerFichier(f);

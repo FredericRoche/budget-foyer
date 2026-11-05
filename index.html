@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-G+C+NXrIwRuuxJxPOIKO2/tqgTDcSCD9pyHABLIS0gY=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-c/5HCFWuGBGRD3tl8uZK9wQihK+yUACt+1SgMlgmNwU=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1605";
+const VERSION_APP = "2026-11-05.1608";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1451,6 +1451,7 @@ async function ouvrirLivre(motDePasse, souvenir){
   try { const nr = reparerFichesEment(); if (nr) setTimeout(() => message(nr + " fiche(s) fournisseur « Ement… » corrigée(s) (libellés « VIREMENT » mal coupés)."), 1500); } catch (e) {}
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";
+  try { classerParAvisImpot(); } catch (e) {}
   estimerDebitsCartes();   // livres repris avant la correction du 17/10/2026 : achats carte datés comme débités le jour même
   if (!distant) await ecrireCache(source, false).catch(() => {});
   if (LIVRE_MODIFIE) planifierSauvegarde();
@@ -2173,6 +2174,21 @@ function dateTexte(t){
   return lireDate(t);
 }
 function premier(texte, re){ const m = texte.match(re); return m ? m[1].trim() : ""; }
+/* Échéances prélevées d'un avis d'impôt (DGFiP) : échéancier « 26 octobre 2026 : 1 655,00 € » (impôt sur le revenu),
+   sinon « Somme à payer » avec la date de prélèvement (« prélevée … le jj/mm/aaaa ») ou la date limite + 10 jours. */
+function echeancesAvisImpot(texte, quoi){
+  const T = String(texte || "").replace(/[  ]/g, " ");
+  const r = [];
+  for (const m of T.matchAll(/(\d{1,2}(?:er)? [a-zéû]+ \d{4})\s*:\s*(\d{1,3}(?: \d{3})*,\d{2})\s*€/gi)){ const d = dateTexte(m[1]); if (d) r.push({date: d, montant: lireMontant(m[2])}); }
+  if (r.length) return r;
+  const montant = lireMontant(premier(T, /(?:Somme (?:à|qu.il vous reste à) payer|Montant de votre taxe d.habitation)[\s\S]{0,120}?(\d{1,3}(?: \d{3})*,\d{2})\s*€/i));
+  if (!(montant > 0)) return r;
+  const prelev = lireDate(premier(T, /pr[ée]lev[ée]e? automatiquement le (\d{2}\/\d{2}\/\d{4})/i));
+  const limite = lireDate(premier(T, /Date limite de paiement\s*:\s*(\d{2}\/\d{2}\/\d{4})/i));
+  const date = prelev || (limite ? ajouterJours(limite, 10) : null);
+  if (date) r.push({date, montant});
+  return r;
+}
 
 function reconnaitrePdf(nom, texte, octets){
   const T = texte; const N = norm(texte);
@@ -2261,7 +2277,9 @@ function reconnaitrePdf(nom, texte, octets){
   if (/\bAVIS_(TF|TH|IR|PS|THRS)_/.test(T) || (/FINANCES PUBLIQUES/.test(T) && /avis d.imp[oô]t|taxes? fonci[eè]res?|taxe d.habitation/i.test(T))){
     const an = premier(N, /(?:avis d.impot|taxes? foncieres?|taxe d.habitation)\s*(\d{4})/) || premier(nom, /(20\d{2})/);
     const quoi = /\bAVIS_TF_|taxes? fonci/i.test(T + nom) ? "Taxe foncière" : /\bAVIS_TH|taxe d.habitation/i.test(T + nom) ? "Taxe d'habitation" : "Impôt sur le revenu";
-    return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : ""), date: an ? an + "-12-31" : null});
+    const echeances = echeancesAvisImpot(T, quoi);
+    return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : "") + (echeances.length === 1 ? " · " + euros(echeances[0].montant) : ""),
+      date: an ? an + "-12-31" : null, quoi, echeances, montant: somme(echeances, e => e.montant) || null});
   }
   if (/^COMPTEDEDEPOTS_/.test(nom)) return Object.assign(base, {genre: "inconnu", raison: "relevé de compte PDF : importez plutôt l'export CSV du compte (plus complet)"});
   // Justificatif d'achat SNCF Connect : paiement et trajets (sert au rapprochement des notes de frais)
@@ -2585,6 +2603,7 @@ function apresImport(){
   affecterDebitsAmex();
   estimerDebitsCartes();
   rapprocherTout();
+  classerParAvisImpot();
 }
 /* Prélèvement Amex sur le compte courant ↔ paiement reçu sur le compte Amex ; virements entre comptes du foyer. */
 function apparierTransferts(){
@@ -3351,6 +3370,34 @@ function piecesPourDebit(o, pieces){
 function rapprocherAvecEcart(j, op){
   j.ecartMontant = Math.round((Math.abs(op.montant) - j.montant) * 100) / 100;
   lier([j], op, false);
+}
+/* Prélèvements d'impôt classés d'après les avis importés : un débit du Trésor public (libellé DGFiP, « DIRECTION
+   GENERALE DES FINANCES », « IMPOT », « TRESOR PUBLIC ») de même montant qu'une échéance d'avis, à 6 jours près,
+   prend la catégorie Impôts › (impôt sur le revenu, taxe foncière, taxe d'habitation). Seulement une opération
+   pas encore classée ou devinée : compléter n'est pas modifier. Chaque échéance ne sert qu'une fois. */
+function classerParAvisImpot(){
+  const avis = vivants("documents").filter(d => d.genre === "avis_impot" && (d.echeances || []).length);
+  if (!avis.length) return 0;
+  const sousCat = quoi => { const l = LIVRE.parametres.categories["Impôts"] || [];
+    return l.find(s => /revenu/i.test(s) && /revenu/i.test(quoi)) || l.find(s => /fonci/i.test(s) && /fonci/i.test(quoi)) || l.find(s => /habitation/i.test(s) && /habitation/i.test(quoi)) || quoi; };
+  const fisc = o => /DIRECTION GENERALE DE|DGFIP|FINANCES PUBLIQ|TRESOR PUBLIC|\bIMPOTS?\b/i.test(norm(o.libelle + " " + (o.detail || "")));
+  const ops = vivants("operations").filter(o => o.montant < 0 && fisc(o));
+  const prises = new Set(ops.filter(o => o.avisImpot).map(o => o.avisImpot));
+  let n = 0;
+  for (const d of avis) d.echeances.forEach((e, i) => {
+    const cle = d.id + "#" + i; if (prises.has(cle)) return;
+    const o = ops.filter(x => !x.avisImpot && versCentimes(-x.montant) === versCentimes(e.montant) && Math.abs(ecartJours(e.date, x.date)) <= 6)
+      .sort((a, b) => Math.abs(ecartJours(e.date, a.date)) - Math.abs(ecartJours(e.date, b.date)))[0];
+    if (!o) return;
+    o.avisImpot = cle; prises.add(cle);
+    if (o.verrou || !["a_preciser", "propose"].includes(o.statut || "a_preciser")){ enregistrer("operations", o); return; }
+    const sc = sousCat(d.quoi || d.titre || "");
+    ajouterCategorieSilencieuse("Impôts", sc);
+    enregistrer("operations", Object.assign(o, {categorie: "Impôts", sousCategorie: sc, nature: natureParDefaut("Impôts"), statut: "classe",
+      natureExacte: o.natureExacte || (d.titre || "").replace(/ · .*$/, "") + " (avis)"}));
+    n++;
+  });
+  return n;
 }
 /* En-cours : justificatifs à rapprocher (hors espèces), regroupés par moyen de paiement. */
 function libelleMoyen(carte){
@@ -5732,6 +5779,14 @@ async function enregistrerFichier(f, enLot){
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
     else if (lu.genre === "justificatif_pdf" || lu.genre === "image") await importerJustificatifPc(lu, !!f.source);
     else if (lu.genre === "document" && lu.sousGenre === "achat_sncf"){ const n = enregistrerAchatsSncf(lu); f.resultat = n + " paiement(s) nouveau(x)"; message(n + " justificatif(s) SNCF Connect enregistré(s) : ils serviront au rapprochement des notes de frais."); }
+    else if (lu.genre === "document" && lu.sousGenre === "avis_impot"){
+      // Un avis réimporté remplace le précédent (même nature, même année, même montant) au lieu de s'ajouter
+      const deja = vivants("documents").find(d => d.genre === "avis_impot" && d.titre === lu.titre && (d.montant || null) === (lu.montant || null))
+        || vivants("documents").find(d => d.genre === "avis_impot" && !d.echeances && d.titre && lu.titre.startsWith(d.titre));
+      enregistrer("documents", Object.assign(deja || {}, {genre: "avis_impot", fichier: lu.nom, date: lu.date, titre: lu.titre, montant: lu.montant, quoi: lu.quoi, echeances: lu.echeances || []}));
+      const n = classerParAvisImpot(); f.resultat = (lu.echeances || []).length + " échéance(s)" + (n ? ", " + n + " prélèvement(s) classé(s)" : "");
+      if (n) message(n + " prélèvement(s) d'impôt classé(s) d'après l'avis.");
+    }
     else if (lu.genre === "document") enregistrer("documents", {genre: lu.sousGenre, fichier: lu.nom, date: lu.date, titre: lu.titre, quantite: lu.quantite, montant: lu.montant, sens: lu.sens, isin: lu.isin});
     f.statut = "fait";
     if (f.source) await rangerFichier(f);
@@ -8313,6 +8368,21 @@ async function autotest(){
       delier(obtenir("justificatifs", je.id));
       v("espèces défait : l'opération en espèces disparaît avec le rapprochement", [!!obtenir("operations", oe), obtenir("justificatifs", je.id).statut], [false, "a_rapprocher"]);
       supprimer("justificatifs", je.id);
+      {
+        // Avis d'impôt : échéances lues, prélèvements DGFiP classés (une échéance par prélèvement)
+        const NL = String.fromCharCode(10);
+        const ir = echeancesAvisImpot(["Somme qu'il vous reste à payer", "6 623,00 €", "25 septembre 2026 : 1 655,00 €", "26 octobre 2026 : 1 655,00 €", "28 décembre 2026 : 1 658,00 €"].join(NL), "Impôt sur le revenu");
+        const tf = echeancesAvisImpot(["Somme à payer", " 1 412,00 €", "Date limite de paiement : 15/10/2026"].join(NL), "Taxe foncière");
+        const th = echeancesAvisImpot(["Montant de votre taxe d'habitation 1 787,00 €", "la somme à payer sera prélevée automatiquement le 28/12/2026."].join(NL), "Taxe d'habitation");
+        v("avis d'impôt : échéancier, date limite + 10 jours, prélèvement daté", [ir.map(e => e.date + " " + e.montant).join(" | "), tf, th],
+          ["2026-09-25 1655 | 2026-10-26 1655 | 2026-12-28 1658", [{date: "2026-10-25", montant: 1412}], [{date: "2026-12-28", montant: 1787}]]);
+        const dA = enregistrer("documents", {genre: "avis_impot", titre: "Taxe foncière 2027", quoi: "Taxe foncière", echeances: [{date: "2027-10-25", montant: 1412}]});
+        const oT = enregistrer("operations", {compte: cj.id, date: "2027-10-26", montant: -1412, libelle: "PRLV SEPA DIRECTION GENERALE DE", categorie: "À préciser", statut: "a_preciser", dateDebit: "2027-10-26"});
+        const oT2 = enregistrer("operations", {compte: cj.id, date: "2027-10-27", montant: -1412, libelle: "PRLV SEPA DIRECTION GENERALE DE", categorie: "À préciser", statut: "a_preciser", dateDebit: "2027-10-27"});
+        const nA = classerParAvisImpot();
+        v("avis d'impôt : prélèvement classé Impôts › Taxe foncière, une seule fois", [nA, obtenir("operations", oT.id).sousCategorie, obtenir("operations", oT2.id).categorie], [1, "Taxe foncière", "À préciser"]);
+        supprimer("operations", oT.id); supprimer("operations", oT2.id); supprimer("documents", dA.id);
+      }
       v("banque du terminal : caisse régionale lue seule, jamais un fournisseur ; vrai commerçant accepté",
         [estBanqueTerminal("SUD RHONE ALPES"), estBanqueTerminal("Crédit Agricole Sud Rhône Alpes"), estBanqueTerminal("Pharmacie Sud Rhône Alpes"), estBanqueTerminal("La Savoureine")], [true, true, false, false]);
       // Débit sans pièce et pièce du même fournisseur à un écart près : appariés, rapprochés seulement sur décision

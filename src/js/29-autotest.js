@@ -569,6 +569,21 @@ async function autotest(){
       delier(obtenir("justificatifs", je.id));
       v("espèces défait : l'opération en espèces disparaît avec le rapprochement", [!!obtenir("operations", oe), obtenir("justificatifs", je.id).statut], [false, "a_rapprocher"]);
       supprimer("justificatifs", je.id);
+      {
+        // Avis d'impôt : échéances lues, prélèvements DGFiP classés (une échéance par prélèvement)
+        const NL = String.fromCharCode(10);
+        const ir = echeancesAvisImpot(["Somme qu'il vous reste à payer", "6 623,00 €", "25 septembre 2026 : 1 655,00 €", "26 octobre 2026 : 1 655,00 €", "28 décembre 2026 : 1 658,00 €"].join(NL), "Impôt sur le revenu");
+        const tf = echeancesAvisImpot(["Somme à payer", " 1 412,00 €", "Date limite de paiement : 15/10/2026"].join(NL), "Taxe foncière");
+        const th = echeancesAvisImpot(["Montant de votre taxe d'habitation 1 787,00 €", "la somme à payer sera prélevée automatiquement le 28/12/2026."].join(NL), "Taxe d'habitation");
+        v("avis d'impôt : échéancier, date limite + 10 jours, prélèvement daté", [ir.map(e => e.date + " " + e.montant).join(" | "), tf, th],
+          ["2026-09-25 1655 | 2026-10-26 1655 | 2026-12-28 1658", [{date: "2026-10-25", montant: 1412}], [{date: "2026-12-28", montant: 1787}]]);
+        const dA = enregistrer("documents", {genre: "avis_impot", titre: "Taxe foncière 2027", quoi: "Taxe foncière", echeances: [{date: "2027-10-25", montant: 1412}]});
+        const oT = enregistrer("operations", {compte: cj.id, date: "2027-10-26", montant: -1412, libelle: "PRLV SEPA DIRECTION GENERALE DE", categorie: "À préciser", statut: "a_preciser", dateDebit: "2027-10-26"});
+        const oT2 = enregistrer("operations", {compte: cj.id, date: "2027-10-27", montant: -1412, libelle: "PRLV SEPA DIRECTION GENERALE DE", categorie: "À préciser", statut: "a_preciser", dateDebit: "2027-10-27"});
+        const nA = classerParAvisImpot();
+        v("avis d'impôt : prélèvement classé Impôts › Taxe foncière, une seule fois", [nA, obtenir("operations", oT.id).sousCategorie, obtenir("operations", oT2.id).categorie], [1, "Taxe foncière", "À préciser"]);
+        supprimer("operations", oT.id); supprimer("operations", oT2.id); supprimer("documents", dA.id);
+      }
       v("banque du terminal : caisse régionale lue seule, jamais un fournisseur ; vrai commerçant accepté",
         [estBanqueTerminal("SUD RHONE ALPES"), estBanqueTerminal("Crédit Agricole Sud Rhône Alpes"), estBanqueTerminal("Pharmacie Sud Rhône Alpes"), estBanqueTerminal("La Savoureine")], [true, true, false, false]);
       // Débit sans pièce et pièce du même fournisseur à un écart près : appariés, rapprochés seulement sur décision

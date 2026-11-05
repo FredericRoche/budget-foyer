@@ -310,6 +310,7 @@ function apresImport(){
   affecterDebitsAmex();
   estimerDebitsCartes();
   rapprocherTout();
+  classerParAvisImpot();
 }
 /* Prélèvement Amex sur le compte courant ↔ paiement reçu sur le compte Amex ; virements entre comptes du foyer. */
 function apparierTransferts(){

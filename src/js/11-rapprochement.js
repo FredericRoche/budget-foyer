@@ -300,6 +300,34 @@ function rapprocherAvecEcart(j, op){
   j.ecartMontant = Math.round((Math.abs(op.montant) - j.montant) * 100) / 100;
   lier([j], op, false);
 }
+/* Prélèvements d'impôt classés d'après les avis importés : un débit du Trésor public (libellé DGFiP, « DIRECTION
+   GENERALE DES FINANCES », « IMPOT », « TRESOR PUBLIC ») de même montant qu'une échéance d'avis, à 6 jours près,
+   prend la catégorie Impôts › (impôt sur le revenu, taxe foncière, taxe d'habitation). Seulement une opération
+   pas encore classée ou devinée : compléter n'est pas modifier. Chaque échéance ne sert qu'une fois. */
+function classerParAvisImpot(){
+  const avis = vivants("documents").filter(d => d.genre === "avis_impot" && (d.echeances || []).length);
+  if (!avis.length) return 0;
+  const sousCat = quoi => { const l = LIVRE.parametres.categories["Impôts"] || [];
+    return l.find(s => /revenu/i.test(s) && /revenu/i.test(quoi)) || l.find(s => /fonci/i.test(s) && /fonci/i.test(quoi)) || l.find(s => /habitation/i.test(s) && /habitation/i.test(quoi)) || quoi; };
+  const fisc = o => /DIRECTION GENERALE DE|DGFIP|FINANCES PUBLIQ|TRESOR PUBLIC|\bIMPOTS?\b/i.test(norm(o.libelle + " " + (o.detail || "")));
+  const ops = vivants("operations").filter(o => o.montant < 0 && fisc(o));
+  const prises = new Set(ops.filter(o => o.avisImpot).map(o => o.avisImpot));
+  let n = 0;
+  for (const d of avis) d.echeances.forEach((e, i) => {
+    const cle = d.id + "#" + i; if (prises.has(cle)) return;
+    const o = ops.filter(x => !x.avisImpot && versCentimes(-x.montant) === versCentimes(e.montant) && Math.abs(ecartJours(e.date, x.date)) <= 6)
+      .sort((a, b) => Math.abs(ecartJours(e.date, a.date)) - Math.abs(ecartJours(e.date, b.date)))[0];
+    if (!o) return;
+    o.avisImpot = cle; prises.add(cle);
+    if (o.verrou || !["a_preciser", "propose"].includes(o.statut || "a_preciser")){ enregistrer("operations", o); return; }
+    const sc = sousCat(d.quoi || d.titre || "");
+    ajouterCategorieSilencieuse("Impôts", sc);
+    enregistrer("operations", Object.assign(o, {categorie: "Impôts", sousCategorie: sc, nature: natureParDefaut("Impôts"), statut: "classe",
+      natureExacte: o.natureExacte || (d.titre || "").replace(/ · .*$/, "") + " (avis)"}));
+    n++;
+  });
+  return n;
+}
 /* En-cours : justificatifs à rapprocher (hors espèces), regroupés par moyen de paiement. */
 function libelleMoyen(carte){
   if (!carte) return "Non précisé";
