@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-rrvqfnlu4rMdmH14ES/penZS+JJRN+hMhrklwooPD+U=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-IIZNVJqplVy5tuuDE3Sa9AI20g4deXeUYUYG6XzUBH4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1134";
+const VERSION_APP = "2026-11-05.1141";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3087,6 +3087,63 @@ function rapprocherTout(){
   return auto;
 }
 
+/* Anomalies de rapprochement : ce qui est à traiter à la main (définition de Frédéric, 05/11/2026).
+   - « pièce sans débit » : pièce à rapprocher dont la période est déjà couverte par le relevé de son moyen
+     de paiement (le dernier relevé va au-delà de la fenêtre de la pièce) ;
+   - « montant différent » : même cas, mais un débit voisin existe (devise, pourboire, saisie) ;
+   - « débit sans pièce » : achat carte des 90 derniers jours, postérieur à la première pièce saisie, sans
+     pièce et non écarté (« pas de pièce pour celui-ci ») ;
+   - « fournisseur non reconnu » : pièce sans fiche, ou fiche seulement devinée dans le texte.
+   Chaque anomalie porte une piste. Les pièces dont le relevé n'est pas encore arrivé n'en sont pas. */
+function anomaliesRapprochement(){
+  const comptes = vivants("comptes");
+  const derniere = new Map();
+  for (const o of vivants("operations")) if (o.date > (derniere.get(o.compte) || "")) derniere.set(o.compte, o.date);
+  const r = [], nomJ = j => (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || j.raisonSociale || "—";
+  const pieces = vivants("justificatifs").filter(x => !x.aValider && !estNoteFrais(x));
+  for (const j of pieces.filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES")){
+    const jj = Object.assign({}, j); if (!jj.carte && jj.carte4) jj.carte = carteDesChiffres(jj.carte4);
+    const [avant, apres] = fenetre(jj);
+    const compat = comptes.filter(c => c.type !== "especes" && compteCompatible(jj, c) && derniere.has(c.id));
+    const couvert = compat.reduce((m, c) => derniere.get(c.id) > m ? derniere.get(c.id) : m, "");
+    if (compat.length && couvert < ajouterJours(j.date, apres)) continue;   // relevé pas encore arrivé
+    const cents = versCentimes(j.montant);
+    const dansFenetre = o => { const d = ecartJours(j.date, o.date); return d >= -avant && d <= apres; };
+    const libre = o => !(o.justificatifs || []).some(id => obtenir("justificatifs", id)?.type === j.type);
+    let genre = "pièce sans débit", raison;
+    if ((j.propositions || []).length) raison = "rapprochement proposé, à confirmer";
+    else if (!compat.length) raison = "moyen de paiement inconnu ou sans relevé importé : préciser la carte";
+    else {
+      const ailleurs = vivants("operations").find(o => o.montant < 0 && -versCentimes(o.montant) === cents && dansFenetre(o) && libre(o) && !compat.some(c => c.id === o.compte));
+      const voisin = !ailleurs && vivants("operations").find(o => o.montant < 0 && compat.some(c => c.id === o.compte) && dansFenetre(o) && libre(o)
+        && Math.abs(-versCentimes(o.montant) - cents) <= Math.max(10, cents * 0.03) && -versCentimes(o.montant) !== cents);
+      if (voisin) genre = "montant différent";
+      raison = ailleurs ? "même montant le " + dateCourte(ailleurs.date) + " sur " + libelleCompte(ailleurs.compte) + " : la carte de la pièce est-elle la bonne ?"
+        : voisin ? "au relevé : " + euros(voisin.montant) + " le " + dateCourte(voisin.date) + " (devise, pourboire, erreur de saisie ?)"
+        : "aucun débit de ce montant au relevé (" + libelleMoyen(jj.carte) + ") : espèces, autre moyen, date ou montant mal lus ?";
+    }
+    r.push({genre, j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant), raison});
+  }
+  // Fournisseur non reconnu (pièces rapprochées ou non)
+  const recent = ajouterJours(aujourdhui(), -90);
+  for (const j of pieces.filter(x => (!x.commercant || x.fournisseurDevine) && (x.statut === "a_rapprocher" || x.date >= recent))){
+    if (r.some(a => a.j === j)) { r.find(a => a.j === j).raison += " ; fournisseur non reconnu"; continue; }
+    r.push({genre: "fournisseur non reconnu", j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant),
+      raison: j.fournisseurDevine ? "fournisseur deviné dans le texte : à confirmer" : "aucune fiche fournisseur : choisir ou créer la fiche"});
+  }
+  // Débits carte sans pièce, depuis que des pièces sont saisies
+  const premiere = pieces.filter(x => x.type !== "facture" && x.type !== "devis").reduce((m, x) => !m || x.date < m ? x.date : m, "");
+  if (premiere){
+    const depuis = [premiere, ajouterJours(aujourdhui(), -90)].sort()[1];
+    const cartes = new Set(comptes.filter(c => c.type === "carte").map(c => c.id));
+    for (const o of vivants("operations").filter(o => cartes.has(o.compte) && o.montant < 0 && o.date >= depuis && !(o.justificatifs || []).length && !o.sansPiece && !o.ndf && !(o.commercant && obtenir("commercants", o.commercant)?.sansPiece))){
+      if (pieces.some(j => j.statut === "a_rapprocher" && (j.propositions || []).some(p => p.op === o.id))) continue;
+      r.push({genre: "débit sans pièce", op: o, date: o.date, nom: (o.commercant && obtenir("commercants", o.commercant)?.nom) || o.libelle, montant: o.montant,
+        raison: "au relevé de " + libelleCompte(o.compte) + ", aucune pièce : ticket à saisir, ou rien à joindre"});
+    }
+  }
+  return r.sort((a, b) => a.date < b.date ? 1 : -1);
+}
 /* En-cours : justificatifs à rapprocher (hors espèces), regroupés par moyen de paiement. */
 function libelleMoyen(carte){
   if (!carte) return "Non précisé";
@@ -5753,6 +5810,19 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
      h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office ; ceux qui changeraient fournisseur ou catégorie sont proposés, à confirmer."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
+  const anomalies = anomaliesRapprochement(), raisonDe = new Map(anomalies.filter(a => a.j && a.genre !== "fournisseur non reconnu").map(a => [a.j.id, a.raison]));
+  if (anomalies.length){
+    const ouvert = etat.anomaliesOuvertes !== false;
+    const parGenre = regrouper(anomalies, a => a.genre);
+    c.appendChild(h("section", {class: "encadre", style: {margin: ".6rem 0"}}, h("h3", null, "Anomalies à traiter à la main : " + anomalies.length + " ",
+      h("button", {class: "mini discret", onclick: () => { etat.anomaliesOuvertes = !ouvert; rafraichirEcran(); }}, ouvert ? "Replier" : "Déplier")),
+      h("p", {class: "note"}, [...parGenre].map(([g, l]) => l.length + " " + g).join(" · ") + ". Les pièces dont le relevé n'est pas encore importé n'y figurent pas."),
+      ouvert ? tableau([{titre: "Date"}, {titre: "Anomalie"}, {titre: "Fournisseur ou libellé"}, {titre: "Montant", num: true}, {titre: "Piste"}, {titre: ""}], anomalies, {classe: "serre", ligne: a =>
+        h("tr", {class: "cliquable" + (a.j && a.j === j ? " choisie" : ""), onclick: () => { if (a.j){ etat.choisi = a.j.id; rafraichirEcran(); } else aller("operations", {compte: a.op.compte, mois: a.op.date.slice(0, 7), choisie: a.op.id}); }},
+          h("td", null, dateCourte(a.date)), h("td", null, a.genre), h("td", null, a.nom), h("td", {class: "num"}, euros(a.montant)), h("td", {class: "petit"}, a.raison),
+          h("td", null, a.op ? h("button", {class: "mini discret", title: "Ne plus signaler ce débit (péage, abonnement, achat sans ticket…)", onclick: e => { e.stopPropagation(); enregistrer("operations", Object.assign(a.op, {sansPiece: true})); rafraichirEcran(); }}, "Pas de pièce") : null,
+            a.op && a.op.commercant ? h("button", {class: "mini discret", title: "Ne plus signaler les débits de ce fournisseur (péages, abonnements…) ; réversible dans sa fiche", onclick: e => { e.stopPropagation(); const f = obtenir("commercants", a.op.commercant); if (f){ enregistrer("commercants", Object.assign(f, {sansPiece: true})); rafraichirEcran(); } }}, "Jamais pour ce fournisseur") : null))}) : null));
+  }
   const sures = propositionsSures();
   if (sures.length) c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("span", {class: "discret"}, sures.length + " rapprochement(s) sûr(s) attendent votre accord (ils changeraient fournisseur ou catégorie). "),
     h("button", {class: "mini primaire", onclick: () => validerPropositionsSures(sures)}, "Les relire et valider…")));
@@ -5766,7 +5836,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : "à rapprocher")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
 }});
 
 /* Validation en lot des rapprochements sûrs : chaque ligne montre la pièce, l'opération et ce qui changerait ;
@@ -6107,6 +6177,8 @@ function panneauCommercant(x, etat, n){
     champ("Nom d'usage", nom),
     h("label", null, "Alias (raisons sociales, libellés)"), aliasListe, h("button", {class: "mini discret", style: {margin: ".3rem 0 .6rem"}, onclick: async () => { const a = await demander("Ajouter un alias", "Libellé bancaire ou raison sociale", ""); if (a){ ajouterAlias(x, a); rendreAlias(); } }}, "Ajouter un alias"),
     champ("Catégorie par défaut", cat), champ("Nature", nature), champ("Lieu", lieu),
+    h("div", {class: "case"}, h("input", {type: "checkbox", id: "f-sanspiece", checked: !!x.sansPiece, onchange: e => { x.sansPiece = e.target.checked; enregistrer("commercants", x); }}),
+      h("label", {for: "f-sanspiece"}, "Pas de pièce attendue (péage, abonnement…) : ses débits ne sont pas signalés en anomalie")),
     h("dl", null, h("dt", null, "Achats"), h("dd", null, String(n)),
       titulaires.length ? [h("dt", null, "Titulaire usuel"), h("dd", null, titulaires.map(([t, k]) => t + " (" + k + ")").join(" · "))] : null,
       natures.length ? [h("dt", null, "Natures employées"), h("dd", null, natures.map(([t, k]) => t + " (" + k + ")").join(" · "))] : null,
@@ -7912,6 +7984,20 @@ async function autotest(){
       const oy = obtenir("operations", opY.id);
       v("catégorie devinée et fiche provisoire : rapproché d'office, complété par la pièce", [obtenir("justificatifs", jy.id).statut, oy.categorie, oy.commercant], ["rapproche", "Maison", fVrai.id]);
       supprimer("justificatifs", jy.id); supprimer("operations", opY.id); supprimer("commercants", fVrai.id); if (obtenir("commercants", fProv.id)) supprimer("commercants", fProv.id);
+    }
+    {
+      // Anomalies : période couverte par le relevé de la carte, pas de rapprochement ; piste donnée
+      const oc = enregistrer("operations", {compte: carte.id, date: "2027-03-28", montant: -1, libelle: "COUVERTURE ESSAI"});
+      const oa = enregistrer("operations", {compte: cj.id, date: "2027-03-08", montant: -45.5, libelle: "AUTRE COMPTE ESSAI", dateDebit: "2027-03-08"});
+      const ja = enregistrer("justificatifs", {type: "ticket", date: "2027-03-08", montant: 45.5, carte: "X333", statut: "a_rapprocher", operations: []});
+      const jb = enregistrer("justificatifs", {type: "ticket", date: "2027-03-08", montant: 77.7, carte: "X333", statut: "a_rapprocher", operations: []});
+      const jc = enregistrer("justificatifs", {type: "ticket", date: "2027-03-27", montant: 66.6, carte: "X333", statut: "a_rapprocher", operations: []});
+      const an = anomaliesRapprochement(), rs = id => an.find(a => a.j && a.j.id === id && a.genre !== "fournisseur non reconnu")?.raison || "";
+      v("anomalies : autre compte signalé, aucun débit signalé, relevé pas encore arrivé exclu", [/même montant/.test(rs(ja.id)), /aucun débit/.test(rs(jb.id)), rs(jc.id)], [true, true, ""]);
+      v("anomalies : fournisseur non reconnu, débit carte sans pièce (puis écarté)", [an.some(a => a.j === jc || a.j?.id === jc.id && a.genre === "fournisseur non reconnu"), an.some(a => a.op?.id === oc.id)], [true, true]);
+      enregistrer("operations", Object.assign(oc, {sansPiece: true}));
+      vrai("anomalies : débit marqué « pas de pièce » retiré", !anomaliesRapprochement().some(a => a.op?.id === oc.id));
+      for (const x of [ja, jb, jc]) supprimer("justificatifs", x.id); supprimer("operations", oc.id); supprimer("operations", oa.id);
     }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();

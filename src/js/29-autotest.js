@@ -501,6 +501,20 @@ async function autotest(){
       v("catégorie devinée et fiche provisoire : rapproché d'office, complété par la pièce", [obtenir("justificatifs", jy.id).statut, oy.categorie, oy.commercant], ["rapproche", "Maison", fVrai.id]);
       supprimer("justificatifs", jy.id); supprimer("operations", opY.id); supprimer("commercants", fVrai.id); if (obtenir("commercants", fProv.id)) supprimer("commercants", fProv.id);
     }
+    {
+      // Anomalies : période couverte par le relevé de la carte, pas de rapprochement ; piste donnée
+      const oc = enregistrer("operations", {compte: carte.id, date: "2027-03-28", montant: -1, libelle: "COUVERTURE ESSAI"});
+      const oa = enregistrer("operations", {compte: cj.id, date: "2027-03-08", montant: -45.5, libelle: "AUTRE COMPTE ESSAI", dateDebit: "2027-03-08"});
+      const ja = enregistrer("justificatifs", {type: "ticket", date: "2027-03-08", montant: 45.5, carte: "X333", statut: "a_rapprocher", operations: []});
+      const jb = enregistrer("justificatifs", {type: "ticket", date: "2027-03-08", montant: 77.7, carte: "X333", statut: "a_rapprocher", operations: []});
+      const jc = enregistrer("justificatifs", {type: "ticket", date: "2027-03-27", montant: 66.6, carte: "X333", statut: "a_rapprocher", operations: []});
+      const an = anomaliesRapprochement(), rs = id => an.find(a => a.j && a.j.id === id && a.genre !== "fournisseur non reconnu")?.raison || "";
+      v("anomalies : autre compte signalé, aucun débit signalé, relevé pas encore arrivé exclu", [/même montant/.test(rs(ja.id)), /aucun débit/.test(rs(jb.id)), rs(jc.id)], [true, true, ""]);
+      v("anomalies : fournisseur non reconnu, débit carte sans pièce (puis écarté)", [an.some(a => a.j === jc || a.j?.id === jc.id && a.genre === "fournisseur non reconnu"), an.some(a => a.op?.id === oc.id)], [true, true]);
+      enregistrer("operations", Object.assign(oc, {sansPiece: true}));
+      vrai("anomalies : débit marqué « pas de pièce » retiré", !anomaliesRapprochement().some(a => a.op?.id === oc.id));
+      for (const x of [ja, jb, jc]) supprimer("justificatifs", x.id); supprimer("operations", oc.id); supprimer("operations", oa.id);
+    }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
     v("hors tolérance (opération 5 jours avant le ticket) : pas de rapprochement d'office", obtenir("justificatifs", j3.id).statut, "a_rapprocher");

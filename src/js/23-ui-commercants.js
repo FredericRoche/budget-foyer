@@ -122,6 +122,8 @@ function panneauCommercant(x, etat, n){
     champ("Nom d'usage", nom),
     h("label", null, "Alias (raisons sociales, libellés)"), aliasListe, h("button", {class: "mini discret", style: {margin: ".3rem 0 .6rem"}, onclick: async () => { const a = await demander("Ajouter un alias", "Libellé bancaire ou raison sociale", ""); if (a){ ajouterAlias(x, a); rendreAlias(); } }}, "Ajouter un alias"),
     champ("Catégorie par défaut", cat), champ("Nature", nature), champ("Lieu", lieu),
+    h("div", {class: "case"}, h("input", {type: "checkbox", id: "f-sanspiece", checked: !!x.sansPiece, onchange: e => { x.sansPiece = e.target.checked; enregistrer("commercants", x); }}),
+      h("label", {for: "f-sanspiece"}, "Pas de pièce attendue (péage, abonnement…) : ses débits ne sont pas signalés en anomalie")),
     h("dl", null, h("dt", null, "Achats"), h("dd", null, String(n)),
       titulaires.length ? [h("dt", null, "Titulaire usuel"), h("dd", null, titulaires.map(([t, k]) => t + " (" + k + ")").join(" · "))] : null,
       natures.length ? [h("dt", null, "Natures employées"), h("dd", null, natures.map(([t, k]) => t + " (" + k + ")").join(" · "))] : null,
