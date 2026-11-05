@@ -225,6 +225,22 @@ async function rangerAvisImpot(f){
   } catch (e){ f.rangement = {erreur: e.message}; console.error(e); }
 }
 
+/* Fichier de même nom (ou « nom (n) ») déjà présent dans « d », PDF au texte identique : son nom, sinon null. */
+async function memePdfDejaRange(d, nom, octets){
+  if (!/\.pdf$/i.test(nom)) return null;
+  const base = nom.replace(/\.pdf$/i, "");
+  let texteNouveau = null;
+  for await (const [n, e] of d.entries()){
+    if (e.kind !== "file" || !(n === nom || (n.startsWith(base + " (") && /\(\d+\)\.pdf$/i.test(n)))) continue;
+    try {
+      texteNouveau = texteNouveau ?? (await textePdf(octets)).replace(/\s+/g, "");
+      const t = (await textePdf(new Uint8Array(await (await e.getFile()).arrayBuffer()))).replace(/\s+/g, "");
+      if (t && t === texteNouveau) return n;
+    } catch (err){ /* PDF illisible : pas de rapprochement par le texte */ }
+  }
+  return null;
+}
+
 async function rangerFichier(f){
   if (f.lu.noteFrais) return rangerNoteFrais(f);   // dossier propre, nom normalisé, sans sous-dossier d'année
   if (f.lu.genre === "document" && f.lu.sousGenre === "avis_impot") return rangerAvisImpot(f);
@@ -250,6 +266,14 @@ async function rangerFichier(f){
     for (const p of chemin) d = await d.getDirectoryHandle(p, {create: true});
     const pris = new Set();
     for await (const [nom] of d.entries()) pris.add(nom);
+    // Même nom déjà rangé : un PDF retéléchargé (quelques octets de différence) dont le texte est identique est le même document
+    const memeNom = await memePdfDejaRange(d, f.source.nom, octets);
+    if (memeNom){
+      await f.source.dossier.removeEntry(f.source.nom);
+      if (r.propose) modifierParametres({rangement: Object.assign({}, reglesRangement(), {[r.cle]: r.dossier})});
+      f.rangement = {chemin: chemin.join("/") + "/" + memeNom, identique: true};
+      return;
+    }
     const final = nomLibre(f.source.nom, pris);
     const fh = await d.getFileHandle(final, {create: true});
     const w = await fh.createWritable(); await w.write(octets); await w.close();
