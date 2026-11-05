@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-yZROZMyyvrUui3eOW0FAKtEmbtRNq+a88BvmxSLmNLQ=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-jnDYXM96NLV2yZv/S471l/F2gRTsGdecztTsRUndIMM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1612";
+const VERSION_APP = "2026-11-05.1621";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -6028,8 +6028,50 @@ async function copieIdentique(d, octets, prefixe, niveau){
   return null;
 }
 
+/* ---------- Avis d'impôt : rangés dans le dossier des impôts du foyer (choisi une fois), sous-dossier de l'année ----------
+   Un seul endroit pour tous les avis (revenu, taxes foncières, taxe d'habitation), nommés « AAAA nom d'origine ». */
+const DOSSIER_IMPOTS = {cle: "impots_racine", libelle: "Dossier des impôts"};
+async function choisirDossierImpots(){
+  const d = await window.showDirectoryPicker({id: "bf-impots", mode: "readwrite", startIn: "documents"});
+  const depot = await reglage(DOSSIERS_IMPORT.depot.cle, null);
+  if (depot && await d.isSameEntry(depot)) throw new Error("Ce dossier est le dossier de dépôt : choisissez-en un autre.");
+  await definirReglage(DOSSIER_IMPOTS.cle, d);
+  return d;
+}
+async function dossierImpots(interactif){
+  let d = await reglage(DOSSIER_IMPOTS.cle, null);
+  if (d){
+    let p = await d.queryPermission({mode: "readwrite"});
+    if (p !== "granted" && interactif) p = await d.requestPermission({mode: "readwrite"});
+    return p === "granted" ? d : null;
+  }
+  if (!interactif || !window.showDirectoryPicker) return null;
+  if (!(await confirmer("Où ranger les avis d'impôt sur cet appareil ? Choisissez votre dossier des impôts (celui qui contient un sous-dossier par année).", "Choisir…"))) return null;
+  try { return await choisirDossierImpots(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); return null; }
+}
+async function rangerAvisImpot(f){
+  const racine = await dossierImpots(true);
+  if (!racine){ f.rangement = {reste: "dossier des impôts non désigné"}; return; }
+  try {
+    const octets = new Uint8Array(await (await f.source.poignee.getFile()).arrayBuffer());
+    const deja = await copieIdentique(racine, octets, racine.name, 2);
+    if (deja){ await f.source.dossier.removeEntry(f.source.nom); f.rangement = {chemin: deja, identique: true}; return; }
+    const an = (String(f.lu.titre || "").match(/(20\d{2})/) || [])[1] || anneeFichier(f.lu);
+    const d = await racine.getDirectoryHandle(an, {create: true});
+    const pris = new Set(); for await (const [nom] of d.entries()) pris.add(nom);
+    const nom = f.source.nom.replace(/\s*\(\d+\)(?=\.pdf$)/i, "");
+    const final = nomLibre(/^20\d{2} /.test(nom) ? nom : an + " " + nom, pris);
+    const fh = await d.getFileHandle(final, {create: true});
+    const w = await fh.createWritable(); await w.write(octets); await w.close();
+    if (!memesOctets(new Uint8Array(await (await fh.getFile()).arrayBuffer()), octets)) throw new Error("copie non conforme, le fichier reste au dépôt");
+    await f.source.dossier.removeEntry(f.source.nom);
+    f.rangement = {chemin: racine.name + "/" + an + "/" + final, identique: false};
+  } catch (e){ f.rangement = {erreur: e.message}; console.error(e); }
+}
+
 async function rangerFichier(f){
   if (f.lu.noteFrais) return rangerNoteFrais(f);   // dossier propre, nom normalisé, sans sous-dossier d'année
+  if (f.lu.genre === "document" && f.lu.sousGenre === "avis_impot") return rangerAvisImpot(f);
   const archives = await dossierImport("archives", true);
   if (!archives){ f.rangement = {reste: "archives non désignées"}; return; }
   const r = dossierRangement(f);
@@ -6089,6 +6131,7 @@ function celluleRangement(f){
   if (f.rangement?.reste) return h("span", {class: "discret"}, "reste au dépôt (" + f.rangement.reste + ")");
   if (f.statut === "erreur" || f.lu.genre === "inconnu") return h("span", {class: "discret"}, "reste au dépôt");
   if (f.lu.noteFrais) return h("span", null, "→ " + DOSSIER_NOTES_FRAIS.libelle.toLowerCase() + " : « " + nomNoteFrais(f.lu.noteFrais) + " »");
+  if (f.lu.genre === "document" && f.lu.sousGenre === "avis_impot") return h("span", null, "→ " + DOSSIER_IMPOTS.libelle.toLowerCase() + ", sous-dossier de l'année");
   const r = dossierRangement(f);
   if (!r) return h("span", {class: "discret"}, "reste au dépôt");
   if (!r.dossier) return h("button", {class: "mini discret", onclick: () => modifierRangement(r.cle, "")}, "Définir le rangement…");
@@ -6111,7 +6154,13 @@ function sectionDossiersImport(){
     return h("li", null, h("span", null, DOSSIER_NOTES_FRAIS.libelle + " : ", zone),
       h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierNotesFrais(); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
   })();
-  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives"), ligneNdf));
+  const ligneImpots = (() => {
+    const zone = h("span", {class: "discret"}, "…");
+    reglage(DOSSIER_IMPOTS.cle, null).then(d => { zone.textContent = d ? "« " + d.name + " »" : "non désigné (demandé au premier rangement)"; zone.className = d ? "" : "discret"; });
+    return h("li", null, h("span", null, DOSSIER_IMPOTS.libelle + " : ", zone),
+      h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierImpots(); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
+  })();
+  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives"), ligneNdf, ligneImpots));
   const regles = Object.entries(reglesRangement()).sort((a, b) => libelleRangement(a[0]).localeCompare(libelleRangement(b[0])));
   if (regles.length) corps.appendChild(tableau([{titre: "Pièces"}, {titre: "Rangées dans (+ année)"}, {titre: ""}], regles, {classe: "serre", ligne: ([cle, d]) =>
     h("tr", null, h("td", null, libelleRangement(cle)), h("td", {class: "petit"}, d), h("td", null, h("button", {class: "mini discret", onclick: () => modifierRangement(cle, d)}, "Modifier")))}));
