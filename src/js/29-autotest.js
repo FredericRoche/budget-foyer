@@ -570,6 +570,16 @@ async function autotest(){
       v("espèces défait : l'opération en espèces disparaît avec le rapprochement", [!!obtenir("operations", oe), obtenir("justificatifs", je.id).statut], [false, "a_rapprocher"]);
       supprimer("justificatifs", je.id);
       {
+        // Placement en double (numéro avec et sans lettre clé) : valeurs réunies sur le compte actif
+        const pA = enregistrer("comptes", {nom: "PEA essai", type: "pea", numero: "012345", actif: true});
+        const pB = enregistrer("comptes", {nom: "PEA essai B", type: "pea", numero: "012345Z", actif: false});
+        enregistrer("valorisations", {compte: pB.id, date: "2026-12-31", valeur: 1000, source: "releve.pdf"});
+        const nR = reunirPlacementsEnDouble();
+        v("placement en double : valeurs réunies, import rattaché au compte actif", [nR, vivants("valorisations").filter(x => x.compte === pA.id).length, compteDuFichier({genre: "valorisation", numero: "012345Z", typeCompte: "pea"})?.id === pA.id], [1, 1, true]);
+        for (const x of vivants("valorisations").filter(x => x.compte === pA.id)) supprimer("valorisations", x.id);
+        supprimer("comptes", pA.id); supprimer("comptes", pB.id);
+      }
+      {
         // Relevé annuel de livret : solde au 31/12 tiré des écritures
         const NL2 = String.fromCharCode(10);
         const tl = ["RELEVE DE COMPTE", " du 01.02.2026 au 31.01.2027 - N° 3", "ECRITURES DE LA PERIODE", "DATE LIBELLE VALEUR DEBIT CREDIT", "31.01 ANCIEN SOLDE 12 119,39 [C]",

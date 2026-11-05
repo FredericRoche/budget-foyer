@@ -55,6 +55,7 @@ async function ouvrirLivre(motDePasse, souvenir){
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";
   try { classerParAvisImpot(); } catch (e) {}
+  try { const np = reunirPlacementsEnDouble(); if (np) setTimeout(() => message(np + " valeur(s) d'un placement en double (même numéro, avec ou sans lettre clé) réunie(s) sur le compte actif."), 4500); } catch (e) {}
   estimerDebitsCartes();   // livres repris avant la correction du 17/10/2026 : achats carte datés comme débités le jour même
   if (!distant) await ecrireCache(source, false).catch(() => {});
   if (LIVRE_MODIFIE) planifierSauvegarde();

@@ -48,11 +48,35 @@ function compteAProposer(lu){
   if (lu.genre === "valorisation") return {nom: lu.produit + (lu.numero ? " …" + String(lu.numero).slice(-4) : ""), type: lu.typeCompte, banque: lu.etablissement, numero: lu.numero || ""};
   return null;
 }
+const numeroCourt = n => { const t = String(n || "").replace(/[\s.-]/g, "").toUpperCase().replace(/[A-Z]$/, "").replace(/^0+/, ""); return t.length >= 5 ? t : ""; };
+/* Réparation (05/11/2026) : un même placement créé deux fois (numéro avec et sans lettre clé, ex. PEA « 089331 » et
+   « 089331B ») : les valeurs du compte en double rejoignent le compte actif, le double est désactivé. */
+function reunirPlacementsEnDouble(){
+  let n = 0;
+  const placements = vivants("comptes").filter(c => !["courant", "carte", "especes"].includes(c.type) && numeroCourt(c.numero));
+  for (const c of placements.filter(x => x.actif !== false)){
+    for (const d of placements.filter(x => x.id !== c.id && x.type === c.type && numeroCourt(x.numero) === numeroCourt(c.numero) && x.actif === false)){
+      for (const v of vivants("valorisations").filter(v => v.compte === d.id)){
+        const deja = vivants("valorisations").find(w => w.compte === c.id && w.date === v.date);
+        if (deja && deja.source && !v.source) continue;   // une valeur de relevé n'est pas remplacée par une saisie
+        if (deja) supprimer("valorisations", deja.id);
+        enregistrer("valorisations", Object.assign(v, {compte: c.id})); n++;
+      }
+    }
+  }
+  return n;
+}
 function compteDuFichier(lu){
   if (lu.genre === "compte") return trouverCompte({numero: lu.numero, type: "courant"});
   if (lu.genre === "carte") return trouverCompte({carte: lu.carte, banque: lu.banque});
   if (lu.genre === "valorisation"){
-    return vivants("comptes").find(c => lu.numero && c.numero && String(c.numero).replace(/\s/g, "") === String(lu.numero).replace(/\s/g, ""))
+    // Numéro exact, sinon au même numéro court (sans zéros de tête ni lettre clé finale : « 089331 » = « 089331B »),
+    // de préférence un compte actif du même type
+    const exact = vivants("comptes").find(c => lu.numero && c.numero && String(c.numero).replace(/\s/g, "") === String(lu.numero).replace(/\s/g, ""));
+    const court = numeroCourt(lu.numero);
+    const proches = court ? vivants("comptes").filter(c => numeroCourt(c.numero) === court) : [];
+    return (exact && exact.actif !== false ? exact : null)
+      || proches.find(c => c.actif !== false && c.type === lu.typeCompte) || proches.find(c => c.actif !== false) || exact || proches[0]
       || vivants("comptes").find(c => !lu.numero && c.type === lu.typeCompte && norm(c.produit || c.nom).includes(norm(lu.produit))) || null;
   }
   if (lu.genre === "facture_cb") return compteCourantLcl(lu.numero) || compteCourantLcl();
