@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-TjOLVlaxOQwwfBeFyik33DsMUSIDE9pfX9HZxcRS23E=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-hn1T/rH1RH1CDwbzsGdCTMslW+sxJo0DTqvkLJO+NjA=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1317";
+const VERSION_APP = "2026-11-05.1529";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2379,7 +2379,7 @@ function preparerReleve(lu, compte){
   const nv = lu.genre === "carte" && lu.banque === "LCL" ? vivants("comptes").find(c => c.carte === "LCL-NV") : null;
   const empNv = nv ? empreintes(nv.id, lignes) : [];
   lignes.forEach((l, i) => {
-    if (idx.has(emp[i])) res.deja.push(l);
+    if (idx.has(emp[i])){ res.deja.push(l); if (l.cheque){ const o = idx.get(emp[i]); if (o && !o.cheque) (res.cheques = res.cheques || []).push({op: o, cheque: l.cheque}); } }
     else if (nv && idx.has(empNv[i])) res.reattribuees.push({ligne: l, op: idx.get(empNv[i]), empreinte: emp[i]});
     else res.nouvelles.push(Object.assign({}, l, {empreinte: emp[i]}));
   });
@@ -2502,7 +2502,8 @@ function periodesCartes(){
   return vivants("imports").filter(i => i.genre === "carte" && i.banque === "LCL").map(i => i.periode);
 }
 function creerOperation(compte, l, importId){
-  const op = {compte: compte.id, date: l.date, montant: Math.round(l.montant * 100) / 100, libelle: l.libelle, detail: l.detail || "", type: l.type || "",
+  // Chèque : le numéro (colonne à part dans l'export LCL) est gardé ; il sert au rapprochement avec la pièce
+  const op = {compte: compte.id, date: l.date, montant: Math.round(l.montant * 100) / 100, libelle: l.libelle || (l.cheque ? "CHQ. " + l.cheque : ""), detail: l.detail || "", type: l.type || "", cheque: l.cheque || undefined,
     mcc: l.mcc || "", categorieBanque: l.categorieBanque || "", ville: l.ville || "", empreinte: l.empreinte, import: importId, justificatifs: []};
   if (compte.type === "carte") op.dateDebit = l.dateDebit || null; else op.dateDebit = l.date;
   classerAutomatiquement(op);
@@ -2513,6 +2514,8 @@ function appliquerReleve(prep){
     date: new Date().toISOString(), nouvelles: prep.nouvelles.length, deja: prep.deja.length});
   for (const l of prep.nouvelles) creerOperation(prep.compte, l, imp.id);
   for (const r of prep.reattribuees) enregistrer("operations", Object.assign(r.op, {compte: prep.compte.id, empreinte: r.empreinte}));
+  // Chèques déjà importés sans leur numéro (avant le 05/11/2026) : numéro et libellé complétés
+  for (const c of prep.cheques || []) enregistrer("operations", Object.assign(c.op, {cheque: c.cheque, libelle: c.op.libelle || "CHQ. " + c.cheque}));
   // Achats carte retrouvés dans l'export du compte : débités en fin de mois (sans écraser une date de débit établie)
   if (prep.dateDebitCartes) for (const o of prep.debitsCartes || []) if (!o.dateDebit || o.debitEstime) enregistrer("operations", Object.assign(o, {dateDebit: prep.dateDebitCartes, debitEstime: false}));
   if (prep.cartesSansTitulaire?.length){
@@ -3101,7 +3104,9 @@ function candidats(js){
     const dj = ecartJours(j.date, op.date);
     if (dj < -avant || dj > apres) continue;
     const compte = obtenir("comptes", op.compte); if (!compte || !compteCompatible(j, compte)) continue;
-    if (j.cheque && !String(op.libelle + " " + (op.detail || "")).replace(/\D/g, " ").split(" ").some(n => n && (n === j.cheque || n.endsWith(j.cheque)))) continue;
+    // Numéro de chèque exigé quand l'opération en porte un ; un chèque importé sans son numéro (avant le 05/11/2026) se rapproche au montant
+    const numerosOp = String(op.libelle + " " + (op.detail || "") + " " + (op.cheque || "")).replace(/\D/g, " ").split(" ").filter(n => n.length >= 5);
+    if (j.cheque && (numerosOp.length || !/^cheque/i.test(norm(op.type || ""))) && !numerosOp.some(n => n === j.cheque || n.endsWith(j.cheque))) continue;
     const dejaTypes = (op.justificatifs || []).map(id => obtenir("justificatifs", id)).filter(x => x && !js.includes(x)).map(x => x.type);
     if (js.some(x => dejaTypes.includes(x.type))) continue;
     const cOp = op.commercant ? obtenir("commercants", op.commercant) : null;
@@ -8262,6 +8267,18 @@ async function autotest(){
         for (const s of vivants("soldes").filter(s => s.source === "essai.pdf")) supprimer("soldes", s.id);
         for (const i of vivants("imports").filter(i => i.fichier === "essai.pdf")) supprimer("imports", i.id);
         const cl = Object.assign({}, LIVRE.parametres.clotures); delete cl[cj.id + "|2027-05-07"]; modifierParametres({clotures: cl});
+      }
+      {
+        // Chèque importé sans son numéro (colonne à part de l'export LCL) : rapproché au montant ; avec numéro, il doit correspondre
+        const oc1 = enregistrer("operations", {compte: cj.id, date: "2027-03-20", montant: -524.03, libelle: "", type: "Chèque", dateDebit: "2027-03-20"});
+        const jc1 = enregistrer("justificatifs", {type: "facture", date: "2027-03-13", montant: 524.03, carte: "CPT:" + cj.id, cheque: "5367918", statut: "a_rapprocher", operations: []});
+        const avant = candidats([jc1]).some(x => x.op.id === oc1.id);
+        enregistrer("operations", Object.assign(oc1, {cheque: "5367000", libelle: "CHQ. 5367000"}));
+        v("chèque : sans numéro connu, rapproché au montant ; numéro différent, écarté", [avant, candidats([jc1]).some(x => x.op.id === oc1.id)], [true, false]);
+        supprimer("operations", oc1.id); supprimer("justificatifs", jc1.id);
+        const lc = creerOperation(cj, {date: "2027-03-21", montant: -10, libelle: "", type: "Chèque", cheque: "1234567", empreinte: "essai-chq"}, null);
+        v("import : le numéro du chèque est gardé (libellé « CHQ. n° »)", [lc.cheque, lc.libelle], ["1234567", "CHQ. 1234567"]);
+        supprimer("operations", lc.id);
       }
       const je = enregistrer("justificatifs", {type: "ticket", date: "2027-03-14", montant: 9.5, carte: "ESPECES", statut: "a_rapprocher", operations: []});
       creerOperationEspeces(je); const oe = obtenir("justificatifs", je.id).operations[0];

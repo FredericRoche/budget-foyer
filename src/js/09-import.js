@@ -104,7 +104,7 @@ function preparerReleve(lu, compte){
   const nv = lu.genre === "carte" && lu.banque === "LCL" ? vivants("comptes").find(c => c.carte === "LCL-NV") : null;
   const empNv = nv ? empreintes(nv.id, lignes) : [];
   lignes.forEach((l, i) => {
-    if (idx.has(emp[i])) res.deja.push(l);
+    if (idx.has(emp[i])){ res.deja.push(l); if (l.cheque){ const o = idx.get(emp[i]); if (o && !o.cheque) (res.cheques = res.cheques || []).push({op: o, cheque: l.cheque}); } }
     else if (nv && idx.has(empNv[i])) res.reattribuees.push({ligne: l, op: idx.get(empNv[i]), empreinte: emp[i]});
     else res.nouvelles.push(Object.assign({}, l, {empreinte: emp[i]}));
   });
@@ -227,7 +227,8 @@ function periodesCartes(){
   return vivants("imports").filter(i => i.genre === "carte" && i.banque === "LCL").map(i => i.periode);
 }
 function creerOperation(compte, l, importId){
-  const op = {compte: compte.id, date: l.date, montant: Math.round(l.montant * 100) / 100, libelle: l.libelle, detail: l.detail || "", type: l.type || "",
+  // Chèque : le numéro (colonne à part dans l'export LCL) est gardé ; il sert au rapprochement avec la pièce
+  const op = {compte: compte.id, date: l.date, montant: Math.round(l.montant * 100) / 100, libelle: l.libelle || (l.cheque ? "CHQ. " + l.cheque : ""), detail: l.detail || "", type: l.type || "", cheque: l.cheque || undefined,
     mcc: l.mcc || "", categorieBanque: l.categorieBanque || "", ville: l.ville || "", empreinte: l.empreinte, import: importId, justificatifs: []};
   if (compte.type === "carte") op.dateDebit = l.dateDebit || null; else op.dateDebit = l.date;
   classerAutomatiquement(op);
@@ -238,6 +239,8 @@ function appliquerReleve(prep){
     date: new Date().toISOString(), nouvelles: prep.nouvelles.length, deja: prep.deja.length});
   for (const l of prep.nouvelles) creerOperation(prep.compte, l, imp.id);
   for (const r of prep.reattribuees) enregistrer("operations", Object.assign(r.op, {compte: prep.compte.id, empreinte: r.empreinte}));
+  // Chèques déjà importés sans leur numéro (avant le 05/11/2026) : numéro et libellé complétés
+  for (const c of prep.cheques || []) enregistrer("operations", Object.assign(c.op, {cheque: c.cheque, libelle: c.op.libelle || "CHQ. " + c.cheque}));
   // Achats carte retrouvés dans l'export du compte : débités en fin de mois (sans écraser une date de débit établie)
   if (prep.dateDebitCartes) for (const o of prep.debitsCartes || []) if (!o.dateDebit || o.debitEstime) enregistrer("operations", Object.assign(o, {dateDebit: prep.dateDebitCartes, debitEstime: false}));
   if (prep.cartesSansTitulaire?.length){

@@ -548,6 +548,18 @@ async function autotest(){
         for (const i of vivants("imports").filter(i => i.fichier === "essai.pdf")) supprimer("imports", i.id);
         const cl = Object.assign({}, LIVRE.parametres.clotures); delete cl[cj.id + "|2027-05-07"]; modifierParametres({clotures: cl});
       }
+      {
+        // Chèque importé sans son numéro (colonne à part de l'export LCL) : rapproché au montant ; avec numéro, il doit correspondre
+        const oc1 = enregistrer("operations", {compte: cj.id, date: "2027-03-20", montant: -524.03, libelle: "", type: "Chèque", dateDebit: "2027-03-20"});
+        const jc1 = enregistrer("justificatifs", {type: "facture", date: "2027-03-13", montant: 524.03, carte: "CPT:" + cj.id, cheque: "5367918", statut: "a_rapprocher", operations: []});
+        const avant = candidats([jc1]).some(x => x.op.id === oc1.id);
+        enregistrer("operations", Object.assign(oc1, {cheque: "5367000", libelle: "CHQ. 5367000"}));
+        v("chèque : sans numéro connu, rapproché au montant ; numéro différent, écarté", [avant, candidats([jc1]).some(x => x.op.id === oc1.id)], [true, false]);
+        supprimer("operations", oc1.id); supprimer("justificatifs", jc1.id);
+        const lc = creerOperation(cj, {date: "2027-03-21", montant: -10, libelle: "", type: "Chèque", cheque: "1234567", empreinte: "essai-chq"}, null);
+        v("import : le numéro du chèque est gardé (libellé « CHQ. n° »)", [lc.cheque, lc.libelle], ["1234567", "CHQ. 1234567"]);
+        supprimer("operations", lc.id);
+      }
       const je = enregistrer("justificatifs", {type: "ticket", date: "2027-03-14", montant: 9.5, carte: "ESPECES", statut: "a_rapprocher", operations: []});
       creerOperationEspeces(je); const oe = obtenir("justificatifs", je.id).operations[0];
       delier(obtenir("justificatifs", je.id));

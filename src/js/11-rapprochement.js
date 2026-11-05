@@ -63,7 +63,9 @@ function candidats(js){
     const dj = ecartJours(j.date, op.date);
     if (dj < -avant || dj > apres) continue;
     const compte = obtenir("comptes", op.compte); if (!compte || !compteCompatible(j, compte)) continue;
-    if (j.cheque && !String(op.libelle + " " + (op.detail || "")).replace(/\D/g, " ").split(" ").some(n => n && (n === j.cheque || n.endsWith(j.cheque)))) continue;
+    // Numéro de chèque exigé quand l'opération en porte un ; un chèque importé sans son numéro (avant le 05/11/2026) se rapproche au montant
+    const numerosOp = String(op.libelle + " " + (op.detail || "") + " " + (op.cheque || "")).replace(/\D/g, " ").split(" ").filter(n => n.length >= 5);
+    if (j.cheque && (numerosOp.length || !/^cheque/i.test(norm(op.type || ""))) && !numerosOp.some(n => n === j.cheque || n.endsWith(j.cheque))) continue;
     const dejaTypes = (op.justificatifs || []).map(id => obtenir("justificatifs", id)).filter(x => x && !js.includes(x)).map(x => x.type);
     if (js.some(x => dejaTypes.includes(x.type))) continue;
     const cOp = op.commercant ? obtenir("commercants", op.commercant) : null;
