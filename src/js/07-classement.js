@@ -214,6 +214,8 @@ function proposerClassement(op){
 }
 function natureParDefaut(categorie){
   if (categorie === "Revenus") return "Revenu";
+  // Catégorie rattachée à un projet (travaux…) : dépense exceptionnelle, suivie dans Projets, hors marche courante
+  try { if (categorie && reglesProjets().some(r => r.categorie === categorie && !r.sousCategorie)) return "Exceptionnelle"; } catch (e) {}
   if (["Transfert", "Épargne", "Patrimoine"].includes(categorie)) return "Hors budget";
   return "Courante";
 }

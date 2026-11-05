@@ -570,6 +570,15 @@ async function autotest(){
       v("espèces défait : l'opération en espèces disparaît avec le rapprochement", [!!obtenir("operations", oe), obtenir("justificatifs", je.id).statut], [false, "a_rapprocher"]);
       supprimer("justificatifs", je.id);
       {
+        // Lot : nature d'une catégorie (projet) sur les opérations et les parts ventilées
+        const on1 = enregistrer("operations", {compte: cj.id, date: "2027-02-10", montant: -100, libelle: "ESSAI NAT 1", categorie: "Catégorie essai", sousCategorie: "Études", nature: "Courante"});
+        const on2 = enregistrer("operations", {compte: cj.id, date: "2027-02-11", montant: -50, libelle: "ESSAI NAT 2", categorie: "Catégorie essai", sousCategorie: "Honoraires", nature: "Hors budget"});
+        const lotN = {actions: [{type: "natureCategorie", categorie: "Catégorie essai", nature: "Exceptionnelle"}]};
+        const apN = preparerCorrections(lotN); appliquerCorrections(lotN);
+        v("lot : nature d'une catégorie (aperçu, puis appliquée)", [apN.nb, obtenir("operations", on1.id).nature, obtenir("operations", on2.id).nature], [2, "Exceptionnelle", "Exceptionnelle"]);
+        supprimer("operations", on1.id); supprimer("operations", on2.id);
+      }
+      {
         // Avis d'impôt : échéances lues, prélèvements DGFiP classés (une échéance par prélèvement)
         const NL = String.fromCharCode(10);
         const ir = echeancesAvisImpot(["Somme qu'il vous reste à payer", "6 623,00 €", "25 septembre 2026 : 1 655,00 €", "26 octobre 2026 : 1 655,00 €", "28 décembre 2026 : 1 658,00 €"].join(NL), "Impôt sur le revenu");

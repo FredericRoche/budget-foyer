@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-c/5HCFWuGBGRD3tl8uZK9wQihK+yUACt+1SgMlgmNwU=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Zmw3DbgLHyyTrRQzwgWnabQsNvejtFgLYRWuGQ3IVLo=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1608";
+const VERSION_APP = "2026-11-05.1610";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1860,6 +1860,8 @@ function proposerClassement(op){
 }
 function natureParDefaut(categorie){
   if (categorie === "Revenus") return "Revenu";
+  // Catégorie rattachée à un projet (travaux…) : dépense exceptionnelle, suivie dans Projets, hors marche courante
+  try { if (categorie && reglesProjets().some(r => r.categorie === categorie && !r.sousCategorie)) return "Exceptionnelle"; } catch (e) {}
   if (["Transfert", "Épargne", "Patrimoine"].includes(categorie)) return "Hors budget";
   return "Courante";
 }
@@ -2798,7 +2800,16 @@ function appliquerRegles(contenu){
    - fusionnerFiches {garder, absorber: [noms], nom?} : opérations, justificatifs et alias rejoignent « garder »
    - deplacerSousCategorie {de: [cat, sous], vers: [cat, sous]} : liste des réglages et tous les enregistrements
    - reclasser {fournisseur, de: [cat, sous], vers: [cat, sous], ficheParDefaut?} : opérations de ce fournisseur
-   - categorieFiche {fiche, categorie, sousCategorie} : classement par défaut fixé, sans toucher au passé */
+   - categorieFiche {fiche, categorie, sousCategorie} : classement par défaut fixé, sans toucher au passé
+   - natureCategorie {categorie, sousCategorie?, nature} : nature (Courante, Exceptionnelle, Hors budget…) de toutes
+     les opérations, et parts ventilées, de cette catégorie */
+const partsNatureAChanger = a => vivants("operations").flatMap(o => {
+  const r = [];
+  const vise = (cat, sous) => cat === a.categorie && (!a.sousCategorie || (sous || "") === a.sousCategorie);
+  if (o.ventilation && o.ventilation.length) o.ventilation.forEach((v, i) => { if (vise(v.categorie || o.categorie, v.sousCategorie || o.sousCategorie) && (v.nature || o.nature) !== a.nature) r.push({o, i}); });
+  else if (vise(o.categorie, o.sousCategorie) && o.nature !== a.nature) r.push({o, i: -1});
+  return r;
+});
 
 // Nom exact d'abord ; sinon sans tenir compte de la casse, des accents, des espaces ni de la ponctuation
 const cleNomFiche = s => norm(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -2859,6 +2870,10 @@ function preparerCorrections(lu){
         return f ? {ok: true, n: 0, texte: "« " + a.fiche + " » : classement par défaut " + a.categorie + " › " + (a.sousCategorie || "") + " (opérations passées inchangées)"}
           : {ok: false, texte: "Fiche « " + a.fiche + " » introuvable : ignorée"};
       }
+      if (a.type === "natureCategorie"){
+        const n = partsNatureAChanger(a).length;
+        return {ok: true, n, texte: [a.categorie, a.sousCategorie].filter(Boolean).join(" › ") + " : nature « " + a.nature + " » pour " + n + " opération(s) ou part(s)"};
+      }
       return {ok: false, texte: "Action inconnue « " + a.type + " » : ignorée"};
     } catch (e){ return {ok: false, texte: "Action « " + a.type + " » illisible : " + e.message}; }
   });
@@ -2896,6 +2911,12 @@ function appliquerCorrections(lu){
       for (const o of opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]))
         enregistrer("operations", Object.assign(o, {categorie: a.vers[0], sousCategorie: a.vers[1], nature: natureParDefaut(a.vers[0]), statut: "classe", verrou: true}));
       if (a.ficheParDefaut){ Object.assign(f, {categorie: a.vers[0], sousCategorie: a.vers[1], fixe: true}); enregistrer("commercants", f); }
+      faites++;
+    } else if (a.type === "natureCategorie"){
+      for (const {o, i} of partsNatureAChanger(a)){
+        if (i >= 0) o.ventilation[i].nature = a.nature; else o.nature = a.nature;
+        enregistrer("operations", o);
+      }
       faites++;
     } else if (a.type === "categorieFiche"){
       const f = ficheNommee(a.fiche); if (!f) continue;
@@ -8368,6 +8389,15 @@ async function autotest(){
       delier(obtenir("justificatifs", je.id));
       v("espèces défait : l'opération en espèces disparaît avec le rapprochement", [!!obtenir("operations", oe), obtenir("justificatifs", je.id).statut], [false, "a_rapprocher"]);
       supprimer("justificatifs", je.id);
+      {
+        // Lot : nature d'une catégorie (projet) sur les opérations et les parts ventilées
+        const on1 = enregistrer("operations", {compte: cj.id, date: "2027-02-10", montant: -100, libelle: "ESSAI NAT 1", categorie: "Catégorie essai", sousCategorie: "Études", nature: "Courante"});
+        const on2 = enregistrer("operations", {compte: cj.id, date: "2027-02-11", montant: -50, libelle: "ESSAI NAT 2", categorie: "Catégorie essai", sousCategorie: "Honoraires", nature: "Hors budget"});
+        const lotN = {actions: [{type: "natureCategorie", categorie: "Catégorie essai", nature: "Exceptionnelle"}]};
+        const apN = preparerCorrections(lotN); appliquerCorrections(lotN);
+        v("lot : nature d'une catégorie (aperçu, puis appliquée)", [apN.nb, obtenir("operations", on1.id).nature, obtenir("operations", on2.id).nature], [2, "Exceptionnelle", "Exceptionnelle"]);
+        supprimer("operations", on1.id); supprimer("operations", on2.id);
+      }
       {
         // Avis d'impôt : échéances lues, prélèvements DGFiP classés (une échéance par prélèvement)
         const NL = String.fromCharCode(10);
