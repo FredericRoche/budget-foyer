@@ -45,6 +45,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       rafraichirEcran();
     }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs sans changement de fournisseur ni de catégorie s'appliqueront d'office, les autres seront proposés.")));
     // Aperçu des opérations nouvelles : seulement pour les fichiers qui en proposent un classement (relevés)
+    try {
     const detail = FICHIERS_EN_COURS.find(f => f.statut === "pret" && f.lu.genre !== "releve_lcl" && ((f.prep?.nouvelles?.length && f.prep.nouvelles[0]?.proposition) || f.prep?.cartesSansTitulaire?.length));
     if (detail){
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Aperçu : " + detail.lu.nom));
@@ -74,6 +75,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
           h("td", null, h("input", {type: "checkbox", checked: p.choixEnTrop.has(o.id), onchange: e => { e.target.checked ? p.choixEnTrop.add(o.id) : p.choixEnTrop.delete(o.id); }})),
           h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
     }
+    } catch (e){ console.error(e); gauche.appendChild(h("p", {class: "neg"}, "Aperçu impossible à afficher : " + e.message + " (le fichier peut quand même être enregistré ; signalez ce message).")); }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));
   // Pleine largeur : la routine du mois se replie sous la liste au lieu d'occuper une colonne en permanence
   grille.className = "";
