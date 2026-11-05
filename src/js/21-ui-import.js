@@ -146,7 +146,18 @@ function preparerFichier(f){
       f.statut = "pret";
     } else if (lu.genre === "reprise_v7"){ f.prep = preparerReprise(lu); f.statut = "pret"; }
     else if (lu.genre === "cartes_lcl"){ f.prep = preparerCartesPdf(lu); f.statut = "pret"; }
-    else if (lu.genre === "releve_lcl"){ f.prep = preparerClotureLcl(lu); if (f.prep) f.compte = f.prep.compte; f.statut = f.prep ? "pret" : "erreur"; if (!f.prep) f.erreur = "compte LCL introuvable"; }
+    else if (lu.genre === "releve_lcl"){
+      // Recalcul (après l'enregistrement d'un autre fichier) : les choix de l'utilisateur sont gardés
+      const avant = f.prep;
+      f.prep = preparerClotureLcl(lu); if (f.prep) f.compte = f.prep.compte; f.statut = f.prep ? "pret" : "erreur"; if (!f.prep) f.erreur = "compte LCL introuvable";
+      if (avant && f.prep){
+        const cle = l => l.date + "|" + versCentimes(l.montant) + "|" + l.libelle;
+        const refuses = new Set(avant.manquants.filter((l, i) => !avant.choixManquants.has(i)).map(cle));
+        f.prep.choixManquants = new Set(f.prep.manquants.map((l, i) => i).filter(i => !refuses.has(cle(f.prep.manquants[i]))));
+        const presents = new Set([...f.prep.enTrop, ...f.prep.enTropCartes].map(o => o.id));
+        f.prep.choixEnTrop = new Set([...avant.choixEnTrop].filter(id => presents.has(id)));
+      }
+    }
     else if (lu.genre === "corrections"){ f.prep = preparerCorrections(lu); f.statut = "pret"; }
     else if (["regles", "plan", "justificatif_pdf", "image", "document"].includes(lu.genre)) f.statut = "pret";
     else f.statut = "erreur";
