@@ -522,8 +522,10 @@ async function autotest(){
       const fq = enregistrer("commercants", {nom: "Hebergeur Essai", alias: [], stats: {}, natures: {}});
       const oq = enregistrer("operations", {compte: carte.id, date: "2027-03-12", montant: -15.74, libelle: "HEBERGEUR ESSAI COM", commercant: fq.id});
       const jq = enregistrer("justificatifs", {type: "facture", date: "2027-03-12", montant: 13.68, carte: "X333", commercant: fq.id, commercantNom: fq.nom, statut: "a_rapprocher", operations: []});
-      const aq = anomaliesRapprochement().find(a => a.op?.id === oq.id);
-      v("écart de montant : pièce voisine proposée, pas rapprochée d'office", [aq?.genre, aq?.piece?.id, obtenir("justificatifs", jq.id).statut], ["montant différent", jq.id, "a_rapprocher"]);
+      const oq2 = enregistrer("operations", {compte: carte.id, date: "2027-03-13", montant: -16.5, libelle: "HEBERGEUR ESSAI COM", commercant: fq.id});
+      const anq = anomaliesRapprochement(), aq = anq.find(a => a.op?.id === oq.id);
+      v("écart de montant : pièce voisine proposée à un seul débit (le plus proche), pas rapprochée d'office", [aq?.genre, aq?.piece?.id, anq.find(a => a.op?.id === oq2.id)?.piece || null, obtenir("justificatifs", jq.id).statut], ["montant différent", jq.id, null, "a_rapprocher"]);
+      supprimer("operations", oq2.id);
       rapprocherAvecEcart(obtenir("justificatifs", jq.id), obtenir("operations", oq.id));
       v("rapprocher quand même : lié, écart noté, plus d'anomalie", [obtenir("justificatifs", jq.id).statut, obtenir("justificatifs", jq.id).ecartMontant, anomaliesRapprochement().some(a => a.op?.id === oq.id)], ["rapproche", 2.06, false]);
       supprimer("justificatifs", jq.id); supprimer("operations", oq.id); supprimer("commercants", fq.id);
