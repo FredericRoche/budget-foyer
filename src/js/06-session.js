@@ -49,6 +49,7 @@ async function ouvrirLivre(motDePasse, souvenir){
   }
   LIVRE = completerLivre(livre);
   try { reparerCategories(); } catch (e) {}
+  try { const na = reparerAliasBanques(); if (na) setTimeout(() => message(na + " alias retiré(s) : nom de la banque du terminal (ex. « SUD RHONE ALPES »), pas celui du commerçant."), 2500); } catch (e) {}
   try { const nr = reparerFichesEment(); if (nr) setTimeout(() => message(nr + " fiche(s) fournisseur « Ement… » corrigée(s) (libellés « VIREMENT » mal coupés)."), 1500); } catch (e) {}
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";

@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Mdp22PQ2yUwyY1DjHOOm6gPCcLAI4K4c/MpIY2TtMf8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-m4i7bKwKaR4M8d+vqf4hNbhqSARYoxboHwvTVVKZ/+I=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1211";
+const VERSION_APP = "2026-11-05.1218";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1446,6 +1446,7 @@ async function ouvrirLivre(motDePasse, souvenir){
   }
   LIVRE = completerLivre(livre);
   try { reparerCategories(); } catch (e) {}
+  try { const na = reparerAliasBanques(); if (na) setTimeout(() => message(na + " alias retiré(s) : nom de la banque du terminal (ex. « SUD RHONE ALPES »), pas celui du commerçant."), 2500); } catch (e) {}
   try { const nr = reparerFichesEment(); if (nr) setTimeout(() => message(nr + " fiche(s) fournisseur « Ement… » corrigée(s) (libellés « VIREMENT » mal coupés)."), 1500); } catch (e) {}
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";
@@ -1698,7 +1699,20 @@ function assurerCommercant(libelle, nomPropose){
 }
 /* Banques des terminaux de paiement, imprimées en tête des facturettes : jamais un commerçant. */
 const BANQUES_TERMINAUX = /BANQUE POPULAIRE|CREDIT AGRICOLE|CAISSE D.?EPARGNE|SOCIETE GENERALE|\bBNP\b|PARIBAS|CREDIT MUTUEL|\bCIC\b|\bLCL\b|CREDIT LYONNAIS|BANQUE POSTALE|\bHSBC\b|\bBRED\b|CREDIT DU NORD|BOURSORAMA|BANQUE DE SAVOIE|BANQUE RHONE|LYONNAISE DE BANQUE|\bCAISSE REGIONALE\b/;
-const estBanqueTerminal = s => BANQUES_TERMINAUX.test(norm(s || "").toUpperCase());
+/* Nom de caisse régionale lu seul, sur la ligne qui suit « CREDIT AGRICOLE » ou « CAISSE D'EPARGNE » (ex. « SUD RHONE
+   ALPES »), et mentions des facturettes : jamais un commerçant non plus. */
+const CAISSES_REGIONALES = /^(SUD RHONE ALPES|CENTRE EST|DES SAVOIE|ALPES PROVENCE|PROVENCE COTE D ?AZUR|COTE D ?AZUR|LOIRE HAUTE LOIRE|CENTRE FRANCE|CENTRE LOIRE|PYRENEES GASCOGNE|NORD DE FRANCE|NORD EST|NORD MIDI PYRENEES|BRIE PICARDIE|ANJOU MAINE|SUD MEDITERRANEE|LANGUEDOC|ALSACE VOSGES|ILE DE FRANCE|PARIS ILE DE FRANCE|RHONE ALPES|AUVERGNE RHONE ALPES|LORRAINE CHAMPAGNE ARDENNE|BOURGOGNE FRANCHE COMTE|SANS CONTACT|CARTE BANCAIRE( SANS CONTACT)?)$/;
+const estBanqueTerminal = s => { const t = norm(s || "").toUpperCase(); return BANQUES_TERMINAUX.test(t) || CAISSES_REGIONALES.test(t.replace(/[^A-Z ]/g, " ").replace(/\s+/g, " ").trim()); };
+/* Réparation (05/11/2026) : alias pris par erreur sur la banque du terminal (« SUD RHONE ALPES ») retirés des fiches. */
+function reparerAliasBanques(){
+  let n = 0;
+  for (const c of vivants("commercants")){
+    const garde = (c.alias || []).filter(a => !estBanqueTerminal(a));
+    if (garde.length !== (c.alias || []).length){ n += c.alias.length - garde.length; enregistrer("commercants", Object.assign(c, {alias: garde})); }
+  }
+  if (n) invaliderIndex();
+  return n;
+}
 /* Lecture plausible d'un nom sur une pièce : au moins un mot de 4 lettres, et surtout des lettres. */
 function nomPlausible(s){
   const t = norm(s || "").replace(/\s+/g, "");
@@ -8049,6 +8063,8 @@ async function autotest(){
       v("pièce antérieure au contrôle : close, hors en-cours ; note de frais et saisie à valider restent ouvertes",
         [pieceClose(jv), encoursSaisis().lignes.some(l => (l.justificatifs || []).includes?.(jv.id)) || JSON.stringify(encoursSaisis()).includes(jv.id), pieceOuverte(jn), pieceClose(Object.assign({}, jv, {aValider: true}))], [true, false, true, false]);
       supprimer("justificatifs", jv.id); supprimer("justificatifs", jn.id);
+      v("banque du terminal : caisse régionale lue seule, jamais un fournisseur ; vrai commerçant accepté",
+        [estBanqueTerminal("SUD RHONE ALPES"), estBanqueTerminal("Crédit Agricole Sud Rhône Alpes"), estBanqueTerminal("Pharmacie Sud Rhône Alpes"), estBanqueTerminal("La Savoureine")], [true, true, false, false]);
       // Débit sans pièce et pièce du même fournisseur à un écart près : appariés, rapprochés seulement sur décision
       const fq = enregistrer("commercants", {nom: "Hebergeur Essai", alias: [], stats: {}, natures: {}});
       const oq = enregistrer("operations", {compte: carte.id, date: "2027-03-12", montant: -15.74, libelle: "HEBERGEUR ESSAI COM", commercant: fq.id});
