@@ -70,10 +70,12 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       if (p.cartes?.nouvelles?.length) gauche.appendChild(h("p", {class: "note"}, p.cartes.nouvelles.length + " achat(s) carte du relevé absent(s) de l'application, ajouté(s) à l'enregistrement : "
         + p.cartes.nouvelles.slice(0, 15).map(l => dateCourte(l.date) + " " + l.libelle + " " + euros(l.montant)).join(" · ") + (p.cartes.nouvelles.length > 15 ? " …" : "")));
       if (enTrop.length) gauche.append(h("h3", null, "Dans l'application mais pas sur le relevé (" + enTrop.length + ") : doublons ou lignes en trop ?"),
-        h("p", {class: "note"}, "Rien n'est supprimé sans votre coche. Un achat du dernier jour peut appartenir au relevé suivant."),
+        h("p", {class: "note"}, "Rien n'est supprimé sans votre coche. Un achat du dernier jour peut appartenir au relevé suivant.",
+          p.doublonsExacts?.size ? [" ", h("button", {class: "mini", onclick: () => { for (const id of p.doublonsExacts) p.choixEnTrop.add(id); rafraichirEcran(); }}, "Cocher les " + p.doublonsExacts.size + " doublon(s) exact(s)"),
+            " ", h("span", {class: "discret"}, "(même compte, jour, montant et libellé qu'une ligne conservée ; l'original reste)")] : null),
         tableau([{titre: "Supprimer"}, {titre: "Date"}, {titre: "Compte"}, {titre: "Libellé"}, {titre: "Montant", num: true}], enTrop, {classe: "serre", ligne: o => h("tr", null,
           h("td", null, h("input", {type: "checkbox", checked: p.choixEnTrop.has(o.id), onchange: e => { e.target.checked ? p.choixEnTrop.add(o.id) : p.choixEnTrop.delete(o.id); }})),
-          h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
+          h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, p.doublonsExacts?.has(o.id) ? h("span", {class: "libbanque"}, "doublon exact") : null, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
     }
     } catch (e){ console.error(e); gauche.appendChild(h("p", {class: "neg"}, "Aperçu impossible à afficher : " + e.message + " (le fichier peut quand même être enregistré ; signalez ce message).")); }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));

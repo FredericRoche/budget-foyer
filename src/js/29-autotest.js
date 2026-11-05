@@ -539,6 +539,10 @@ async function autotest(){
         const oTrop = enregistrer("operations", {compte: cj.id, date: "2027-04-20", montant: -15, libelle: "DOUBLON ESSAI", dateDebit: "2027-04-20"});
         const lu = Object.assign({nom: "essai.pdf", cartes: []}, {genre: "releve_lcl", releveCompte: rc, numero: rc.numero, periode: rc.periode});
         const pc = preparerClotureLcl(lu);
+        const oDup = enregistrer("operations", {compte: cj.id, date: "2027-04-11", montant: -68, libelle: "PRLV EAU", dateDebit: "2027-04-11"});
+        const pcd = preparerClotureLcl(lu);
+        v("clôture : doublon exact repéré (l'original apparié reste)", [(pcd.doublonsExacts.has(oDup.id) ? 1 : 0) + (pcd.doublonsExacts.has(oDeja.id) ? 1 : 0), pcd.doublonsExacts.has(oTrop.id)], [1, false]);
+        supprimer("operations", oDup.id);
         v("clôture : conforme à 4 jours près, manquants proposés, ligne en trop signalée (non cochée)", [pc.conformes, pc.manquants.map(l => l.montant), pc.enTrop.map(o => o.id), pc.choixEnTrop.size], [1, [1454.82, -120], [oTrop.id], 0]);
         const rr = appliquerClotureLcl(pc);
         const cb = vivants("operations").find(o => o.compte === cj.id && /^RELEVE CB AU/.test(o.libelle) && o.date === "2027-04-30");
@@ -729,6 +733,8 @@ async function autotest(){
         {id: "i", nom: "Superette Alpha", alias: ["ALPHA SAS 12"]}, {id: "j", nom: "Alpha Distribution", alias: ["ALPHA SAS 12"]}];
       v("doublons probables : inclusion, ordre des mots, alias ; ni générique ni deux lieux", doublonsProbables(fs).map(g => g.map(x => x.id).sort().join("")).sort(), ["ab", "cd", "ij"]);
       v("doublons probables : groupe écarté", doublonsProbables(fs, ["a|b"]).length, 2);
+      const fv = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf"].map((n, i) => ({id: "v" + i, nom: n + " Villeessai"})).concat([{id: "w", nom: "Villeessai"}, {id: "x1", nom: "Hotel Kilo Villeessai"}, {id: "x2", nom: "Kilo"}]);
+      v("doublons probables : un mot répandu (ville) ne relie rien ; paires seulement", doublonsProbables(fv).map(g => g.map(x => x.id).sort().join("")), ["x1x2"]);
       v("devis : fenêtre de date d'une facture", fenetre({type: "devis"}), fenetre({type: "facture"}));
       const jOk = enregistrer("justificatifs", {type: "autre", date: "2027-05-20", montant: 1318.8, commercantNom: "Bureau d'études essai", statut: "a_rapprocher", operations: []});
       const jDep = enregistrer("justificatifs", {type: "facturette", date: "2027-05-20", montant: 1318.8, commercantNom: "Lu de travers", origine: "depot", aValider: true, statut: "a_rapprocher", operations: []});

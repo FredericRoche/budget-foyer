@@ -216,7 +216,7 @@ function entete(titre, contexte, outils){
     outils ? h("div", {class: "outils"}, outils) : null);
 }
 function compteATraiter(){
-  const ops = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose").length;
+  const ops = vivants("operations").filter(o => (o.statut === "a_preciser" || o.statut === "propose") && o.date >= debutAnomalies()).length;
   const js = vivants("justificatifs").filter(pieceOuverte).length;
   const factures = vivants("factures").filter(f => Math.abs(f.ecart || 0) >= 0.01 && !f.ecartVu).length;
   const echeances = vivants("echeances").filter(e => e.aConfirmer).length;

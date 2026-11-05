@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-RTdDbZ8dCdddnyP21W+hyJVuugvta8onAaHG/8lXanA=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-G+C+NXrIwRuuxJxPOIKO2/tqgTDcSCD9pyHABLIS0gY=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1601";
+const VERSION_APP = "2026-11-05.1605";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2471,7 +2471,18 @@ function preparerClotureLcl(lu){
     lignesCartes.length ? {ok: !(cartes?.nouvelles?.length) && !enTropCartes.length, texte: "cartes : " + conformesCartes + " achat(s) conforme(s)" + (cartes?.nouvelles?.length ? ", " + cartes.nouvelles.length + " manquant(s)" : "") + (enTropCartes.length ? ", " + enTropCartes.length + " en trop dans l'application" : "")} : null,
     ecartSolde === null ? null : {ok: Math.abs(ecartSolde) < 0.01, texte: Math.abs(ecartSolde) < 0.01 ? "solde au " + dateFr(fin) + " : " + euros(r.soldeFin) + ", identique" : "solde au " + dateFr(fin) + " : relevé " + euros(r.soldeFin) + ", application " + euros(r.soldeFin - ecartSolde) + " (après ajouts)"}
   ].filter(Boolean);
-  return {lu, compte, manquants, enTrop: cpt.enTrop, enTropCartes, conformes: cpt.conformes, cartes, controles, nb: manquants.length + (cartes?.nouvelles?.length || 0),
+  // Doublons exacts parmi les lignes en trop : même compte, jour, montant et libellé qu'une autre opération gardée
+  const cleDbl = o => [o.compte, o.date, versCentimes(o.montant), (o.libelle || "").trim().toUpperCase()].join("|");
+  const enTropIds = new Set([...cpt.enTrop, ...enTropCartes].map(o => o.id));
+  const groupes = regrouper(vivants("operations"), cleDbl);
+  const doublonsExacts = new Set();
+  for (const o of [...cpt.enTrop, ...enTropCartes]){
+    const g = groupes.get(cleDbl(o)) || [];
+    if (g.length < 2) continue;
+    const garde = g.find(x => !enTropIds.has(x.id)) || g[0];
+    if (garde.id !== o.id) doublonsExacts.add(o.id);
+  }
+  return {lu, compte, manquants, enTrop: cpt.enTrop, enTropCartes, doublonsExacts, conformes: cpt.conformes, cartes, controles, nb: manquants.length + (cartes?.nouvelles?.length || 0),
     choixManquants: new Set(manquants.map((l, i) => i)), choixEnTrop: new Set()};
 }
 function appliquerClotureLcl(prep){
@@ -4768,7 +4779,7 @@ function entete(titre, contexte, outils){
     outils ? h("div", {class: "outils"}, outils) : null);
 }
 function compteATraiter(){
-  const ops = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose").length;
+  const ops = vivants("operations").filter(o => (o.statut === "a_preciser" || o.statut === "propose") && o.date >= debutAnomalies()).length;
   const js = vivants("justificatifs").filter(pieceOuverte).length;
   const factures = vivants("factures").filter(f => Math.abs(f.ecart || 0) >= 0.01 && !f.ecartVu).length;
   const echeances = vivants("echeances").filter(e => e.aConfirmer).length;
@@ -5233,7 +5244,10 @@ function imprimerSynthese(budget, an){
 /* ===== 19-ui-traiter.js ===== */
 /* ================= À traiter ================= */
 declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
-  const aClasser = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose").sort((a, b) => a.date < b.date ? 1 : -1);
+  // Seulement à partir du début du contrôle (réglé dans Justificatifs) : avant, les données ont été reconstituées
+  const tousAClasser = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose");
+  const aClasser = tousAClasser.filter(o => o.date >= debutAnomalies()).sort((a, b) => a.date < b.date ? 1 : -1);
+  const anciens = tousAClasser.length - aClasser.length;
   const surs = aClasser.filter(o => o.statut === "propose" && o.categorie !== "À préciser");
   etat.coches = etat.coches || new Set(surs.map(o => o.id));
   c.appendChild(entete("À traiter", "Ce qui attend une décision. Les cas sans ambiguïté qui ne changent rien sont appliqués d'office et restent réversibles (en bas de page) ; ceux qui changeraient fournisseur ou catégorie attendent votre clic.",
@@ -5243,7 +5257,8 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
     }}, "Valider les propositions cochées") : null));
 
   /* 1. Opérations à classer */
-  const sec = h("section", null, h("h2", null, "Opérations à classer (" + aClasser.length + ")"));
+  const sec = h("section", null, h("h2", null, "Opérations à classer (" + aClasser.length + ")"),
+    anciens ? h("p", {class: "note"}, anciens + " opération(s) antérieure(s) au " + dateFr(debutAnomalies()) + " (données reconstituées) ne sont pas listées ; la date se règle dans l'encadré des anomalies (Justificatifs).") : null);
   sec.appendChild(tableau([{titre: ""}, {titre: "Date", cle: o => o.date}, {titre: "Compte", cle: o => libelleCompte(o.compte)}, {titre: "Libellé bancaire", cle: o => o.libelle},
     {titre: "Montant", num: true, cle: o => o.montant}, {titre: "Classement proposé"}, {titre: "Origine"}, {titre: "Lieu"}, {titre: ""}], aClasser, {
     classe: "serre", vide: "Aucune opération en attente de classement.",
@@ -5253,7 +5268,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
       const selLieu = selectionLieu(o.lieu);
       const c2 = o.commercant ? obtenir("commercants", o.commercant) : null;
       const sugg = c2 && c2.variable ? repartitionCommercant(c2) : [];
-      return h("tr", {class: o.statut === "a_preciser" ? "choisie" : ""}, h("td", null, cb), h("td", null, dateCourte(o.date)), h("td", null, libelleCompte(o.compte)),
+      return h("tr", {class: o.statut === "a_preciser" ? "choisie" : ""}, h("td", null, cb), h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)),
         h("td", null, o.libelle, c2 ? h("span", {class: "libbanque"}, c2.nom) : null), montantCellule(o.montant),
         h("td", null, selCat, sugg.length ? h("div", {class: "suggestions"}, sugg.map(s2 => h("button", {onclick: () => { selCat.value = s2.categorie + "|" + s2.sousCategorie; }}, s2.categorie + " › " + s2.sousCategorie + " (" + Math.round(s2.part * 100) + " %)"))) : null),
         h("td", null, marqueOrigine(o)), h("td", null, selLieu),
@@ -5594,10 +5609,12 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       if (p.cartes?.nouvelles?.length) gauche.appendChild(h("p", {class: "note"}, p.cartes.nouvelles.length + " achat(s) carte du relevé absent(s) de l'application, ajouté(s) à l'enregistrement : "
         + p.cartes.nouvelles.slice(0, 15).map(l => dateCourte(l.date) + " " + l.libelle + " " + euros(l.montant)).join(" · ") + (p.cartes.nouvelles.length > 15 ? " …" : "")));
       if (enTrop.length) gauche.append(h("h3", null, "Dans l'application mais pas sur le relevé (" + enTrop.length + ") : doublons ou lignes en trop ?"),
-        h("p", {class: "note"}, "Rien n'est supprimé sans votre coche. Un achat du dernier jour peut appartenir au relevé suivant."),
+        h("p", {class: "note"}, "Rien n'est supprimé sans votre coche. Un achat du dernier jour peut appartenir au relevé suivant.",
+          p.doublonsExacts?.size ? [" ", h("button", {class: "mini", onclick: () => { for (const id of p.doublonsExacts) p.choixEnTrop.add(id); rafraichirEcran(); }}, "Cocher les " + p.doublonsExacts.size + " doublon(s) exact(s)"),
+            " ", h("span", {class: "discret"}, "(même compte, jour, montant et libellé qu'une ligne conservée ; l'original reste)")] : null),
         tableau([{titre: "Supprimer"}, {titre: "Date"}, {titre: "Compte"}, {titre: "Libellé"}, {titre: "Montant", num: true}], enTrop, {classe: "serre", ligne: o => h("tr", null,
           h("td", null, h("input", {type: "checkbox", checked: p.choixEnTrop.has(o.id), onchange: e => { e.target.checked ? p.choixEnTrop.add(o.id) : p.choixEnTrop.delete(o.id); }})),
-          h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
+          h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, p.doublonsExacts?.has(o.id) ? h("span", {class: "libbanque"}, "doublon exact") : null, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
     }
     } catch (e){ console.error(e); gauche.appendChild(h("p", {class: "neg"}, "Aperçu impossible à afficher : " + e.message + " (le fichier peut quand même être enregistré ; signalez ce message).")); }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));
@@ -6319,23 +6336,29 @@ function motsSignificatifs(nom){
 }
 function doublonsProbables(fiches, ignores){
   const ign = new Set(ignores || []);
-  const infos = fiches.map(x => ({x, mots: motsSignificatifs(x.nom), alias: new Set((x.alias || []).filter(a => a && a.length >= 4))}));
-  const parent = infos.map((_, i) => i);
-  const racine = i => parent[i] === i ? i : (parent[i] = racine(parent[i]));
+  // Mots trop répandus parmi les fiches (noms de ville, d'arrondissement…) : ils ne distinguent rien. Seuil relatif,
+  // au moins 6 fiches. Avant le 05/11/2026, ces mots reliaient de proche en proche des centaines de fiches.
+  const df = new Map();
+  const motsDe = fiches.map(x => [...new Set(motsSignificatifs(x.nom))]);
+  for (const ms of motsDe) for (const m of ms) df.set(m, (df.get(m) || 0) + 1);
+  const seuil = Math.max(6, Math.round(fiches.length * 0.02));
+  const lieuxMots = new Set(fiches.flatMap(x => x.lieu ? motsSignificatifs(x.lieu) : []));
+  const infos = fiches.map((x, i) => ({x, mots: motsDe[i].filter(m => (df.get(m) || 0) < seuil && !lieuxMots.has(m)), alias: new Set((x.alias || []).filter(a => a && a.length >= 4))}));
+  // Paires seulement (pas de regroupement de proche en proche) : chaque proposition se lit et se tranche seule
+  const paires = [];
   for (let i = 0; i < infos.length; i++) for (let j = i + 1; j < infos.length; j++){
     const a = infos[i], b = infos[j];
     if (a.x.lieu && b.x.lieu && a.x.lieu !== b.x.lieu) continue;
-    if (!a.mots.length || !b.mots.length) continue;
-    const [p, g] = a.mots.length <= b.mots.length ? [a.mots, b.mots] : [b.mots, a.mots];
-    const inclus = p.every(m => g.includes(m));
-    const memeTete = a.mots[0] === b.mots[0] && a.mots[0].length >= 4;
     const aliasCommun = [...a.alias].some(x => b.alias.has(x));
-    if (inclus || memeTete || aliasCommun) parent[racine(j)] = racine(i);
+    let ok = aliasCommun, force = aliasCommun ? 3 : 0;
+    if (!ok && a.mots.length && b.mots.length){
+      const [p, g] = a.mots.length <= b.mots.length ? [a.mots, b.mots] : [b.mots, a.mots];
+      if (p.every(m => g.includes(m))){ ok = true; force = 2; }
+      else if (a.mots[0] === b.mots[0] && a.mots[0].length >= 4){ ok = true; force = 1; }
+    }
+    if (ok) paires.push({g: [a.x, b.x].sort((u, v) => u.nom.localeCompare(v.nom, "fr")), force});
   }
-  const groupes = new Map();
-  infos.forEach((inf, i) => { const r = racine(i); if (!groupes.has(r)) groupes.set(r, []); groupes.get(r).push(inf.x); });
-  return [...groupes.values()].filter(g => g.length > 1).map(g => g.sort((a, b) => a.nom.localeCompare(b.nom, "fr")))
-    .filter(g => !ign.has(g.map(x => x.id).sort().join("|")));
+  return paires.filter(p => !ign.has(p.g.map(x => x.id).sort().join("|"))).sort((u, v) => v.force - u.force || u.g[0].nom.localeCompare(v.g[0].nom, "fr")).map(p => p.g);
 }
 async function fusionnerGroupe(groupe, nbAchats){
   const parDefaut = [...groupe].sort((a, b) => (nbAchats.get(b.id) || 0) - (nbAchats.get(a.id) || 0) || a.nom.length - b.nom.length)[0];
@@ -6376,9 +6399,9 @@ declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   if (doublons.length){
     const d = h("details", {class: "carte", style: {marginBottom: "1rem"}}, h("summary", {style: {cursor: "pointer"}}, h("strong", null, "Doublons probables (" + doublons.length + ")"),
       h("span", {class: "petit discret"}, " — fiches qui semblent désigner la même enseigne")),
-      tableau([{titre: "Fiches"}, {titre: "Achats", num: true}, {titre: ""}], doublons, {classe: "serre", limite: 200, ligne: gr => h("tr", null,
-        h("td", null, gr.map(x => x.nom + (x.lieu ? " (" + x.lieu + ")" : "")).join(" · ")),
-        h("td", {class: "num"}, gr.map(x => String(nbAchats.get(x.id) || 0)).join(" · ")),
+      tableau([{titre: "Fiches qui se ressemblent"}, {titre: "Achats", num: true}, {titre: ""}], doublons, {classe: "serre", limite: 100, ligne: gr => h("tr", null,
+        h("td", null, gr.map(x => h("div", null, x.nom, x.lieu ? h("span", {class: "libbanque"}, x.lieu) : null))),
+        h("td", {class: "num"}, gr.map(x => h("div", null, String(nbAchats.get(x.id) || 0)))),
         h("td", null, h("button", {class: "mini primaire", onclick: () => fusionnerGroupe(gr, nbAchats)}, "Fusionner…"), " ",
           h("button", {class: "mini discret", title: "Ne plus proposer ce groupe", onclick: () => { modifierParametres({doublonsIgnores: [...(LIVRE.parametres.doublonsIgnores || []), gr.map(x => x.id).sort().join("|")]}); rafraichirEcran(); }}, "Distinctes")))}));
     try { d.open = localStorage.getItem("doublonsOuverts") === "1"; } catch (e) {}
@@ -8260,6 +8283,10 @@ async function autotest(){
         const oTrop = enregistrer("operations", {compte: cj.id, date: "2027-04-20", montant: -15, libelle: "DOUBLON ESSAI", dateDebit: "2027-04-20"});
         const lu = Object.assign({nom: "essai.pdf", cartes: []}, {genre: "releve_lcl", releveCompte: rc, numero: rc.numero, periode: rc.periode});
         const pc = preparerClotureLcl(lu);
+        const oDup = enregistrer("operations", {compte: cj.id, date: "2027-04-11", montant: -68, libelle: "PRLV EAU", dateDebit: "2027-04-11"});
+        const pcd = preparerClotureLcl(lu);
+        v("clôture : doublon exact repéré (l'original apparié reste)", [(pcd.doublonsExacts.has(oDup.id) ? 1 : 0) + (pcd.doublonsExacts.has(oDeja.id) ? 1 : 0), pcd.doublonsExacts.has(oTrop.id)], [1, false]);
+        supprimer("operations", oDup.id);
         v("clôture : conforme à 4 jours près, manquants proposés, ligne en trop signalée (non cochée)", [pc.conformes, pc.manquants.map(l => l.montant), pc.enTrop.map(o => o.id), pc.choixEnTrop.size], [1, [1454.82, -120], [oTrop.id], 0]);
         const rr = appliquerClotureLcl(pc);
         const cb = vivants("operations").find(o => o.compte === cj.id && /^RELEVE CB AU/.test(o.libelle) && o.date === "2027-04-30");
@@ -8450,6 +8477,8 @@ async function autotest(){
         {id: "i", nom: "Superette Alpha", alias: ["ALPHA SAS 12"]}, {id: "j", nom: "Alpha Distribution", alias: ["ALPHA SAS 12"]}];
       v("doublons probables : inclusion, ordre des mots, alias ; ni générique ni deux lieux", doublonsProbables(fs).map(g => g.map(x => x.id).sort().join("")).sort(), ["ab", "cd", "ij"]);
       v("doublons probables : groupe écarté", doublonsProbables(fs, ["a|b"]).length, 2);
+      const fv = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf"].map((n, i) => ({id: "v" + i, nom: n + " Villeessai"})).concat([{id: "w", nom: "Villeessai"}, {id: "x1", nom: "Hotel Kilo Villeessai"}, {id: "x2", nom: "Kilo"}]);
+      v("doublons probables : un mot répandu (ville) ne relie rien ; paires seulement", doublonsProbables(fv).map(g => g.map(x => x.id).sort().join("")), ["x1x2"]);
       v("devis : fenêtre de date d'une facture", fenetre({type: "devis"}), fenetre({type: "facture"}));
       const jOk = enregistrer("justificatifs", {type: "autre", date: "2027-05-20", montant: 1318.8, commercantNom: "Bureau d'études essai", statut: "a_rapprocher", operations: []});
       const jDep = enregistrer("justificatifs", {type: "facturette", date: "2027-05-20", montant: 1318.8, commercantNom: "Lu de travers", origine: "depot", aValider: true, statut: "a_rapprocher", operations: []});

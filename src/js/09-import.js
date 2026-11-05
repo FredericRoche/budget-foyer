@@ -196,7 +196,18 @@ function preparerClotureLcl(lu){
     lignesCartes.length ? {ok: !(cartes?.nouvelles?.length) && !enTropCartes.length, texte: "cartes : " + conformesCartes + " achat(s) conforme(s)" + (cartes?.nouvelles?.length ? ", " + cartes.nouvelles.length + " manquant(s)" : "") + (enTropCartes.length ? ", " + enTropCartes.length + " en trop dans l'application" : "")} : null,
     ecartSolde === null ? null : {ok: Math.abs(ecartSolde) < 0.01, texte: Math.abs(ecartSolde) < 0.01 ? "solde au " + dateFr(fin) + " : " + euros(r.soldeFin) + ", identique" : "solde au " + dateFr(fin) + " : relevé " + euros(r.soldeFin) + ", application " + euros(r.soldeFin - ecartSolde) + " (après ajouts)"}
   ].filter(Boolean);
-  return {lu, compte, manquants, enTrop: cpt.enTrop, enTropCartes, conformes: cpt.conformes, cartes, controles, nb: manquants.length + (cartes?.nouvelles?.length || 0),
+  // Doublons exacts parmi les lignes en trop : même compte, jour, montant et libellé qu'une autre opération gardée
+  const cleDbl = o => [o.compte, o.date, versCentimes(o.montant), (o.libelle || "").trim().toUpperCase()].join("|");
+  const enTropIds = new Set([...cpt.enTrop, ...enTropCartes].map(o => o.id));
+  const groupes = regrouper(vivants("operations"), cleDbl);
+  const doublonsExacts = new Set();
+  for (const o of [...cpt.enTrop, ...enTropCartes]){
+    const g = groupes.get(cleDbl(o)) || [];
+    if (g.length < 2) continue;
+    const garde = g.find(x => !enTropIds.has(x.id)) || g[0];
+    if (garde.id !== o.id) doublonsExacts.add(o.id);
+  }
+  return {lu, compte, manquants, enTrop: cpt.enTrop, enTropCartes, doublonsExacts, conformes: cpt.conformes, cartes, controles, nb: manquants.length + (cartes?.nouvelles?.length || 0),
     choixManquants: new Set(manquants.map((l, i) => i)), choixEnTrop: new Set()};
 }
 function appliquerClotureLcl(prep){

@@ -27,23 +27,29 @@ function motsSignificatifs(nom){
 }
 function doublonsProbables(fiches, ignores){
   const ign = new Set(ignores || []);
-  const infos = fiches.map(x => ({x, mots: motsSignificatifs(x.nom), alias: new Set((x.alias || []).filter(a => a && a.length >= 4))}));
-  const parent = infos.map((_, i) => i);
-  const racine = i => parent[i] === i ? i : (parent[i] = racine(parent[i]));
+  // Mots trop répandus parmi les fiches (noms de ville, d'arrondissement…) : ils ne distinguent rien. Seuil relatif,
+  // au moins 6 fiches. Avant le 05/11/2026, ces mots reliaient de proche en proche des centaines de fiches.
+  const df = new Map();
+  const motsDe = fiches.map(x => [...new Set(motsSignificatifs(x.nom))]);
+  for (const ms of motsDe) for (const m of ms) df.set(m, (df.get(m) || 0) + 1);
+  const seuil = Math.max(6, Math.round(fiches.length * 0.02));
+  const lieuxMots = new Set(fiches.flatMap(x => x.lieu ? motsSignificatifs(x.lieu) : []));
+  const infos = fiches.map((x, i) => ({x, mots: motsDe[i].filter(m => (df.get(m) || 0) < seuil && !lieuxMots.has(m)), alias: new Set((x.alias || []).filter(a => a && a.length >= 4))}));
+  // Paires seulement (pas de regroupement de proche en proche) : chaque proposition se lit et se tranche seule
+  const paires = [];
   for (let i = 0; i < infos.length; i++) for (let j = i + 1; j < infos.length; j++){
     const a = infos[i], b = infos[j];
     if (a.x.lieu && b.x.lieu && a.x.lieu !== b.x.lieu) continue;
-    if (!a.mots.length || !b.mots.length) continue;
-    const [p, g] = a.mots.length <= b.mots.length ? [a.mots, b.mots] : [b.mots, a.mots];
-    const inclus = p.every(m => g.includes(m));
-    const memeTete = a.mots[0] === b.mots[0] && a.mots[0].length >= 4;
     const aliasCommun = [...a.alias].some(x => b.alias.has(x));
-    if (inclus || memeTete || aliasCommun) parent[racine(j)] = racine(i);
+    let ok = aliasCommun, force = aliasCommun ? 3 : 0;
+    if (!ok && a.mots.length && b.mots.length){
+      const [p, g] = a.mots.length <= b.mots.length ? [a.mots, b.mots] : [b.mots, a.mots];
+      if (p.every(m => g.includes(m))){ ok = true; force = 2; }
+      else if (a.mots[0] === b.mots[0] && a.mots[0].length >= 4){ ok = true; force = 1; }
+    }
+    if (ok) paires.push({g: [a.x, b.x].sort((u, v) => u.nom.localeCompare(v.nom, "fr")), force});
   }
-  const groupes = new Map();
-  infos.forEach((inf, i) => { const r = racine(i); if (!groupes.has(r)) groupes.set(r, []); groupes.get(r).push(inf.x); });
-  return [...groupes.values()].filter(g => g.length > 1).map(g => g.sort((a, b) => a.nom.localeCompare(b.nom, "fr")))
-    .filter(g => !ign.has(g.map(x => x.id).sort().join("|")));
+  return paires.filter(p => !ign.has(p.g.map(x => x.id).sort().join("|"))).sort((u, v) => v.force - u.force || u.g[0].nom.localeCompare(v.g[0].nom, "fr")).map(p => p.g);
 }
 async function fusionnerGroupe(groupe, nbAchats){
   const parDefaut = [...groupe].sort((a, b) => (nbAchats.get(b.id) || 0) - (nbAchats.get(a.id) || 0) || a.nom.length - b.nom.length)[0];
@@ -84,9 +90,9 @@ declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   if (doublons.length){
     const d = h("details", {class: "carte", style: {marginBottom: "1rem"}}, h("summary", {style: {cursor: "pointer"}}, h("strong", null, "Doublons probables (" + doublons.length + ")"),
       h("span", {class: "petit discret"}, " — fiches qui semblent désigner la même enseigne")),
-      tableau([{titre: "Fiches"}, {titre: "Achats", num: true}, {titre: ""}], doublons, {classe: "serre", limite: 200, ligne: gr => h("tr", null,
-        h("td", null, gr.map(x => x.nom + (x.lieu ? " (" + x.lieu + ")" : "")).join(" · ")),
-        h("td", {class: "num"}, gr.map(x => String(nbAchats.get(x.id) || 0)).join(" · ")),
+      tableau([{titre: "Fiches qui se ressemblent"}, {titre: "Achats", num: true}, {titre: ""}], doublons, {classe: "serre", limite: 100, ligne: gr => h("tr", null,
+        h("td", null, gr.map(x => h("div", null, x.nom, x.lieu ? h("span", {class: "libbanque"}, x.lieu) : null))),
+        h("td", {class: "num"}, gr.map(x => h("div", null, String(nbAchats.get(x.id) || 0)))),
         h("td", null, h("button", {class: "mini primaire", onclick: () => fusionnerGroupe(gr, nbAchats)}, "Fusionner…"), " ",
           h("button", {class: "mini discret", title: "Ne plus proposer ce groupe", onclick: () => { modifierParametres({doublonsIgnores: [...(LIVRE.parametres.doublonsIgnores || []), gr.map(x => x.id).sort().join("|")]}); rafraichirEcran(); }}, "Distinctes")))}));
     try { d.open = localStorage.getItem("doublonsOuverts") === "1"; } catch (e) {}
