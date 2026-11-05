@@ -202,10 +202,13 @@ function rapprocherTout(){
    - « pièce sans débit » : pièce à rapprocher dont la période est déjà couverte par le relevé de son moyen
      de paiement (le dernier relevé va au-delà de la fenêtre de la pièce) ;
    - « montant différent » : même cas, mais un débit voisin existe (devise, pourboire, saisie) ;
-   - « débit sans pièce » : achat carte des 90 derniers jours, postérieur à la première pièce saisie, sans
+   - « débit sans pièce » : achat carte postérieur à la première pièce saisie, sans
      pièce et non écarté (« pas de pièce pour celui-ci ») ;
    - « fournisseur non reconnu » : pièce sans fiche, ou fiche seulement devinée dans le texte.
-   Chaque anomalie porte une piste. Les pièces dont le relevé n'est pas encore arrivé n'en sont pas. */
+   Chaque anomalie porte une piste. Les pièces dont le relevé n'est pas encore arrivé n'en sont pas.
+   Rien avant la date de début du contrôle (réglable ; 1er octobre 2026 : avant, les pièces n'étaient pas
+   saisies au fil de l'eau). */
+const debutAnomalies = () => LIVRE.parametres.anomaliesDepuis || "2026-10-01";
 function anomaliesRapprochement(){
   const comptes = vivants("comptes");
   const derniere = new Map();
@@ -229,15 +232,14 @@ function anomaliesRapprochement(){
       const voisin = !ailleurs && vivants("operations").find(o => o.montant < 0 && compat.some(c => c.id === o.compte) && dansFenetre(o) && libre(o)
         && Math.abs(-versCentimes(o.montant) - cents) <= Math.max(10, cents * 0.03) && -versCentimes(o.montant) !== cents);
       if (voisin) genre = "montant différent";
-      raison = ailleurs ? "même montant le " + dateCourte(ailleurs.date) + " sur " + libelleCompte(ailleurs.compte) + " : la carte de la pièce est-elle la bonne ?"
-        : voisin ? "au relevé : " + euros(voisin.montant) + " le " + dateCourte(voisin.date) + " (devise, pourboire, erreur de saisie ?)"
+      raison = ailleurs ? "même montant le " + dateFr(ailleurs.date) + " sur " + libelleCompte(ailleurs.compte) + " : la carte de la pièce est-elle la bonne ?"
+        : voisin ? "au relevé : " + euros(voisin.montant) + " le " + dateFr(voisin.date) + " (devise, pourboire, erreur de saisie ?)"
         : "aucun débit de ce montant au relevé (" + libelleMoyen(jj.carte) + ") : espèces, autre moyen, date ou montant mal lus ?";
     }
     r.push({genre, j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant), raison});
   }
   // Fournisseur non reconnu (pièces rapprochées ou non)
-  const recent = ajouterJours(aujourdhui(), -90);
-  for (const j of pieces.filter(x => (!x.commercant || x.fournisseurDevine) && (x.statut === "a_rapprocher" || x.date >= recent))){
+  for (const j of pieces.filter(x => (!x.commercant || x.fournisseurDevine) && (x.statut === "a_rapprocher" || x.date >= debutAnomalies()))){
     if (r.some(a => a.j === j)) { r.find(a => a.j === j).raison += " ; fournisseur non reconnu"; continue; }
     r.push({genre: "fournisseur non reconnu", j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant),
       raison: j.fournisseurDevine ? "fournisseur deviné dans le texte : à confirmer" : "aucune fiche fournisseur : choisir ou créer la fiche"});
@@ -245,7 +247,7 @@ function anomaliesRapprochement(){
   // Débits carte sans pièce, depuis que des pièces sont saisies
   const premiere = pieces.filter(x => x.type !== "facture" && x.type !== "devis").reduce((m, x) => !m || x.date < m ? x.date : m, "");
   if (premiere){
-    const depuis = [premiere, ajouterJours(aujourdhui(), -90)].sort()[1];
+    const depuis = [premiere, debutAnomalies()].sort()[1];
     const cartes = new Set(comptes.filter(c => c.type === "carte").map(c => c.id));
     for (const o of vivants("operations").filter(o => cartes.has(o.compte) && o.montant < 0 && o.date >= depuis && !(o.justificatifs || []).length && !o.sansPiece && !o.ndf && !(o.commercant && obtenir("commercants", o.commercant)?.sansPiece))){
       if (pieces.some(j => j.statut === "a_rapprocher" && (j.propositions || []).some(p => p.op === o.id))) continue;
@@ -253,7 +255,7 @@ function anomaliesRapprochement(){
         raison: "au relevé de " + libelleCompte(o.compte) + ", aucune pièce : ticket à saisir, ou rien à joindre"});
     }
   }
-  return r.sort((a, b) => a.date < b.date ? 1 : -1);
+  return r.filter(a => a.date >= debutAnomalies()).sort((a, b) => a.date < b.date ? 1 : -1);
 }
 /* En-cours : justificatifs à rapprocher (hors espèces), regroupés par moyen de paiement. */
 function libelleMoyen(carte){

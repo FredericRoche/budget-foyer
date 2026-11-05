@@ -13,18 +13,20 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
      h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office ; ceux qui changeraient fournisseur ou catégorie sont proposés, à confirmer."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
   const anomalies = anomaliesRapprochement(), raisonDe = new Map(anomalies.filter(a => a.j && a.genre !== "fournisseur non reconnu").map(a => [a.j.id, a.raison]));
-  if (anomalies.length){
-    const ouvert = etat.anomaliesOuvertes !== false;
-    const parGenre = regrouper(anomalies, a => a.genre);
-    c.appendChild(h("section", {class: "encadre", style: {margin: ".6rem 0"}}, h("h3", null, "Anomalies à traiter à la main : " + anomalies.length + " ",
-      h("button", {class: "mini discret", onclick: () => { etat.anomaliesOuvertes = !ouvert; rafraichirEcran(); }}, ouvert ? "Replier" : "Déplier")),
-      h("p", {class: "note"}, [...parGenre].map(([g, l]) => l.length + " " + g).join(" · ") + ". Les pièces dont le relevé n'est pas encore importé n'y figurent pas."),
-      ouvert ? tableau([{titre: "Date"}, {titre: "Anomalie"}, {titre: "Fournisseur ou libellé"}, {titre: "Montant", num: true}, {titre: "Piste"}, {titre: ""}], anomalies, {classe: "serre", ligne: a =>
-        h("tr", {class: "cliquable" + (a.j && a.j === j ? " choisie" : ""), onclick: () => { if (a.j){ etat.choisi = a.j.id; rafraichirEcran(); } else aller("operations", {compte: a.op.compte, mois: a.op.date.slice(0, 7), choisie: a.op.id}); }},
-          h("td", null, dateCourte(a.date)), h("td", null, a.genre), h("td", null, a.nom), h("td", {class: "num"}, euros(a.montant)), h("td", {class: "petit"}, a.raison),
-          h("td", null, a.op ? h("button", {class: "mini discret", title: "Ne plus signaler ce débit (péage, abonnement, achat sans ticket…)", onclick: e => { e.stopPropagation(); enregistrer("operations", Object.assign(a.op, {sansPiece: true})); rafraichirEcran(); }}, "Pas de pièce") : null,
-            a.op && a.op.commercant ? h("button", {class: "mini discret", title: "Ne plus signaler les débits de ce fournisseur (péages, abonnements…) ; réversible dans sa fiche", onclick: e => { e.stopPropagation(); const f = obtenir("commercants", a.op.commercant); if (f){ enregistrer("commercants", Object.assign(f, {sansPiece: true})); rafraichirEcran(); } }}, "Jamais pour ce fournisseur") : null))}) : null));
-  }
+  const depuis = debutAnomalies();
+  const champDepuis = champDate({value: depuis, onchange: e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)){ modifierParametres({anomaliesDepuis: e.target.value}); rafraichirEcran(); } }});
+  // Replié d'office pendant une saisie à valider ou une pièce ouverte : la file de travail passe avant
+  const ouvert = etat.anomaliesOuvertes ?? !(nbValider || j);
+  const parGenre = regrouper(anomalies, a => a.genre);
+  const blocAnomalies = h("section", {class: "encadre", style: {margin: ".6rem 0"}}, h("h3", null, "Anomalies à traiter à la main : " + anomalies.length + " ",
+      anomalies.length ? h("button", {class: "mini discret", onclick: () => { etat.anomaliesOuvertes = !ouvert; rafraichirEcran(); }}, ouvert ? "Replier" : "Déplier") : null),
+    h("p", {class: "note"}, (anomalies.length ? [...parGenre].map(([g, l]) => l.length + " " + g).join(" · ") + ". " : "Aucune. ") + "Contrôle à partir du ", champDepuis,
+      " (avant, les pièces n'étaient pas saisies au fil de l'eau). Les pièces dont le relevé n'est pas encore importé n'y figurent pas."),
+    ouvert && anomalies.length ? tableau([{titre: "Date"}, {titre: "Anomalie"}, {titre: "Fournisseur ou libellé"}, {titre: "Montant", num: true}, {titre: "Piste"}, {titre: ""}], anomalies, {classe: "serre", limite: 60, ligne: a =>
+      h("tr", {class: "cliquable" + (a.j && a.j === j ? " choisie" : ""), onclick: () => { if (a.j){ etat.choisi = a.j.id; rafraichirEcran(); } else aller("operations", {compte: a.op.compte, mois: a.op.date.slice(0, 7), choisie: a.op.id}); }},
+        h("td", null, dateFr(a.date)), h("td", null, a.genre), h("td", null, a.nom), h("td", {class: "num"}, euros(a.montant)), h("td", {class: "petit"}, a.raison),
+        h("td", null, a.op ? h("button", {class: "mini discret", title: "Ne plus signaler ce débit (péage, abonnement, achat sans ticket…)", onclick: e => { e.stopPropagation(); enregistrer("operations", Object.assign(a.op, {sansPiece: true})); rafraichirEcran(); }}, "Pas de pièce") : null,
+          a.op && a.op.commercant ? h("button", {class: "mini discret", title: "Ne plus signaler les débits de ce fournisseur (péages, abonnements…) ; réversible dans sa fiche", onclick: e => { e.stopPropagation(); const f = obtenir("commercants", a.op.commercant); if (f){ enregistrer("commercants", Object.assign(f, {sansPiece: true})); rafraichirEcran(); } }}, "Jamais pour ce fournisseur") : null))}) : null);
   const sures = propositionsSures();
   if (sures.length) c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("span", {class: "discret"}, sures.length + " rapprochement(s) sûr(s) attendent votre accord (ils changeraient fournisseur ou catégorie). "),
     h("button", {class: "mini primaire", onclick: () => validerPropositionsSures(sures)}, "Les relire et valider…")));
@@ -34,10 +36,11 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   } else if (!j){
     c.appendChild(h("p", {class: "vide"}, aRapprocher.length ? "Rien à valider ni à trancher : " + aRapprocher.length + " justificatif(s) attendent leur opération au relevé. Cliquez sur une ligne pour l'ouvrir." : "Aucun justificatif à rapprocher."));
   } else c.appendChild(ecranRapprochement(j, etat, attente));
+  c.appendChild(blocAnomalies);
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Tous les justificatifs"));
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
-      h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
+      h("td", null, dateFr(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
       h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
 }});
 
