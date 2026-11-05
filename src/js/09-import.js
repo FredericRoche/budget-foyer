@@ -67,13 +67,23 @@ function preparerReleve(lu, compte){
   if (lu.genre === "compte" && lu.banque === "LCL"){
     const cartes = lignes.filter(l => l.type === "Carte");
     lignes = lignes.filter(l => l.type !== "Carte");
-    // Lignes carte : écartées si les exports par carte couvrent leur date, sinon gardées (dédoublonnées) sur le compte « sans titulaire ».
-    const couvertes = periodesCartes();
-    const aGarder = [];
-    for (const l of cartes) (couvertes.some(p => l.date >= p.debut && l.date <= p.fin) ? res.ecartees : aGarder).push(l);
-    const d = dedoublonnerCartesLcl(aGarder);
+    // Lignes carte (dédoublonnées) : écartées seulement si le même achat (date, montant ; à un jour près) est déjà
+    // sur une carte LCL ; sinon gardées sur le compte « sans titulaire ». Avant le 05/11/2026, elles étaient écartées dès
+    // qu'un export par carte couvrait leur date : un export d'encours tiré avant que les paiements récents (téléphone)
+    // n'y figurent faisait perdre ces achats.
+    const d = dedoublonnerCartesLcl(cartes);
     res.doublonsLcl = d.ecartees;
-    res.cartesSansTitulaire = d.gardees;
+    const lcl = new Set(vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL").map(c => c.id));
+    const reserve = new Map();
+    for (const o of vivants("operations").filter(o => lcl.has(o.compte))){ const k = o.date + "|" + versCentimes(o.montant); reserve.set(k, (reserve.get(k) || 0) + 1); }
+    const prendre = k => { const n = reserve.get(k) || 0; if (n > 0){ reserve.set(k, n - 1); return true; } return false; };
+    const restent = [];
+    for (const l of d.gardees) (prendre(l.date + "|" + versCentimes(l.montant)) ? res.ecartees : restent).push(l);
+    res.cartesSansTitulaire = restent.filter(l => {
+      const c = versCentimes(l.montant);
+      if (prendre(ajouterJours(l.date, -1) + "|" + c) || prendre(ajouterJours(l.date, 1) + "|" + c)){ res.ecartees.push(l); return false; }
+      return true;
+    });
     // Contrôle du solde : solde initial + opérations hors carte + factures de cartes débitées = solde final
     const factures = vivants("factures").filter(f => f.compteDebit === compte?.id && f.dateDebit > lu.periode.debut && f.dateDebit <= lu.periode.fin);
     const calc = versCentimes(lu.soldeDebut) + somme(lignes, l => versCentimes(l.montant)) - somme(factures, f => versCentimes(f.montant));

@@ -518,6 +518,15 @@ async function autotest(){
       v("pièce antérieure au contrôle : close, hors en-cours ; note de frais et saisie à valider restent ouvertes",
         [pieceClose(jv), encoursSaisis().lignes.some(l => (l.justificatifs || []).includes?.(jv.id)) || JSON.stringify(encoursSaisis()).includes(jv.id), pieceOuverte(jn), pieceClose(Object.assign({}, jv, {aValider: true}))], [true, false, true, false]);
       supprimer("justificatifs", jv.id); supprimer("justificatifs", jn.id);
+      {
+        // Export du compte : une ligne carte n'est écartée que si l'achat est déjà sur une carte LCL (à un jour près)
+        const ox = enregistrer("operations", {compte: carte.id, date: "2027-02-05", montant: -10, libelle: "DEJA SUR CARTE"});
+        const lu = {genre: "compte", banque: "LCL", numero: "000099Z", periode: {debut: "2027-02-01", fin: "2027-02-28"}, soldeDebut: 0, soldeFin: 0,
+          lignes: [{date: "2027-02-06", montant: -10, libelle: "DEJA SUR CARTE", type: "Carte"}, {date: "2027-02-06", montant: -42.94, libelle: "MANQUANT CARTE", type: "Carte"}]};
+        const pr = preparerReleve(lu, cj);
+        v("export du compte : achat déjà sur une carte écarté, achat absent gardé (sans titulaire)", [pr.ecartees.length, (pr.cartesSansTitulaire || []).map(l => l.libelle)], [1, ["MANQUANT CARTE"]]);
+        supprimer("operations", ox.id);
+      }
       const je = enregistrer("justificatifs", {type: "ticket", date: "2027-03-14", montant: 9.5, carte: "ESPECES", statut: "a_rapprocher", operations: []});
       creerOperationEspeces(je); const oe = obtenir("justificatifs", je.id).operations[0];
       delier(obtenir("justificatifs", je.id));

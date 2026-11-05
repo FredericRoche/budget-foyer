@@ -51,9 +51,10 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       gauche.appendChild(tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Classement proposé"}, {titre: "Lieu"}, {titre: "Origine"}], detail.prep.nouvelles, {classe: "serre", limite: 60, ligne: l =>
         h("tr", null, h("td", null, dateCourte(l.date)), h("td", null, l.libelle), montantCellule(l.montant), h("td", {class: l.proposition.categorie === "À préciser" ? "neg" : ""}, l.proposition.categorie + (l.proposition.sousCategorie && l.proposition.sousCategorie !== l.proposition.categorie ? " › " + l.proposition.sousCategorie : "")),
           h("td", null, etiquetteLieu(l.proposition.lieu)), h("td", null, marqueOrigine(l.proposition)))}));
-      if (detail.prep.deja.length || detail.prep.ecartees.length || detail.prep.doublonsLcl) gauche.appendChild(h("p", {class: "note"},
+      if (detail.prep.deja.length || detail.prep.ecartees.length || detail.prep.doublonsLcl || detail.prep.cartesSansTitulaire?.length) gauche.appendChild(h("p", {class: "note"},
         (detail.prep.deja.length ? detail.prep.deja.length + " ligne(s) déjà présente(s), écartée(s). " : "") +
-        (detail.prep.ecartees.length ? detail.prep.ecartees.length + " ligne(s) carte couverte(s) par les exports par carte, écartée(s). " : "") +
+        (detail.prep.ecartees.length ? detail.prep.ecartees.length + " ligne(s) carte déjà présente(s) sur une carte, écartée(s). " : "") +
+        (detail.prep.cartesSansTitulaire?.length ? detail.prep.cartesSansTitulaire.length + " achat(s) carte absent(s) des cartes, ajouté(s) sur « Cartes LCL (sans titulaire) » : " + detail.prep.cartesSansTitulaire.slice(0, 12).map(l => dateCourte(l.date) + " " + l.libelle + " " + euros(l.montant)).join(" · ") + (detail.prep.cartesSansTitulaire.length > 12 ? " …" : "") + ". " : "") +
         (detail.prep.doublonsLcl ? detail.prep.doublonsLcl + " doublon(s) LCL écarté(s) (règle ⌈n/2⌉). " : "")));
     }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));

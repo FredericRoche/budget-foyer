@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pM7yU5D+ysjir/XXMcYmKGpoT1EVDFmqy6/kuLIwP5s=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-rDi+6n3b4XVBAfz0udFk+vQk13RYiLAjNDOH1oKIAsg=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1234";
+const VERSION_APP = "2026-11-05.1243";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2297,13 +2297,23 @@ function preparerReleve(lu, compte){
   if (lu.genre === "compte" && lu.banque === "LCL"){
     const cartes = lignes.filter(l => l.type === "Carte");
     lignes = lignes.filter(l => l.type !== "Carte");
-    // Lignes carte : écartées si les exports par carte couvrent leur date, sinon gardées (dédoublonnées) sur le compte « sans titulaire ».
-    const couvertes = periodesCartes();
-    const aGarder = [];
-    for (const l of cartes) (couvertes.some(p => l.date >= p.debut && l.date <= p.fin) ? res.ecartees : aGarder).push(l);
-    const d = dedoublonnerCartesLcl(aGarder);
+    // Lignes carte (dédoublonnées) : écartées seulement si le même achat (date, montant ; à un jour près) est déjà
+    // sur une carte LCL ; sinon gardées sur le compte « sans titulaire ». Avant le 05/11/2026, elles étaient écartées dès
+    // qu'un export par carte couvrait leur date : un export d'encours tiré avant que les paiements récents (téléphone)
+    // n'y figurent faisait perdre ces achats.
+    const d = dedoublonnerCartesLcl(cartes);
     res.doublonsLcl = d.ecartees;
-    res.cartesSansTitulaire = d.gardees;
+    const lcl = new Set(vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL").map(c => c.id));
+    const reserve = new Map();
+    for (const o of vivants("operations").filter(o => lcl.has(o.compte))){ const k = o.date + "|" + versCentimes(o.montant); reserve.set(k, (reserve.get(k) || 0) + 1); }
+    const prendre = k => { const n = reserve.get(k) || 0; if (n > 0){ reserve.set(k, n - 1); return true; } return false; };
+    const restent = [];
+    for (const l of d.gardees) (prendre(l.date + "|" + versCentimes(l.montant)) ? res.ecartees : restent).push(l);
+    res.cartesSansTitulaire = restent.filter(l => {
+      const c = versCentimes(l.montant);
+      if (prendre(ajouterJours(l.date, -1) + "|" + c) || prendre(ajouterJours(l.date, 1) + "|" + c)){ res.ecartees.push(l); return false; }
+      return true;
+    });
     // Contrôle du solde : solde initial + opérations hors carte + factures de cartes débitées = solde final
     const factures = vivants("factures").filter(f => f.compteDebit === compte?.id && f.dateDebit > lu.periode.debut && f.dateDebit <= lu.periode.fin);
     const calc = versCentimes(lu.soldeDebut) + somme(lignes, l => versCentimes(l.montant)) - somme(factures, f => versCentimes(f.montant));
@@ -5435,9 +5445,10 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       gauche.appendChild(tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Classement proposé"}, {titre: "Lieu"}, {titre: "Origine"}], detail.prep.nouvelles, {classe: "serre", limite: 60, ligne: l =>
         h("tr", null, h("td", null, dateCourte(l.date)), h("td", null, l.libelle), montantCellule(l.montant), h("td", {class: l.proposition.categorie === "À préciser" ? "neg" : ""}, l.proposition.categorie + (l.proposition.sousCategorie && l.proposition.sousCategorie !== l.proposition.categorie ? " › " + l.proposition.sousCategorie : "")),
           h("td", null, etiquetteLieu(l.proposition.lieu)), h("td", null, marqueOrigine(l.proposition)))}));
-      if (detail.prep.deja.length || detail.prep.ecartees.length || detail.prep.doublonsLcl) gauche.appendChild(h("p", {class: "note"},
+      if (detail.prep.deja.length || detail.prep.ecartees.length || detail.prep.doublonsLcl || detail.prep.cartesSansTitulaire?.length) gauche.appendChild(h("p", {class: "note"},
         (detail.prep.deja.length ? detail.prep.deja.length + " ligne(s) déjà présente(s), écartée(s). " : "") +
-        (detail.prep.ecartees.length ? detail.prep.ecartees.length + " ligne(s) carte couverte(s) par les exports par carte, écartée(s). " : "") +
+        (detail.prep.ecartees.length ? detail.prep.ecartees.length + " ligne(s) carte déjà présente(s) sur une carte, écartée(s). " : "") +
+        (detail.prep.cartesSansTitulaire?.length ? detail.prep.cartesSansTitulaire.length + " achat(s) carte absent(s) des cartes, ajouté(s) sur « Cartes LCL (sans titulaire) » : " + detail.prep.cartesSansTitulaire.slice(0, 12).map(l => dateCourte(l.date) + " " + l.libelle + " " + euros(l.montant)).join(" · ") + (detail.prep.cartesSansTitulaire.length > 12 ? " …" : "") + ". " : "") +
         (detail.prep.doublonsLcl ? detail.prep.doublonsLcl + " doublon(s) LCL écarté(s) (règle ⌈n/2⌉). " : "")));
     }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));
@@ -8076,6 +8087,15 @@ async function autotest(){
       v("pièce antérieure au contrôle : close, hors en-cours ; note de frais et saisie à valider restent ouvertes",
         [pieceClose(jv), encoursSaisis().lignes.some(l => (l.justificatifs || []).includes?.(jv.id)) || JSON.stringify(encoursSaisis()).includes(jv.id), pieceOuverte(jn), pieceClose(Object.assign({}, jv, {aValider: true}))], [true, false, true, false]);
       supprimer("justificatifs", jv.id); supprimer("justificatifs", jn.id);
+      {
+        // Export du compte : une ligne carte n'est écartée que si l'achat est déjà sur une carte LCL (à un jour près)
+        const ox = enregistrer("operations", {compte: carte.id, date: "2027-02-05", montant: -10, libelle: "DEJA SUR CARTE"});
+        const lu = {genre: "compte", banque: "LCL", numero: "000099Z", periode: {debut: "2027-02-01", fin: "2027-02-28"}, soldeDebut: 0, soldeFin: 0,
+          lignes: [{date: "2027-02-06", montant: -10, libelle: "DEJA SUR CARTE", type: "Carte"}, {date: "2027-02-06", montant: -42.94, libelle: "MANQUANT CARTE", type: "Carte"}]};
+        const pr = preparerReleve(lu, cj);
+        v("export du compte : achat déjà sur une carte écarté, achat absent gardé (sans titulaire)", [pr.ecartees.length, (pr.cartesSansTitulaire || []).map(l => l.libelle)], [1, ["MANQUANT CARTE"]]);
+        supprimer("operations", ox.id);
+      }
       const je = enregistrer("justificatifs", {type: "ticket", date: "2027-03-14", montant: 9.5, carte: "ESPECES", statut: "a_rapprocher", operations: []});
       creerOperationEspeces(je); const oe = obtenir("justificatifs", je.id).operations[0];
       delier(obtenir("justificatifs", je.id));
