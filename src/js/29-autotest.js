@@ -630,6 +630,9 @@ async function autotest(){
     /* --- Valorisations lues dans des PDF (textes types) --- */
     const av = reconnaitrePdf("RELEVE.pdf", "Votre relevé trimestriel au 30 juin 2027\nLa valeur de votre adhésion s'élève à 612 400,00 euros.\nN° Adhésion : 123 456789012C", null);
     v("assurance-vie : valeur et date", [av.genre, av.valeur, av.date], ["valorisation", 612400, "2027-06-30"]);
+    const ava = reconnaitrePdf("RELEVEANNUELASSURANCEVIE_20280205.pdf", "Assureur : Assureur Essai\nN° Adhésion : 701 123456789C CONTRAT EXEMPLE VIE\nRelevé annuel de votre assurance vie établi au 31 décembre 2027\nLa valeur de votre adhésion au 31 décembre 2027 est de : 203 664,22 €", null);
+    const avi = reconnaitrePdf("INFORMATIONTRIMESTRIELLEASSURANCEVIE_20271125.pdf", "Assureur : Assureur Essai\nN° Adhésion : 701 123456789C\nLa valeur de votre adhésion au 30 septembre 2027 s'élève à 201 520,28 €.", null);
+    v("assurance-vie : relevé annuel et information trimestrielle", [ava.valeur, ava.date, ava.numero, ava.produit, avi.valeur, avi.date], [203664.22, "2027-12-31", "701123456789C", "CONTRAT EXEMPLE VIE", 201520.28, "2027-09-30"]);
     const pea = reconnaitrePdf("PLANDEPARGNEENACTIONS_08208012345_20270331.pdf", "Précisions sur votre PEA au 31/03/2027:\nEvaluation globale de votre PEA : 356.973,29 euros", null);
     v("PEA : évaluation globale", [pea.valeur, pea.date], [356973.29, "2027-03-31"]);
 

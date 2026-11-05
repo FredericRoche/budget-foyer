@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-OXdl1oh1B0PoNoq2D+LaOipzwkLOmvjZ+iInP/zzT8E=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-EFOy6v2tmd0Up7qmd9p5RCBIUIXtoKw4RhYLczJyV3g=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1705";
+const VERSION_APP = "2026-11-05.1744";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2252,13 +2252,15 @@ function reconnaitrePdf(nom, texte, octets){
       numero: premier(T, /\d{5}-(\d{6}[A-Z])/), date: lireDate(premier(T, /[ée]tabli au (\d{2}\/\d{2}\/\d{4})/)),
       valeur: lireMontant(premier(T, new RegExp("EVALUATION TOTALE\\s*" + reMontant))), lignes, partiel: surPea});
   }
-  // Assurance-vie, relevé trimestriel (« valeur de votre adhésion »)
-  if (/valeur de votre adh[ée]sion s.[ée]l[èe]ve/i.test(T)){
+  // Assurance-vie : relevé trimestriel (« la valeur de votre adhésion s'élève à … euros »), information
+  // trimestrielle (« la valeur de votre adhésion au 30 septembre 2025 s'élève à … € ») et relevé annuel (« … au 31 décembre 2025 est de : … € »)
+  if (/valeur de votre adh[ée]sion (?:au \d{1,2}(?:er)? \S+ \d{4} )?(?:s.[ée]l[èe]ve|est de)/i.test(T)){
+    const m = T.match(/valeur de votre adh[ée]sion (?:au (\d{1,2}(?:er)? \S+ \d{4}) )?(?:s.[ée]l[èe]ve [àa]|est de\s*:?)\s*(\d{1,3}(?:[  .]\d{3})*,\d{2})\s*(?:€|euros)/i);
+    const dateLue = (m && m[1]) || premier(T, /relev[ée] (?:trimestriel|annuel)[^\n]*? (?:au|établi au) (\d{1,2}(?:er)? \S+ \d{4})/i);
     return Object.assign(base, {genre: "valorisation", etablissement: premier(T, /Assureur\s*:\s*([A-Za-zÀ-ÿ ]+?)\s*(?:N°|\n)/) || "Assurance-vie", typeCompte: "assurance_vie",
-      produit: premier(T, /adh[ée]sion au contrat (.+?) formule/i) || "Assurance-vie",
+      produit: premier(T, /adh[ée]sion au contrat (.+?) formule/i) || premier(T, /N° Adh[ée]sion\s*:\s*[\d ]+[A-Z][ \t]+([A-Z][A-Z ]{3,40})/) || "Assurance-vie",
       numero: premier(T, /N° Adh[ée]sion\s*:\s*([\d ]+[A-Z])/).replace(/\s/g, ""),
-      date: dateTexte(premier(T, /relev[ée] trimestriel au (\d{1,2}(?:er)? \S+ \d{4})/i)),
-      valeur: lireMontant(premier(T, /valeur de votre adh[ée]sion s.[ée]l[èe]ve [àa]\s*([\d .,]+)\s*euros/i))});
+      date: dateTexte(dateLue), valeur: m ? lireMontant(m[2]) : NaN});
   }
   // Contrat de retraite (« valeur de transfert »)
   if (/Valeur de transfert/i.test(T)){
@@ -8551,6 +8553,9 @@ async function autotest(){
     /* --- Valorisations lues dans des PDF (textes types) --- */
     const av = reconnaitrePdf("RELEVE.pdf", "Votre relevé trimestriel au 30 juin 2027\nLa valeur de votre adhésion s'élève à 612 400,00 euros.\nN° Adhésion : 123 456789012C", null);
     v("assurance-vie : valeur et date", [av.genre, av.valeur, av.date], ["valorisation", 612400, "2027-06-30"]);
+    const ava = reconnaitrePdf("RELEVEANNUELASSURANCEVIE_20280205.pdf", "Assureur : Assureur Essai\nN° Adhésion : 701 123456789C CONTRAT EXEMPLE VIE\nRelevé annuel de votre assurance vie établi au 31 décembre 2027\nLa valeur de votre adhésion au 31 décembre 2027 est de : 203 664,22 €", null);
+    const avi = reconnaitrePdf("INFORMATIONTRIMESTRIELLEASSURANCEVIE_20271125.pdf", "Assureur : Assureur Essai\nN° Adhésion : 701 123456789C\nLa valeur de votre adhésion au 30 septembre 2027 s'élève à 201 520,28 €.", null);
+    v("assurance-vie : relevé annuel et information trimestrielle", [ava.valeur, ava.date, ava.numero, ava.produit, avi.valeur, avi.date], [203664.22, "2027-12-31", "701123456789C", "CONTRAT EXEMPLE VIE", 201520.28, "2027-09-30"]);
     const pea = reconnaitrePdf("PLANDEPARGNEENACTIONS_08208012345_20270331.pdf", "Précisions sur votre PEA au 31/03/2027:\nEvaluation globale de votre PEA : 356.973,29 euros", null);
     v("PEA : évaluation globale", [pea.valeur, pea.date], [356973.29, "2027-03-31"]);
 

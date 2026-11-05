@@ -360,13 +360,15 @@ function reconnaitrePdf(nom, texte, octets){
       numero: premier(T, /\d{5}-(\d{6}[A-Z])/), date: lireDate(premier(T, /[ée]tabli au (\d{2}\/\d{2}\/\d{4})/)),
       valeur: lireMontant(premier(T, new RegExp("EVALUATION TOTALE\\s*" + reMontant))), lignes, partiel: surPea});
   }
-  // Assurance-vie, relevé trimestriel (« valeur de votre adhésion »)
-  if (/valeur de votre adh[ée]sion s.[ée]l[èe]ve/i.test(T)){
+  // Assurance-vie : relevé trimestriel (« la valeur de votre adhésion s'élève à … euros »), information
+  // trimestrielle (« la valeur de votre adhésion au 30 septembre 2025 s'élève à … € ») et relevé annuel (« … au 31 décembre 2025 est de : … € »)
+  if (/valeur de votre adh[ée]sion (?:au \d{1,2}(?:er)? \S+ \d{4} )?(?:s.[ée]l[èe]ve|est de)/i.test(T)){
+    const m = T.match(/valeur de votre adh[ée]sion (?:au (\d{1,2}(?:er)? \S+ \d{4}) )?(?:s.[ée]l[èe]ve [àa]|est de\s*:?)\s*(\d{1,3}(?:[  .]\d{3})*,\d{2})\s*(?:€|euros)/i);
+    const dateLue = (m && m[1]) || premier(T, /relev[ée] (?:trimestriel|annuel)[^\n]*? (?:au|établi au) (\d{1,2}(?:er)? \S+ \d{4})/i);
     return Object.assign(base, {genre: "valorisation", etablissement: premier(T, /Assureur\s*:\s*([A-Za-zÀ-ÿ ]+?)\s*(?:N°|\n)/) || "Assurance-vie", typeCompte: "assurance_vie",
-      produit: premier(T, /adh[ée]sion au contrat (.+?) formule/i) || "Assurance-vie",
+      produit: premier(T, /adh[ée]sion au contrat (.+?) formule/i) || premier(T, /N° Adh[ée]sion\s*:\s*[\d ]+[A-Z][ \t]+([A-Z][A-Z ]{3,40})/) || "Assurance-vie",
       numero: premier(T, /N° Adh[ée]sion\s*:\s*([\d ]+[A-Z])/).replace(/\s/g, ""),
-      date: dateTexte(premier(T, /relev[ée] trimestriel au (\d{1,2}(?:er)? \S+ \d{4})/i)),
-      valeur: lireMontant(premier(T, /valeur de votre adh[ée]sion s.[ée]l[èe]ve [àa]\s*([\d .,]+)\s*euros/i))});
+      date: dateTexte(dateLue), valeur: m ? lireMontant(m[2]) : NaN});
   }
   // Contrat de retraite (« valeur de transfert »)
   if (/Valeur de transfert/i.test(T)){
