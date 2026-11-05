@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-m4i7bKwKaR4M8d+vqf4hNbhqSARYoxboHwvTVVKZ/+I=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pM7yU5D+ysjir/XXMcYmKGpoT1EVDFmqy6/kuLIwP5s=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1218";
+const VERSION_APP = "2026-11-05.1234";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1446,6 +1446,7 @@ async function ouvrirLivre(motDePasse, souvenir){
   }
   LIVRE = completerLivre(livre);
   try { reparerCategories(); } catch (e) {}
+  try { const ne = reparerEspecesOrphelines(); if (ne) setTimeout(() => message(ne + " opération(s) en espèces supprimée(s) : leur pièce n'y était plus rattachée (payée par carte)."), 3500); } catch (e) {}
   try { const na = reparerAliasBanques(); if (na) setTimeout(() => message(na + " alias retiré(s) : nom de la banque du terminal (ex. « SUD RHONE ALPES »), pas celui du commerçant."), 2500); } catch (e) {}
   try { const nr = reparerFichesEment(); if (nr) setTimeout(() => message(nr + " fiche(s) fournisseur « Ement… » corrigée(s) (libellés « VIREMENT » mal coupés)."), 1500); } catch (e) {}
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
@@ -3021,6 +3022,8 @@ function lier(js, op, auto){
 function delier(j){
   for (const id of j.operations || []){
     const op = obtenir("operations", id); if (!op) continue;
+    // Opération en espèces née de cette pièce : elle disparaît avec le rapprochement (sinon double compte)
+    if (op.empreinte === "especes|" + j.id){ supprimer("operations", op.id); continue; }
     op.justificatifs = (op.justificatifs || []).filter(x => x !== j.id);
     if (op.ventilation) op.ventilation = op.ventilation.filter(v => v.justificatif !== j.id);
     if (op.ventilation && op.ventilation.length < 2) delete op.ventilation;
@@ -3251,6 +3254,16 @@ function compteEspeces(){
   let c = vivants("comptes").find(x => x.type === "especes");
   if (!c) c = enregistrer("comptes", {nom: "Espèces", type: "especes", banque: "", actif: true});
   return c;
+}
+/* Réparation (05/11/2026) : opérations en espèces dont la pièce d'origine n'y est plus rattachée (rapprochement
+   défait avant ce correctif, ou pièce supprimée) : supprimées. */
+function reparerEspecesOrphelines(){
+  let n = 0;
+  for (const o of vivants("operations").filter(o => (o.empreinte || "").startsWith("especes|"))){
+    const j = obtenir("justificatifs", o.empreinte.slice(8));
+    if (!j || !(j.operations || []).includes(o.id)){ supprimer("operations", o.id); n++; }
+  }
+  return n;
 }
 function creerOperationEspeces(j){
   const compte = compteEspeces();
@@ -8063,6 +8076,11 @@ async function autotest(){
       v("pièce antérieure au contrôle : close, hors en-cours ; note de frais et saisie à valider restent ouvertes",
         [pieceClose(jv), encoursSaisis().lignes.some(l => (l.justificatifs || []).includes?.(jv.id)) || JSON.stringify(encoursSaisis()).includes(jv.id), pieceOuverte(jn), pieceClose(Object.assign({}, jv, {aValider: true}))], [true, false, true, false]);
       supprimer("justificatifs", jv.id); supprimer("justificatifs", jn.id);
+      const je = enregistrer("justificatifs", {type: "ticket", date: "2027-03-14", montant: 9.5, carte: "ESPECES", statut: "a_rapprocher", operations: []});
+      creerOperationEspeces(je); const oe = obtenir("justificatifs", je.id).operations[0];
+      delier(obtenir("justificatifs", je.id));
+      v("espèces défait : l'opération en espèces disparaît avec le rapprochement", [!!obtenir("operations", oe), obtenir("justificatifs", je.id).statut], [false, "a_rapprocher"]);
+      supprimer("justificatifs", je.id);
       v("banque du terminal : caisse régionale lue seule, jamais un fournisseur ; vrai commerçant accepté",
         [estBanqueTerminal("SUD RHONE ALPES"), estBanqueTerminal("Crédit Agricole Sud Rhône Alpes"), estBanqueTerminal("Pharmacie Sud Rhône Alpes"), estBanqueTerminal("La Savoureine")], [true, true, false, false]);
       // Débit sans pièce et pièce du même fournisseur à un écart près : appariés, rapprochés seulement sur décision

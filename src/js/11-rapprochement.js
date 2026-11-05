@@ -118,6 +118,8 @@ function lier(js, op, auto){
 function delier(j){
   for (const id of j.operations || []){
     const op = obtenir("operations", id); if (!op) continue;
+    // Opération en espèces née de cette pièce : elle disparaît avec le rapprochement (sinon double compte)
+    if (op.empreinte === "especes|" + j.id){ supprimer("operations", op.id); continue; }
     op.justificatifs = (op.justificatifs || []).filter(x => x !== j.id);
     if (op.ventilation) op.ventilation = op.ventilation.filter(v => v.justificatif !== j.id);
     if (op.ventilation && op.ventilation.length < 2) delete op.ventilation;
@@ -348,6 +350,16 @@ function compteEspeces(){
   let c = vivants("comptes").find(x => x.type === "especes");
   if (!c) c = enregistrer("comptes", {nom: "Espèces", type: "especes", banque: "", actif: true});
   return c;
+}
+/* Réparation (05/11/2026) : opérations en espèces dont la pièce d'origine n'y est plus rattachée (rapprochement
+   défait avant ce correctif, ou pièce supprimée) : supprimées. */
+function reparerEspecesOrphelines(){
+  let n = 0;
+  for (const o of vivants("operations").filter(o => (o.empreinte || "").startsWith("especes|"))){
+    const j = obtenir("justificatifs", o.empreinte.slice(8));
+    if (!j || !(j.operations || []).includes(o.id)){ supprimer("operations", o.id); n++; }
+  }
+  return n;
 }
 function creerOperationEspeces(j){
   const compte = compteEspeces();
