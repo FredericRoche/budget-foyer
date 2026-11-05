@@ -570,6 +570,13 @@ async function autotest(){
       v("espèces défait : l'opération en espèces disparaît avec le rapprochement", [!!obtenir("operations", oe), obtenir("justificatifs", je.id).statut], [false, "a_rapprocher"]);
       supprimer("justificatifs", je.id);
       {
+        // Relevé annuel de livret : solde au 31/12 tiré des écritures
+        const NL2 = String.fromCharCode(10);
+        const tl = ["RELEVE DE COMPTE", " du 01.02.2026 au 31.01.2027 - N° 3", "ECRITURES DE LA PERIODE", "DATE LIBELLE VALEUR DEBIT CREDIT", "31.01 ANCIEN SOLDE 12 119,39 [C]",
+          "31.12 INTERETS AU : 31 12 26 31.12.26 . 363,57 [C]", "15.01 VIREMENT ESSAI 15.01.27 100,00", "31.01 SOLDE EN EUROS 12 382,96 [C]"].join(NL2);
+        v("livret : solde au 31/12 lu dans le relevé annuel", soldesFinAnnee(tl), [{date: "2026-12-31", valeur: 12482.96}]);
+      }
+      {
         // Lot : nature d'une catégorie (projet) sur les opérations et les parts ventilées
         const on1 = enregistrer("operations", {compte: cj.id, date: "2027-02-10", montant: -100, libelle: "ESSAI NAT 1", categorie: "Catégorie essai", sousCategorie: "Études", nature: "Courante"});
         const on2 = enregistrer("operations", {compte: cj.id, date: "2027-02-11", montant: -50, libelle: "ESSAI NAT 2", categorie: "Catégorie essai", sousCategorie: "Honoraires", nature: "Hors budget"});

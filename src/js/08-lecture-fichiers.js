@@ -188,6 +188,20 @@ function extraireReleveCompteLcl(texte){
     controle: {ok, texte: "relevé du compte : " + operations.length + " écriture(s)" + (final === null ? ", solde final illisible" : ok ? ", soldes cohérents au centime" : ", écart de " + euros((versCentimes(final) - calc) / 100) + " entre les écritures et le solde final")}};
 }
 
+/* Relevé annuel d'un livret (période de février à janvier) : solde au 31/12 compris dans la période, tiré des
+   écritures (ancien solde + écritures jusqu'au 31/12). Sert de valeur de fin d'année pour la comparaison du patrimoine. */
+function soldesFinAnnee(texte){
+  const rc = extraireReleveCompteLcl(texte);
+  if (!rc || !rc.controle.ok) return [];
+  const r = [];
+  for (let an = +rc.periode.debut.slice(0, 4); an <= +rc.periode.fin.slice(0, 4); an++){
+    const d = an + "-12-31";
+    if (d < rc.periode.debut || d >= rc.periode.fin) continue;
+    r.push({date: d, valeur: Math.round((rc.soldeDebut + somme(rc.operations.filter(o => o.date <= d), o => o.montant)) * 100) / 100});
+  }
+  return r;
+}
+
 /* ---------- Justificatifs d'achat SNCF Connect ----------
    Un PDF par paiement : date de la transaction, montant, carte, et pour chaque trajet sa date, son heure
    et ses voyageurs. Les trajets d'une même commande (aller et retour) partagent un prix de bloc. */
@@ -325,7 +339,7 @@ function reconnaitrePdf(nom, texte, octets){
     return Object.assign(base, {genre: "valorisation", etablissement: "LCL", typeCompte: "livret",
       produit: /DEVDURABLE/.test(fn[1]) ? "Livret de développement durable et solidaire" : (fn[1] === "LIVRETA" ? "Livret A" : fn[1]),
       numero: fn[2].slice(5), date: `${fn[3].slice(0, 4)}-${fn[3].slice(4, 6)}-${fn[3].slice(6, 8)}`,
-      valeur: lireMontant(premier(T, new RegExp("SOLDE EN EUROS\\s*" + reMontant)))});
+      valeur: lireMontant(premier(T, new RegExp("SOLDE EN EUROS\\s*" + reMontant))), intermediaires: soldesFinAnnee(T)});
   }
   // PEA LCL : relevé du compte espèces avec l'évaluation globale
   if (/Evaluation globale de votre PEA/i.test(T)){

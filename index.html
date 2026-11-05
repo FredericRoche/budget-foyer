@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-jnDYXM96NLV2yZv/S471l/F2gRTsGdecztTsRUndIMM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-USN2ghMPrXdrWVCg6K3BhiFp0KGQG/00c6aWp7n/5ho=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1621";
+const VERSION_APP = "2026-11-05.1654";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2080,6 +2080,20 @@ function extraireReleveCompteLcl(texte){
     controle: {ok, texte: "relevé du compte : " + operations.length + " écriture(s)" + (final === null ? ", solde final illisible" : ok ? ", soldes cohérents au centime" : ", écart de " + euros((versCentimes(final) - calc) / 100) + " entre les écritures et le solde final")}};
 }
 
+/* Relevé annuel d'un livret (période de février à janvier) : solde au 31/12 compris dans la période, tiré des
+   écritures (ancien solde + écritures jusqu'au 31/12). Sert de valeur de fin d'année pour la comparaison du patrimoine. */
+function soldesFinAnnee(texte){
+  const rc = extraireReleveCompteLcl(texte);
+  if (!rc || !rc.controle.ok) return [];
+  const r = [];
+  for (let an = +rc.periode.debut.slice(0, 4); an <= +rc.periode.fin.slice(0, 4); an++){
+    const d = an + "-12-31";
+    if (d < rc.periode.debut || d >= rc.periode.fin) continue;
+    r.push({date: d, valeur: Math.round((rc.soldeDebut + somme(rc.operations.filter(o => o.date <= d), o => o.montant)) * 100) / 100});
+  }
+  return r;
+}
+
 /* ---------- Justificatifs d'achat SNCF Connect ----------
    Un PDF par paiement : date de la transaction, montant, carte, et pour chaque trajet sa date, son heure
    et ses voyageurs. Les trajets d'une même commande (aller et retour) partagent un prix de bloc. */
@@ -2217,7 +2231,7 @@ function reconnaitrePdf(nom, texte, octets){
     return Object.assign(base, {genre: "valorisation", etablissement: "LCL", typeCompte: "livret",
       produit: /DEVDURABLE/.test(fn[1]) ? "Livret de développement durable et solidaire" : (fn[1] === "LIVRETA" ? "Livret A" : fn[1]),
       numero: fn[2].slice(5), date: `${fn[3].slice(0, 4)}-${fn[3].slice(4, 6)}-${fn[3].slice(6, 8)}`,
-      valeur: lireMontant(premier(T, new RegExp("SOLDE EN EUROS\\s*" + reMontant)))});
+      valeur: lireMontant(premier(T, new RegExp("SOLDE EN EUROS\\s*" + reMontant))), intermediaires: soldesFinAnnee(T)});
   }
   // PEA LCL : relevé du compte espèces avec l'évaluation globale
   if (/Evaluation globale de votre PEA/i.test(T)){
@@ -2597,6 +2611,11 @@ function appliquerValorisation(lu, compte){
   const deja = vivants("valorisations").find(v => v.compte === compte.id && v.date === lu.date);
   enregistrer("valorisations", Object.assign(deja || {}, {compte: compte.id, date: lu.date, valeur: lu.valeur, source: lu.nom,
     details: lu.lignes || null, partiel: !!lu.partiel, complements: {versements: lu.versements, renteMinimale: lu.renteMinimale, capitalDeces: lu.capitalDeces, cotisation: lu.cotisation}}));
+  // Soldes de fin d'année lus dans le même relevé (livrets) : une valeur au 31/12, sans écraser une autre source de ce jour
+  for (const v of lu.intermediaires || []){
+    const d2 = vivants("valorisations").find(x => x.compte === compte.id && x.date === v.date);
+    if (!d2 || d2.source === lu.nom) enregistrer("valorisations", Object.assign(d2 || {}, {compte: compte.id, date: v.date, valeur: v.valeur, source: lu.nom}));
+  }
 }
 
 /* ---------- Après chaque import : transferts, débits différés, rapprochements ---------- */
@@ -8445,6 +8464,13 @@ async function autotest(){
       delier(obtenir("justificatifs", je.id));
       v("espèces défait : l'opération en espèces disparaît avec le rapprochement", [!!obtenir("operations", oe), obtenir("justificatifs", je.id).statut], [false, "a_rapprocher"]);
       supprimer("justificatifs", je.id);
+      {
+        // Relevé annuel de livret : solde au 31/12 tiré des écritures
+        const NL2 = String.fromCharCode(10);
+        const tl = ["RELEVE DE COMPTE", " du 01.02.2026 au 31.01.2027 - N° 3", "ECRITURES DE LA PERIODE", "DATE LIBELLE VALEUR DEBIT CREDIT", "31.01 ANCIEN SOLDE 12 119,39 [C]",
+          "31.12 INTERETS AU : 31 12 26 31.12.26 . 363,57 [C]", "15.01 VIREMENT ESSAI 15.01.27 100,00", "31.01 SOLDE EN EUROS 12 382,96 [C]"].join(NL2);
+        v("livret : solde au 31/12 lu dans le relevé annuel", soldesFinAnnee(tl), [{date: "2026-12-31", valeur: 12482.96}]);
+      }
       {
         // Lot : nature d'une catégorie (projet) sur les opérations et les parts ventilées
         const on1 = enregistrer("operations", {compte: cj.id, date: "2027-02-10", montant: -100, libelle: "ESSAI NAT 1", categorie: "Catégorie essai", sousCategorie: "Études", nature: "Courante"});

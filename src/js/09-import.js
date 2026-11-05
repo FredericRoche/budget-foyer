@@ -302,6 +302,11 @@ function appliquerValorisation(lu, compte){
   const deja = vivants("valorisations").find(v => v.compte === compte.id && v.date === lu.date);
   enregistrer("valorisations", Object.assign(deja || {}, {compte: compte.id, date: lu.date, valeur: lu.valeur, source: lu.nom,
     details: lu.lignes || null, partiel: !!lu.partiel, complements: {versements: lu.versements, renteMinimale: lu.renteMinimale, capitalDeces: lu.capitalDeces, cotisation: lu.cotisation}}));
+  // Soldes de fin d'année lus dans le même relevé (livrets) : une valeur au 31/12, sans écraser une autre source de ce jour
+  for (const v of lu.intermediaires || []){
+    const d2 = vivants("valorisations").find(x => x.compte === compte.id && x.date === v.date);
+    if (!d2 || d2.source === lu.nom) enregistrer("valorisations", Object.assign(d2 || {}, {compte: compte.id, date: v.date, valeur: v.valeur, source: lu.nom}));
+  }
 }
 
 /* ---------- Après chaque import : transferts, débits différés, rapprochements ---------- */
