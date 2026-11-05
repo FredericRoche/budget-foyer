@@ -42,6 +42,8 @@ async function dossierImport(quoi, interactif){
 function reglesRangement(){ return LIVRE.parametres.rangement || {}; }
 /* Clé de la règle qui s'applique au fichier : un compte, ou une famille de pièces. */
 function cleRangement(lu, compte){
+  // Relevé d'un autre compte LCL que le compte principal (compte personnel…) : sa propre règle, son propre dossier
+  if (lu.genre === "releve_lcl" && compte && compte.id !== compteCourantLcl()?.id) return "releves_pdf:" + compte.id;
   if (lu.genre === "cartes_lcl" || lu.genre === "releve_lcl") return "releves_pdf_lcl";
   if (["compte", "carte", "valorisation"].includes(lu.genre)) return compte ? "compte:" + compte.id : null;
   if (lu.genre === "facture_cb") return "factures_cb";
@@ -52,7 +54,7 @@ function cleRangement(lu, compte){
   return null;
 }
 const LIBELLES_RANGEMENT = {releves_pdf_lcl: "Relevés PDF du compte LCL", factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
-function libelleRangement(cle){ return cle.startsWith("compte:") ? libelleCompte(cle.slice(7)) : LIBELLES_RANGEMENT[cle] || cle; }
+function libelleRangement(cle){ return cle.startsWith("compte:") ? libelleCompte(cle.slice(7)) : cle.startsWith("releves_pdf:") ? "Relevés PDF · " + libelleCompte(cle.slice(12)) : LIBELLES_RANGEMENT[cle] || cle; }
 
 /* Année du fichier : fin de période, date de valeur, arrêté, sinon aujourd'hui. */
 function anneeFichier(lu){ return String((lu.periode && lu.periode.fin) || lu.date || lu.arrete || lu.dateDebit || aujourdhui()).slice(0, 4); }
@@ -74,6 +76,7 @@ function proposerRangement(lu, compte, index){
   const enfant = (base, re) => base && index.find(c => c.startsWith(base + "/") && c.split("/").length === base.split("/").length + 1 && re.test(c.split("/").pop()));
   const courant = () => { const c = compteCourantLcl(); return c ? parNumero(c.numero) : null; };
   if (lu.genre === "compte"){ const b = parNumero(compte?.numero); return b ? b + "/Historiques CSV" : (compte ? compte.nom : null); }
+  if (lu.genre === "releve_lcl" && compte && compte.id !== compteCourantLcl()?.id){ const b = parNumero(compte.numero); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés PDF" : compte.nom + "/Relevés PDF"); }
   if (lu.genre === "cartes_lcl" || lu.genre === "releve_lcl"){ const b = courant(); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés" : "Relevés PDF LCL"); }
   if (lu.genre === "carte"){
     if (lu.banque === "Amex"){ const b = parNom(/^amex$/i); return (b || "Amex") + "/Relevés"; }
