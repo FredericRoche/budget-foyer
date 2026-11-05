@@ -145,7 +145,7 @@ function rapprochementModifie(js, op){
    parce qu'elles changeraient fournisseur ou catégorie, ou ventileraient : à valider en lot, après relecture. */
 function propositionsSures(){
   const vus = new Set(), r = [];
-  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && !x.aValider && !x.refuse)){
+  for (const j of vivants("justificatifs").filter(x => pieceOuverte(x) && !x.aValider && !x.refuse)){
     const p = (j.propositions || [])[0];
     if (!p || !p.sur) continue;
     const ids = p.groupe || [j.id], cle = ids.slice().sort().join("|");
@@ -209,6 +209,11 @@ function rapprocherTout(){
    Rien avant la date de début du contrôle (réglable ; 1er octobre 2026 : avant, les pièces n'étaient pas
    saisies au fil de l'eau). */
 const debutAnomalies = () => LIVRE.parametres.anomaliesDepuis || "2026-10-01";
+/* Pièce antérieure au début du contrôle, jamais rapprochée : close (comptée comme réglée, hors compteurs, hors
+   dépenses en attente). Rien n'est écrit : changer la date de début la rouvre. Saisie à valider et note de frais
+   (remboursement attendu) restent ouvertes. */
+const pieceClose = j => j.statut === "a_rapprocher" && !j.aValider && !estNoteFrais(j) && (j.date || "") < debutAnomalies();
+const pieceOuverte = j => j.statut === "a_rapprocher" && !pieceClose(j);
 function anomaliesRapprochement(){
   const comptes = vivants("comptes");
   const derniere = new Map();
@@ -268,7 +273,7 @@ function libelleMoyen(carte){
 }
 function encoursSaisis(){
   const m = new Map();
-  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES" && !estNoteFrais(x))){
+  for (const j of vivants("justificatifs").filter(x => pieceOuverte(x) && x.carte !== "ESPECES" && !estNoteFrais(x))){
     const k = libelleMoyen(j.carte); const g = m.get(k) || m.set(k, {moyen: k, n: 0, montant: 0, depuis: j.date}).get(k);
     g.n++; g.montant += j.montant || 0; if (j.date && j.date < g.depuis) g.depuis = j.date;
   }

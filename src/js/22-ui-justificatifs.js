@@ -1,7 +1,7 @@
 /* ================= Justificatifs : rapprochement et boîte de saisies ================= */
 declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   const tous = vivants("justificatifs").sort((a, b) => a.date < b.date ? 1 : -1);
-  const aRapprocher = tous.filter(j => j.statut === "a_rapprocher");
+  const aRapprocher = tous.filter(pieceOuverte);
   const nbValider = aRapprocher.filter(j => j.aValider).length;
   // File de travail : saisies à valider, sinon justificatifs ayant au moins une opération candidate à trancher
   const attente = nbValider ? aRapprocher.filter(j => j.aValider) : aRapprocher.filter(j => !j.reporte && candidats([j]).length);
@@ -41,7 +41,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateFr(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
 }});
 
 /* Validation en lot des rapprochements sûrs : chaque ligne montre la pièce, l'opération et ce qui changerait ;

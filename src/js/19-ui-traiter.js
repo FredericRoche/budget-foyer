@@ -50,7 +50,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
         h("button", {class: "mini discret", onclick: async () => { if (await confirmer("Supprimer " + (g.length - 1) + " ligne(s) en double ?", "Supprimer", true)){ for (const o of g.slice(1)) supprimer("operations", o.id); enregistrer("operations", Object.assign(g[0], {doublonVu: true})); rafraichirEcran(); } }}, "N'en garder qu'une"))));
   }
   deux.appendChild(secD);
-  const js = vivants("justificatifs").filter(j => j.statut === "a_rapprocher");
+  const js = vivants("justificatifs").filter(pieceOuverte);
   const secJ = h("section", {class: "carte"}, h("h2", null, "Justificatifs à rapprocher (" + js.length + ")"));
   const ul = h("ul", {class: "liste-traiter"});
   for (const j of js.slice(0, 8)) ul.appendChild(h("li", null, h("span", null, dateCourte(j.date) + " · " + (j.commercantNom || j.raisonSociale || "?") + " · " + euros(j.montant) +

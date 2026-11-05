@@ -513,6 +513,11 @@ async function autotest(){
       v("anomalies : fournisseur non reconnu, débit carte sans pièce (puis écarté)", [an.some(a => a.j === jc || a.j?.id === jc.id && a.genre === "fournisseur non reconnu"), an.some(a => a.op?.id === oc.id)], [true, true]);
       enregistrer("operations", Object.assign(oc, {sansPiece: true}));
       vrai("anomalies : débit marqué « pas de pièce » retiré", !anomaliesRapprochement().some(a => a.op?.id === oc.id));
+      const jv = enregistrer("justificatifs", {type: "ticket", date: "2026-09-15", montant: 12, carte: "X333", statut: "a_rapprocher", operations: []});
+      const jn = enregistrer("justificatifs", {type: "notefrais", date: "2026-09-15", montant: 12, statut: "a_rapprocher", operations: []});
+      v("pièce antérieure au contrôle : close, hors en-cours ; note de frais et saisie à valider restent ouvertes",
+        [pieceClose(jv), encoursSaisis().lignes.some(l => (l.justificatifs || []).includes?.(jv.id)) || JSON.stringify(encoursSaisis()).includes(jv.id), pieceOuverte(jn), pieceClose(Object.assign({}, jv, {aValider: true}))], [true, false, true, false]);
+      supprimer("justificatifs", jv.id); supprimer("justificatifs", jn.id);
       for (const x of [ja, jb, jc]) supprimer("justificatifs", x.id); supprimer("operations", oc.id); supprimer("operations", oa.id);
     }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});

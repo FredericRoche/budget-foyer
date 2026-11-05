@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-mOu9Of0hRFcyoiELt4f4/msIr+NZ5dvYZgwMOiibUnU=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-relQd3wtPGl0NkJHIgAJZ5QbmGfsA5/SYmx1q+Xr+n4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1150";
+const VERSION_APP = "2026-11-05.1153";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3034,7 +3034,7 @@ function rapprochementModifie(js, op){
    parce qu'elles changeraient fournisseur ou catégorie, ou ventileraient : à valider en lot, après relecture. */
 function propositionsSures(){
   const vus = new Set(), r = [];
-  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && !x.aValider && !x.refuse)){
+  for (const j of vivants("justificatifs").filter(x => pieceOuverte(x) && !x.aValider && !x.refuse)){
     const p = (j.propositions || [])[0];
     if (!p || !p.sur) continue;
     const ids = p.groupe || [j.id], cle = ids.slice().sort().join("|");
@@ -3098,6 +3098,11 @@ function rapprocherTout(){
    Rien avant la date de début du contrôle (réglable ; 1er octobre 2026 : avant, les pièces n'étaient pas
    saisies au fil de l'eau). */
 const debutAnomalies = () => LIVRE.parametres.anomaliesDepuis || "2026-10-01";
+/* Pièce antérieure au début du contrôle, jamais rapprochée : close (comptée comme réglée, hors compteurs, hors
+   dépenses en attente). Rien n'est écrit : changer la date de début la rouvre. Saisie à valider et note de frais
+   (remboursement attendu) restent ouvertes. */
+const pieceClose = j => j.statut === "a_rapprocher" && !j.aValider && !estNoteFrais(j) && (j.date || "") < debutAnomalies();
+const pieceOuverte = j => j.statut === "a_rapprocher" && !pieceClose(j);
 function anomaliesRapprochement(){
   const comptes = vivants("comptes");
   const derniere = new Map();
@@ -3157,7 +3162,7 @@ function libelleMoyen(carte){
 }
 function encoursSaisis(){
   const m = new Map();
-  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES" && !estNoteFrais(x))){
+  for (const j of vivants("justificatifs").filter(x => pieceOuverte(x) && x.carte !== "ESPECES" && !estNoteFrais(x))){
     const k = libelleMoyen(j.carte); const g = m.get(k) || m.set(k, {moyen: k, n: 0, montant: 0, depuis: j.date}).get(k);
     g.n++; g.montant += j.montant || 0; if (j.date && j.date < g.depuis) g.depuis = j.date;
   }
@@ -4563,7 +4568,7 @@ function entete(titre, contexte, outils){
 }
 function compteATraiter(){
   const ops = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose").length;
-  const js = vivants("justificatifs").filter(j => j.statut === "a_rapprocher").length;
+  const js = vivants("justificatifs").filter(pieceOuverte).length;
   const factures = vivants("factures").filter(f => Math.abs(f.ecart || 0) >= 0.01 && !f.ecartVu).length;
   const echeances = vivants("echeances").filter(e => e.aConfirmer).length;
   return {ops, js, factures, echeances, total: ops + js + factures + echeances};
@@ -4577,7 +4582,7 @@ function construireNavigation(){
     pastille ? h("span", {class: "pastille" + (alerte ? " alerte" : "")}, pastille) : null);
   n.append(lien("accueil", "Tableau de bord"), lien("traiter", "À traiter", a.total || null),
     h("div", {class: "rubrique"}, "Comptes"), lien("operations", "Opérations"), lien("import", "Importer"),
-    lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(j => j.statut === "a_rapprocher").length || null),
+    lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(pieceOuverte).length || null),
     lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Fournisseurs"),
     h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), lien("sites", "Coût par site"), lien("patrimoine", "Bilan et résultat"),
     lien("tresorerie", "Trésorerie", ana?.premierBas ? "!" : null, true),
@@ -4854,7 +4859,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
   const tb = somme(lignes.filter(l => l.ligne), l => l.budget), tr = somme(lignes, l => l.realise) - depensesProjets(borneB(an + "-" + pad2(mo) + "-01"), finMo, regP);
   // Dépenses du mois saisies (tickets, factures, chèques) dont l'opération n'est pas encore au relevé,
   // retenues selon la même règle que le réalisé (hors « Hors budget » et revenus)
-  const taEnAttente = somme(vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && j.carte !== "ESPECES" && !estNoteFrais(j) && (j.date || "").slice(0, 7) === an + "-" + pad2(mo) && !estDepenseProjet(j, regP, true)
+  const taEnAttente = somme(vivants("justificatifs").filter(j => pieceOuverte(j) && j.carte !== "ESPECES" && !estNoteFrais(j) && (j.date || "").slice(0, 7) === an + "-" + pad2(mo) && !estDepenseProjet(j, regP, true)
     && (n => !NATURES_HORS_RESULTAT.includes(n) && n !== "Revenu")((budget?.lignes || []).find(x => x.categorie === j.categorie && (x.sousCategorie || "") === (j.sousCategorie || ""))?.nature || natureParDefaut(j.categorie))), j => j.montant || 0);
   const cumulB = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.budget) : 0;
   const cumulR = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.realise) - depensesProjets(borneB(an + "-01-01"), finMo, regP) : 0;
@@ -5077,7 +5082,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
         h("button", {class: "mini discret", onclick: async () => { if (await confirmer("Supprimer " + (g.length - 1) + " ligne(s) en double ?", "Supprimer", true)){ for (const o of g.slice(1)) supprimer("operations", o.id); enregistrer("operations", Object.assign(g[0], {doublonVu: true})); rafraichirEcran(); } }}, "N'en garder qu'une"))));
   }
   deux.appendChild(secD);
-  const js = vivants("justificatifs").filter(j => j.statut === "a_rapprocher");
+  const js = vivants("justificatifs").filter(pieceOuverte);
   const secJ = h("section", {class: "carte"}, h("h2", null, "Justificatifs à rapprocher (" + js.length + ")"));
   const ul = h("ul", {class: "liste-traiter"});
   for (const j of js.slice(0, 8)) ul.appendChild(h("li", null, h("span", null, dateCourte(j.date) + " · " + (j.commercantNom || j.raisonSociale || "?") + " · " + euros(j.montant) +
@@ -5801,7 +5806,7 @@ function sectionDossiersImport(){
 /* ================= Justificatifs : rapprochement et boîte de saisies ================= */
 declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   const tous = vivants("justificatifs").sort((a, b) => a.date < b.date ? 1 : -1);
-  const aRapprocher = tous.filter(j => j.statut === "a_rapprocher");
+  const aRapprocher = tous.filter(pieceOuverte);
   const nbValider = aRapprocher.filter(j => j.aValider).length;
   // File de travail : saisies à valider, sinon justificatifs ayant au moins une opération candidate à trancher
   const attente = nbValider ? aRapprocher.filter(j => j.aValider) : aRapprocher.filter(j => !j.reporte && candidats([j]).length);
@@ -5841,7 +5846,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
       h("td", null, dateFr(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
 }});
 
 /* Validation en lot des rapprochements sûrs : chaque ligne montre la pièce, l'opération et ce qui changerait ;
@@ -8002,6 +8007,11 @@ async function autotest(){
       v("anomalies : fournisseur non reconnu, débit carte sans pièce (puis écarté)", [an.some(a => a.j === jc || a.j?.id === jc.id && a.genre === "fournisseur non reconnu"), an.some(a => a.op?.id === oc.id)], [true, true]);
       enregistrer("operations", Object.assign(oc, {sansPiece: true}));
       vrai("anomalies : débit marqué « pas de pièce » retiré", !anomaliesRapprochement().some(a => a.op?.id === oc.id));
+      const jv = enregistrer("justificatifs", {type: "ticket", date: "2026-09-15", montant: 12, carte: "X333", statut: "a_rapprocher", operations: []});
+      const jn = enregistrer("justificatifs", {type: "notefrais", date: "2026-09-15", montant: 12, statut: "a_rapprocher", operations: []});
+      v("pièce antérieure au contrôle : close, hors en-cours ; note de frais et saisie à valider restent ouvertes",
+        [pieceClose(jv), encoursSaisis().lignes.some(l => (l.justificatifs || []).includes?.(jv.id)) || JSON.stringify(encoursSaisis()).includes(jv.id), pieceOuverte(jn), pieceClose(Object.assign({}, jv, {aValider: true}))], [true, false, true, false]);
+      supprimer("justificatifs", jv.id); supprimer("justificatifs", jn.id);
       for (const x of [ja, jb, jc]) supprimer("justificatifs", x.id); supprimer("operations", oc.id); supprimer("operations", oa.id);
     }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
