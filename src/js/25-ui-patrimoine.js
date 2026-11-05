@@ -80,6 +80,13 @@ async function saisirValorisation(compte){
   if (compte && ["courant", "carte", "especes"].includes(compte.type)){ corps.appendChild(h("p", null, "Le solde de « " + compte.nom + " » vient des relevés importés.")); await dialogue({titre: compte.nom, corps}); return; }
   corps.append(comptes.length ? null : h("p", {class: "neg"}, "Créez d'abord le compte (Réglages › Comptes)."), h("div", {class: "grille-champs"}, champ("Compte", sel), champ("Date", date), champ("Valeur", valeur)),
     h("p", {class: "note"}, "Plus simple : déposez le relevé PDF dans « Importer », la valeur et la date y sont lues."));
+  // Historique des valeurs du compte : la plus récente fait foi ; une saisie à la main peut être retirée
+  const hist = compte ? vivants("valorisations").filter(v => v.compte === compte.id).sort((a, b) => a.date < b.date ? 1 : -1) : [];
+  if (hist.length) corps.append(h("h3", null, "Valeurs enregistrées"), tableau([{titre: "Date"}, {titre: "Valeur", num: true}, {titre: "Source"}, {titre: ""}], hist, {classe: "serre", ligne: v => h("tr", null,
+    h("td", null, dateFr(v.date)), h("td", {class: "num"}, euros(v.valeur)), h("td", {class: "petit"}, !v.source ? "saisie à la main" : v.source === "plan" ? "plan importé (saisie)" : "relevé · " + v.source),
+    h("td", null, h("button", {class: "mini discret", onclick: async e => { e.target.closest("tr").style.opacity = .4;
+      if (await confirmer("Retirer la valeur du " + dateFr(v.date) + " (" + euros(v.valeur) + ", " + (v.source ? "relevé" : "saisie à la main") + ") ?", "Retirer", true)){ supprimer("valorisations", v.id); message("Valeur retirée."); rafraichirEcran(); }
+      else e.target.closest("tr").style.opacity = 1; }}, "Retirer")))}));
   const ok = await dialogue({titre: "Saisir une valorisation", corps, actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
     const v = lireMontant(valeur.value); if (isNaN(v)){ message("Valeur illisible.", true); return false; }
     if (!dateSaisieOk(date, "Date de la valorisation")) return false;
