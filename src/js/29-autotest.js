@@ -274,6 +274,7 @@ async function autotest(){
             v("relevé PDF LCL : cartes, dates, devise ignorée, remboursement reconnu", [lc.cartes.length, lc.cartes[0].carte, lc.cartes[0].lignes.map(l => l.date + " " + l.montant).join(" | "), lc.cartes[0].controle.ok, lc.cartes[1].carte],
               [2, "X456", "2026-12-30 -1581 | 2027-01-03 -20 | 2027-01-03 -20 | 2027-01-05 12.5", true, "X678"]);
             const p1 = preparerCartesPdf(lc); appliquerCartesPdf(p1);
+            v("relevé PDF LCL : achats déjà débités (fin du mois de la section), pas d'encours", vivants("operations").filter(o => o.compte === ck.id).map(o => o.dateDebit), ["2027-01-29", "2027-01-29", "2027-01-29", "2027-01-29"]);
             const p2 = preparerCartesPdf(extraireCartesReleveLcl(rel));
             v("relevé PDF LCL : deux achats identiques gardés, réimport sans doublon, carte inconnue sans titulaire", [p1.nouvelles.length, p2.nouvelles.length, vivants("operations").filter(o => o.compte === ck.id && o.date === "2027-01-03").length, p1.cartes[1].sansTitulaire], [5, 0, 2, true]);
             for (const o of vivants("operations").filter(o => /ESSAI/.test(o.libelle) && o.date >= "2026-12-30" && o.date <= "2027-01-05")) supprimer("operations", o.id);
@@ -487,7 +488,18 @@ async function autotest(){
       rapprocherTout();
       const px = obtenir("justificatifs", jx.id);
       v("rapprochement qui changerait la catégorie : proposé, pas appliqué", [px.statut, (px.propositions || [])[0]?.op, obtenir("operations", opX.id).categorie], ["a_rapprocher", opX.id, "Culture et loisirs"]);
+      const sx = propositionsSures().find(s => s.op.id === opX.id);
+      vrai("proposition sûre listée pour validation en lot, avec ce qui change", !!sx && /catégorie : Culture/.test(sx.changements.join(" ")));
       supprimer("justificatifs", jx.id); supprimer("operations", opX.id);
+      // Compléter n'est pas modifier : catégorie seulement devinée, fiche née de l'import sans rien appris
+      const fProv = enregistrer("commercants", {nom: "Libelle Brut Essai", alias: ["LIBELLE BRUT ESSAI"], stats: {}, natures: {}});
+      const fVrai = enregistrer("commercants", {nom: "Quincaillerie Essai", alias: [], stats: {"Maison|Bricolage et jardin": 3}, natures: {}});
+      const opY = enregistrer("operations", {compte: carte.id, date: "2027-03-22", montant: -31.7, libelle: "LIBELLE BRUT ESSAI", commercant: fProv.id, categorie: "Culture et loisirs", sousCategorie: "Livres, presse, sorties, jeux", statut: "propose"});
+      const jy = enregistrer("justificatifs", {type: "ticket", date: "2027-03-22", montant: 31.7, carte: "X333", commercant: fVrai.id, commercantNom: fVrai.nom, categorie: "Maison", sousCategorie: "Bricolage et jardin", statut: "a_rapprocher", operations: []});
+      rapprocherTout();
+      const oy = obtenir("operations", opY.id);
+      v("catégorie devinée et fiche provisoire : rapproché d'office, complété par la pièce", [obtenir("justificatifs", jy.id).statut, oy.categorie, oy.commercant], ["rapproche", "Maison", fVrai.id]);
+      supprimer("justificatifs", jy.id); supprimer("operations", opY.id); supprimer("commercants", fVrai.id); if (obtenir("commercants", fProv.id)) supprimer("commercants", fProv.id);
     }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
@@ -514,6 +526,16 @@ async function autotest(){
     /* --- Trésorerie : découvert provoqué --- */
     enregistrer("budgets", {annee: 2027, nom: "B", fige: false, actif: true, lignes: [{id: "l1", nature: "Courante", categorie: "Alimentation", sousCategorie: "Courses", annuel: 12000, paiement: {compte: 1}}]});
     enregistrer("echeances", {libelle: "Grosse dépense", montant: -30000, recurrence: "unique", debut: "2027-05-15", compte: cj.id});
+    {
+      // Achat carte ancien sans date de débit : pas un débit à venir ; flux passés cohérents
+      const cv = enregistrer("comptes", {nom: "Carte ancienne essai", type: "carte", banque: "LCL", carte: "X909", compteDebit: cj.id, actif: true});
+      const ov = enregistrer("operations", {compte: cv.id, date: "2027-01-05", montant: -5000, libelle: "ACHAT ANCIEN ESSAI", dateDebit: null});
+      const sv = simulerTresorerie({depart: "2027-03-31", jours: 60});
+      v("encours : achat de plus de 62 jours sans débit ignoré et signalé", [sv.evenements.some(e => /Carte ancienne/.test(e.libelle)), encoursCarte(cv, "2027-03-31").anciens.length], [false, 1]);
+      supprimer("operations", ov.id); supprimer("comptes", cv.id);
+      const fp = fluxPasses(cj, 3, "2027-03-31");
+      v("flux passés : mois sans relevé ni opération omis ; fin = début + entrées − sorties + virements", [fp.length > 0, fp.every(m => m.debut === null || Math.abs(m.debut + m.entrees - m.sorties + m.transferts - m.fin) < 0.01)], [true, true]);
+    }
     const s1 = simulerTresorerie({depart: "2027-03-31", jours: 120});
     const a1 = analyseTresorerie(s1);
     v("trésorerie : solde de départ (relevé + facture)", Math.round(s1.soldeDepart * 100) / 100, Math.round((11950 - 45.4) * 100) / 100);

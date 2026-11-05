@@ -126,14 +126,45 @@ function delier(j){
   enregistrer("justificatifs", Object.assign(j, {operations: [], statut: "a_rapprocher", auto: false, rapprocheLe: null, refuse: true}));
 }
 
-/* Le rapprochement modifierait-il l'opération ? Fournisseur différent, catégorie différente, ou ventilation
-   (plusieurs pièces) : oui. Une pièce sans fournisseur ni catégorie, ou conforme à l'opération : non. */
+/* Le rapprochement modifierait-il l'opération ? Ventilation (plusieurs pièces), fournisseur établi différent,
+   catégorie établie différente : oui. Compléter n'est pas modifier (précision de Frédéric, 05/11/2026) :
+   - une opération pas encore classée (« À préciser ») ou seulement devinée (« proposé ») prend la catégorie
+     saisie sur la pièce ;
+   - une fiche née de l'import du libellé bancaire, qui n'a encore rien appris (ni classement validé, ni
+     verrou), cède la place au fournisseur de la pièce (le libellé devient son alias, comme sur confirmation). */
+const ficheProvisoire = id => { const d = id ? obtenir("commercants", id) : null; return !!d && !d.fixe && !Object.keys(d.stats || {}).length; };
 function rapprochementModifie(js, op){
   if (js.length > 1) return true;
   const j = js[0];
-  if (j.commercant && op.commercant && j.commercant !== op.commercant) return true;
-  if (j.categorie && j.categorie !== "À préciser" && (j.categorie !== op.categorie || (j.sousCategorie && j.sousCategorie !== op.sousCategorie))) return true;
+  if (j.commercant && op.commercant && j.commercant !== op.commercant && !ficheProvisoire(op.commercant)) return true;
+  const classeeOp = op.verrou || (op.categorie && op.categorie !== "À préciser" && !["propose", "a_preciser"].includes(op.statut));
+  if (classeeOp && j.categorie && j.categorie !== "À préciser" && (j.categorie !== op.categorie || (j.sousCategorie && j.sousCategorie !== op.sousCategorie))) return true;
   return false;
+}
+/* Propositions sûres (montant exact, candidat unique ou nettement en tête) qui attendent une confirmation
+   parce qu'elles changeraient fournisseur ou catégorie, ou ventileraient : à valider en lot, après relecture. */
+function propositionsSures(){
+  const vus = new Set(), r = [];
+  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && !x.aValider && !x.refuse)){
+    const p = (j.propositions || [])[0];
+    if (!p || !p.sur) continue;
+    const ids = p.groupe || [j.id], cle = ids.slice().sort().join("|");
+    if (vus.has(cle)) continue; vus.add(cle);
+    const op = obtenir("operations", p.op);
+    const js = ids.map(id => obtenir("justificatifs", id)).filter(x => x && x.statut === "a_rapprocher");
+    if (!op || js.length !== ids.length) continue;
+    r.push({js, op, changements: changementsRapprochement(js, op)});
+  }
+  return r;
+}
+function changementsRapprochement(js, op){
+  const r = [], nomC = id => obtenir("commercants", id)?.nom || "—";
+  if (js.length > 1) r.push("ventilée sur " + js.length + " pièces");
+  const j = js[0];
+  if (js.length === 1 && j.commercant && op.commercant && j.commercant !== op.commercant) r.push("fournisseur : " + nomC(op.commercant) + " → " + nomC(j.commercant));
+  if (js.length === 1 && j.categorie && j.categorie !== "À préciser" && (j.categorie !== op.categorie || (j.sousCategorie && j.sousCategorie !== op.sousCategorie)))
+    r.push("catégorie : " + [op.categorie, op.sousCategorie].filter(Boolean).join(" › ") + " → " + [j.categorie, j.sousCategorie].filter(Boolean).join(" › "));
+  return r;
 }
 /* Passe automatique, après chaque import ou fusion de la boîte. Décision de Frédéric (04/11/2026) : l'application
    ne change rien d'elle-même sur une déduction. Un cas sûr qui ne modifie pas l'opération est rapproché d'office ;

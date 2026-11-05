@@ -142,7 +142,7 @@ function periodesCartes(){
 function creerOperation(compte, l, importId){
   const op = {compte: compte.id, date: l.date, montant: Math.round(l.montant * 100) / 100, libelle: l.libelle, detail: l.detail || "", type: l.type || "",
     mcc: l.mcc || "", categorieBanque: l.categorieBanque || "", ville: l.ville || "", empreinte: l.empreinte, import: importId, justificatifs: []};
-  if (compte.type === "carte") op.dateDebit = null; else op.dateDebit = l.date;
+  if (compte.type === "carte") op.dateDebit = l.dateDebit || null; else op.dateDebit = l.date;
   classerAutomatiquement(op);
   return enregistrer("operations", op);
 }
@@ -272,7 +272,10 @@ function suiteSoldee(cand, cible){
 function estimerDebitsCartes(){
   const ops = vivants("operations");
   const fin = ops.reduce((m, o) => o.date > m ? o.date : m, "");
-  const visee = o => o.origine === "reprise" && !o.facture && !o.paiementAmex && !(o.lien && o.montant > 0)
+  // Achats carte lus dans un relevé de compte PDF avant le 05/11/2026 : créés sans date de débit, ils
+  // passaient pour un encours à débiter (double compte en trésorerie). Ils sont datés comme les autres.
+  const pdf = new Set(vivants("imports").filter(i => i.genre === "carte" && /\.pdf$/i.test(i.fichier || "")).map(i => i.id));
+  const visee = o => (o.origine === "reprise" || pdf.has(o.import)) && !o.facture && !o.paiementAmex && !(o.lien && o.montant > 0)
     && (!o.dateDebit || o.debitEstime || o.dateDebit === o.date);
   const parDate = (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
   const voulu = new Map();

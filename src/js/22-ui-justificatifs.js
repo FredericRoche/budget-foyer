@@ -12,6 +12,9 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
      h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office ; ceux qui changeraient fournisseur ou catégorie sont proposés, à confirmer."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
+  const sures = propositionsSures();
+  if (sures.length) c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("span", {class: "discret"}, sures.length + " rapprochement(s) sûr(s) attendent votre accord (ils changeraient fournisseur ou catégorie). "),
+    h("button", {class: "mini primaire", onclick: () => validerPropositionsSures(sures)}, "Les relire et valider…")));
   if (!j && etat.listeSeule && attente.length){
     c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("span", {class: "discret"}, attente.length + " pièce(s) " + (nbValider ? "à valider" : "avec une opération candidate à trancher") + ". Cliquez sur une ligne pour l'ouvrir, ou "),
       h("button", {class: "mini", onclick: () => { etat.listeSeule = false; etat.ferme = null; rafraichirEcran(); }}, "Reprendre la file")));
@@ -24,6 +27,24 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
       h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
       h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : "à rapprocher")))}));
 }});
+
+/* Validation en lot des rapprochements sûrs : chaque ligne montre la pièce, l'opération et ce qui changerait ;
+   on décoche ceux qu'on veut regarder à part. Rien n'est fait sans « Valider ». */
+async function validerPropositionsSures(sures){
+  const cases = sures.map(() => h("input", {type: "checkbox", checked: true}));
+  const nomPiece = j => (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || j.raisonSociale || "—";
+  const corps = h("div", null, h("p", {class: "note"}, "Montant exact et opération unique pour chacun. Décochez ceux à examiner un par un."),
+    h("table", {class: "serre", style: {width: "100%"}}, h("tbody", null, sures.map((s, i) => h("tr", null, h("td", null, cases[i]),
+      h("td", null, dateCourte(s.js[0].date) + " · " + s.js.map(nomPiece).join(" + ")), h("td", null, h("span", {class: "libbanque"}, s.op.libelle)),
+      h("td", {class: "num"}, euros(s.op.montant)), h("td", {class: "petit"}, s.changements.join(" ; ") || "—"))))));
+  const ok = await dialogue({titre: "Rapprochements sûrs à valider (" + sures.length + ")", large: true, corps,
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Valider les cochés", classe: "primaire", valeur: true}]});
+  if (!ok) return;
+  let n = 0;
+  sures.forEach((s, i) => { if (cases[i].checked && obtenir("operations", s.op.id) && s.js.every(j => j.statut === "a_rapprocher")){ lier(s.js, s.op, false); n++; } });
+  message(n + " rapprochement(s) validé(s).");
+  rafraichirEcran();
+}
 
 /* Pièces déjà enregistrées qui pourraient être la même : même montant à 45 jours près, ou même fournisseur
    à 45 jours près, ou même numéro de facture. Sert à la validation d'une pièce lue automatiquement. */

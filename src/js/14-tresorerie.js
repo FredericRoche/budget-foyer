@@ -60,6 +60,46 @@ function joursHabituels(compteId, depart){
   for (const [k, js] of par){ const j = jourDominant(js); if (j) r.set(k, j); }
   return r;
 }
+/* Encours d'une carte : achats sans date de débit. Une carte à débit différé est prélevée au plus tard le
+   mois suivant : un achat de plus de 62 jours sans date de débit est une donnée incomplète (débit jamais
+   rattaché), pas un débit à venir. Il est écarté de la projection et signalé dans l'écran Trésorerie. */
+const ANCIENNETE_ENCOURS = 62;
+function encoursCarte(c, date){
+  const tous = vivants("operations").filter(x => x.compte === c.id && !x.dateDebit && !(x.lien && x.montant > 0) && x.date <= date);
+  const limite = ajouterJours(date, -ANCIENNETE_ENCOURS);
+  return {recents: tous.filter(x => x.date > limite), anciens: tous.filter(x => x.date <= limite)};
+}
+/* Flux passés du compte suivi, mois par mois, d'après les opérations importées (relevés) : entrées et sorties
+   (dont débits des cartes), virements entre comptes à part (net), plus bas et solde de fin. Les soldes partent
+   du solde connu à la date d'arrivée et remontent le temps opération par opération : le tableau s'enchaîne
+   (fin d'un mois = début du suivant) et retombe sur le solde affiché ailleurs. */
+function fluxPasses(compte, nbMois = 12, jusquA = aujourdhui()){
+  if (!compte) return [];
+  const ops = vivants("operations").filter(o => o.compte === compte.id && o.date <= jusquA);
+  const r = [];
+  for (let i = nbMois - 1; i >= 0; i--){
+    const mois = ajouterMois(debutDeMois(jusquA), -i), fin = finDeMois(mois) < jusquA ? finDeMois(mois) : jusquA;
+    const duMois = ops.filter(o => o.date >= mois && o.date <= fin).sort((a, b) => a.date < b.date ? -1 : 1);
+    const m = {mois, ops: duMois, debut: null, fin: null, bas: null, entrees: 0, sorties: 0, cartes: 0, transferts: 0, nb: duMois.length};
+    for (const o of duMois) for (const p of partsDe(o)){
+      if (p.categorie === "Transfert" && p.sousCategorie === "Virement entre comptes") m.transferts += p.montant;
+      else if (p.montant > 0) m.entrees += p.montant;
+      else { m.sorties -= p.montant; if (p.categorie === "Transfert" && /^(Facture cartes|Paiement Amex)$/.test(p.sousCategorie || "")) m.cartes -= p.montant; }
+    }
+    r.push(m);
+  }
+  // Soldes à rebours depuis le solde connu
+  let solde = soldeCompte(compte, jusquA);
+  for (let i = r.length - 1; i >= 0 && solde !== null; i--){
+    const m = r[i]; m.fin = solde;
+    m.debut = solde - somme(m.ops, o => o.montant);
+    let s = m.debut, bas = m.debut;
+    for (let k = 0; k < m.ops.length; k++){ s += m.ops[k].montant; if (k === m.ops.length - 1 || m.ops[k + 1].date !== m.ops[k].date) bas = Math.min(bas, s); }
+    m.bas = bas; solde = m.debut;
+  }
+  const premier = r.findIndex(m => m.nb);
+  return (premier < 0 ? [] : r.slice(premier)).map(m => { delete m.ops; return m; });
+}
 function simulerTresorerie(options){
   const o = Object.assign({jours: 365, depart: aujourdhui(), supplements: [], perimetre: "courant"}, options);
   const compte = obtenir("comptes", LIVRE.parametres.compteTresorerie) || comptesDeType("courant")[0];
@@ -87,7 +127,7 @@ function simulerTresorerie(options){
   // 2. Encours connus des cartes rattachées à ce compte
   const amexJour = jourPrelevementAmex(compte.id);
   for (const c of vivants("comptes").filter(c => c.type === "carte" && (c.compteDebit === compte.id || !c.compteDebit))){
-    const encours = vivants("operations").filter(x => x.compte === c.id && !x.dateDebit && !(x.lien && x.montant > 0) && x.date <= o.depart);
+    const encours = encoursCarte(c, o.depart).recents;
     if (!encours.length) continue;
     const total = somme(encours, x => x.montant);
     const date = c.carte === "AMEX" ? prochainJour(o.depart, amexJour) : dernierJourOuvre(o.depart);

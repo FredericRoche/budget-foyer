@@ -126,7 +126,8 @@ function extraireCartesReleveLcl(texte){
     if (!a) continue;
     // Année : celle du mois de la carte, sauf un achat de fin d'année réglé en janvier
     const mm = +a[3], an = mm > moisCarte + 1 ? anCarte - 1 : anCarte;
-    carte.lignes.push({date: an + "-" + a[3] + "-" + a[2], montant: -lireMontant(a[4]), libelle: propre(a[1]), type: "Carte"});
+    // Débit différé : le total de la section est prélevé sur le compte le dernier jour ouvré de son mois
+    carte.lignes.push({date: an + "-" + a[3] + "-" + a[2], montant: -lireMontant(a[4]), libelle: propre(a[1]), type: "Carte", dateDebit: dernierJourOuvre(carte.mois + "-01")});
   }
   const pleines = cartes.filter(c => c.lignes.length);
   if (!pleines.length) return null;

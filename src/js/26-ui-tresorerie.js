@@ -20,13 +20,23 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
       h("span", null, h("i", {style: {background: COULEURS.or}}), "échéances de plus de 10 000 €"))));
 
   const g = h("div", {class: "large-etroit"});
-  const gauche = h("section", null, h("h2", null, "Mois par mois"));
+  const gauche = h("section", null, h("h2", null, "Mois à venir (projection)"));
   gauche.appendChild(tableau([{titre: "Mois"}, {titre: "Début", num: true}, {titre: "Entrées", num: true}, {titre: "Sorties", num: true}, {titre: "Plus bas", num: true}, {titre: "Fin", num: true}], ana.mois, {ligne: m =>
     h("tr", null, h("td", null, moisFr(m.mois)), h("td", {class: "num"}, euros(m.debut, 0)), h("td", {class: "num pos"}, euros(m.entrees, 0)), h("td", {class: "num"}, euros(m.sorties, 0)),
       h("td", {class: "num" + (m.bas < p.seuilBas ? " neg" : "")}, h("strong", null, euros(m.bas, 0))), h("td", {class: "num" + (m.fin < p.seuilBas ? " neg" : "")}, euros(m.fin, 0)))}));
   const capitaux = vivants("echeances").filter(e => e.active !== false && estCapital(e));
   if (capitaux.length) gauche.appendChild(h("p", {class: "note"}, "Marche courante seule : " + capitaux.length + " flux de capital (cessions de titres, projets) sont suivis à part, dans ",
     h("button", {class: "lien", onclick: () => aller("epargne")}, "Épargne"), " et ", h("button", {class: "lien", onclick: () => aller("projets")}, "Projets"), "."));
+  /* Mois passés : flux réels du compte, d'après les relevés importés */
+  const passes = fluxPasses(sim.compte, 12, sim.depart).reverse();
+  gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Mois passés (relevés)"));
+  gauche.appendChild(tableau([{titre: "Mois"}, {titre: "Début", num: true}, {titre: "Entrées", num: true}, {titre: "Sorties", num: true}, {titre: "dont cartes", num: true},
+    {titre: "Virements entre comptes", num: true}, {titre: "Plus bas", num: true}, {titre: "Fin", num: true}], passes, {classe: "serre", vide: "Aucun relevé importé pour ce compte.", ligne: m =>
+    h("tr", {class: "cliquable", title: m.nb + " opération(s) : les voir", onclick: () => aller("operations", {compte: sim.compte.id, mois: m.mois.slice(0, 7), nonDebitees: false})},
+      h("td", null, moisFr(m.mois.slice(0, 7))), h("td", {class: "num"}, m.debut == null ? "—" : euros(m.debut, 0)), h("td", {class: "num pos"}, euros(m.entrees, 0)), h("td", {class: "num"}, euros(m.sorties, 0)),
+      h("td", {class: "num discret"}, m.cartes ? euros(m.cartes, 0) : "—"), h("td", {class: "num"}, Math.abs(m.transferts) < 0.5 ? "—" : eurosSigne(Math.round(m.transferts))),
+      h("td", {class: "num" + (m.bas != null && m.bas < p.seuilBas ? " neg" : "")}, h("strong", null, m.bas == null ? "—" : euros(m.bas, 0))), h("td", {class: "num" + (m.fin != null && m.fin < p.seuilBas ? " neg" : "")}, m.fin == null ? "—" : euros(m.fin, 0)))}));
+  gauche.appendChild(h("p", {class: "note"}, "Flux réels du compte, mois par mois (le mois en cours jusqu'au dernier relevé importé). Les soldes remontent le temps depuis le solde connu ; un mois incomplet (relevé manquant) fausse les soldes des mois d'avant. « dont cartes » : débits des cartes à débit différé et de l'Amex, déjà comptés dans les sorties. Les virements entre vos comptes sont isolés. Cliquez un mois pour voir ses opérations."));
   g.appendChild(gauche);
 
   const droite = h("section");
@@ -43,12 +53,17 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
 
   /* Débits différés à venir */
   const cartes = vivants("comptes").filter(x => x.type === "carte" && (x.compteDebit === sim.compte.id || !x.compteDebit));
-  const lignesCartes = cartes.map(x => ({compte: x, encours: -somme(vivants("operations").filter(o => o.compte === x.id && !o.dateDebit && !(o.lien && o.montant > 0)), o => o.montant)})).filter(x => Math.abs(x.encours) > 0.005);
+  const lignesCartes = cartes.map(x => { const e = encoursCarte(x, sim.depart); return {compte: x, encours: -somme(e.recents, o => o.montant), anciens: e.anciens}; })
+    .filter(x => Math.abs(x.encours) > 0.005 || x.anciens.length);
+  const anciens = lignesCartes.flatMap(x => x.anciens);
   if (lignesCartes.length){
     droite.appendChild(h("h2", null, "Débits différés à venir"));
     droite.appendChild(tableau([{titre: "Carte"}, {titre: "Débit prévu"}, {titre: "Encours connu", num: true}], lignesCartes, {classe: "serre", ligne: x => h("tr", {class: "cliquable", onclick: () => aller("operations", {compte: x.compte.id, nonDebitees: true, mois: ""})},
       h("td", null, x.compte.nom), h("td", null, dateFr(x.compte.carte === "AMEX" ? prochainJour(aujourdhui(), jourPrelevementAmex(sim.compte.id)) : dernierJourOuvre(aujourdhui()))), h("td", {class: "num"}, euros(x.encours)))}));
     droite.appendChild(h("p", {class: "note"}, "Encours = achats importés, comptés au budget à leur date d'achat, débités plus tard. S'y ajoute la part carte du budget du mois non encore dépensée."));
+    if (anciens.length) droite.appendChild(h("div", {class: "bandeau info"}, anciens.length + " achat(s) carte de plus de " + ANCIENNETE_ENCOURS + " jours sans date de débit ("
+      + euros(-somme(anciens, o => o.montant), 0) + ", " + lignesCartes.filter(x => x.anciens.length).map(x => x.compte.nom).join(", ")
+      + ") : ils ont forcément été débités ; la projection les ignore. Cliquez la carte pour les voir."));
   }
   /* Grosses échéances de la période */
   droite.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Grosses échéances ponctuelles"));
