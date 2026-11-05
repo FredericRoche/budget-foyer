@@ -320,7 +320,9 @@ function reconnaitrePdf(nom, texte, octets){
   // Relevé de compte LCL : on n'en garde que le détail des cartes (le compte vient des exports CSV)
   const cartesPdf = extraireCartesReleveLcl(T);
   // Relevé mensuel complet (écritures du compte + détail des cartes) : clôture du mois, il fait foi
-  const releve = extraireReleveCompteLcl(T);
+  // Seulement un relevé de compte courant : un livret ou un PEA ont le même format d'écritures mais sont lus plus bas
+  const epargne = /^(LIVRET|PEA|PLAN|COMPTEEPARGNE|CEL|PEL)/i.test(nom) || /\bLIVRET\b|PLAN D.?[EÉ]PARGNE|[EÉ]PARGNE LOGEMENT/i.test(T);
+  const releve = epargne && !/^COMPTEDEDEPOTS/i.test(nom) ? null : extraireReleveCompteLcl(T);
   if (releve) return Object.assign(base, cartesPdf || {cartes: []}, {nom, genre: "releve_lcl", banque: "LCL", releveCompte: releve, numero: releve.numero, periode: releve.periode,
     titre: "Relevé LCL du " + dateFr(releve.periode.debut) + " au " + dateFr(releve.periode.fin)});
   if (cartesPdf) return Object.assign(base, cartesPdf, {nom});

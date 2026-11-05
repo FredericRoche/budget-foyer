@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-USN2ghMPrXdrWVCg6K3BhiFp0KGQG/00c6aWp7n/5ho=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-S1V/mAMuUgxLaA//4baWNWkUF9OVzerle2gc5pW+YLs=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1654";
+const VERSION_APP = "2026-11-05.1659";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2212,7 +2212,9 @@ function reconnaitrePdf(nom, texte, octets){
   // Relevé de compte LCL : on n'en garde que le détail des cartes (le compte vient des exports CSV)
   const cartesPdf = extraireCartesReleveLcl(T);
   // Relevé mensuel complet (écritures du compte + détail des cartes) : clôture du mois, il fait foi
-  const releve = extraireReleveCompteLcl(T);
+  // Seulement un relevé de compte courant : un livret ou un PEA ont le même format d'écritures mais sont lus plus bas
+  const epargne = /^(LIVRET|PEA|PLAN|COMPTEEPARGNE|CEL|PEL)/i.test(nom) || /\bLIVRET\b|PLAN D.?[EÉ]PARGNE|[EÉ]PARGNE LOGEMENT/i.test(T);
+  const releve = epargne && !/^COMPTEDEDEPOTS/i.test(nom) ? null : extraireReleveCompteLcl(T);
   if (releve) return Object.assign(base, cartesPdf || {cartes: []}, {nom, genre: "releve_lcl", banque: "LCL", releveCompte: releve, numero: releve.numero, periode: releve.periode,
     titre: "Relevé LCL du " + dateFr(releve.periode.debut) + " au " + dateFr(releve.periode.fin)});
   if (cartesPdf) return Object.assign(base, cartesPdf, {nom});
@@ -8470,6 +8472,7 @@ async function autotest(){
         const tl = ["RELEVE DE COMPTE", " du 01.02.2026 au 31.01.2027 - N° 3", "ECRITURES DE LA PERIODE", "DATE LIBELLE VALEUR DEBIT CREDIT", "31.01 ANCIEN SOLDE 12 119,39 [C]",
           "31.12 INTERETS AU : 31 12 26 31.12.26 . 363,57 [C]", "15.01 VIREMENT ESSAI 15.01.27 100,00", "31.01 SOLDE EN EUROS 12 382,96 [C]"].join(NL2);
         v("livret : solde au 31/12 lu dans le relevé annuel", soldesFinAnnee(tl), [{date: "2026-12-31", valeur: 12482.96}]);
+        v("livret : jamais pris pour un relevé du compte courant", reconnaitrePdf("LIVRETA_09999099999_20270206.pdf", "LIVRET A" + NL2 + tl, null).genre, "valorisation");
       }
       {
         // Lot : nature d'une catégorie (projet) sur les opérations et les parts ventilées
