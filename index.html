@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1leutmjIHHgT8uCubYeqxbVsBfxO5za0CFoKjATNq+8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-rrvqfnlu4rMdmH14ES/penZS+JJRN+hMhrklwooPD+U=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1127";
+const VERSION_APP = "2026-11-05.1134";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -5904,7 +5904,7 @@ function ecranRapprochement(j, etat, attente){
     // Questions posées après l'enregistrement (la saisie est déjà sauvée, quelle que soit la réponse)
     (async () => {
       for (const p of aliasAProposer){
-        if (await confirmer("Retenir « " + p.nom + " » comme autre nom de « " + p.fiche.nom + " » ? Les prochaines pièces portant ce nom seront rattachées d'office à cette fiche.", "Retenir")){
+        if (await confirmer("Ajouter « " + p.nom + " » (raison sociale lue sur la pièce) aux alias de la fiche « " + p.fiche.nom + " » ? La fiche garde son nom « " + p.fiche.nom + " » ; les prochaines pièces portant cette raison sociale y seront rattachées sans question.", "Ajouter l'alias")){
           if (ajouterAlias(p.fiche, p.nom)) message("Retenu : « " + p.nom + " » = " + p.fiche.nom + ".");
         } else enregistrer("justificatifs", Object.assign(p.x, {aliasRefuse: true}));
       }

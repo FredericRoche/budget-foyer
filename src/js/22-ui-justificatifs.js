@@ -163,7 +163,7 @@ function ecranRapprochement(j, etat, attente){
     // Questions posées après l'enregistrement (la saisie est déjà sauvée, quelle que soit la réponse)
     (async () => {
       for (const p of aliasAProposer){
-        if (await confirmer("Retenir « " + p.nom + " » comme autre nom de « " + p.fiche.nom + " » ? Les prochaines pièces portant ce nom seront rattachées d'office à cette fiche.", "Retenir")){
+        if (await confirmer("Ajouter « " + p.nom + " » (raison sociale lue sur la pièce) aux alias de la fiche « " + p.fiche.nom + " » ? La fiche garde son nom « " + p.fiche.nom + " » ; les prochaines pièces portant cette raison sociale y seront rattachées sans question.", "Ajouter l'alias")){
           if (ajouterAlias(p.fiche, p.nom)) message("Retenu : « " + p.nom + " » = " + p.fiche.nom + ".");
         } else enregistrer("justificatifs", Object.assign(p.x, {aliasRefuse: true}));
       }
