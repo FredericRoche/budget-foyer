@@ -45,7 +45,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       rafraichirEcran();
     }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs sans changement de fournisseur ni de catégorie s'appliqueront d'office, les autres seront proposés.")));
     // Aperçu des opérations nouvelles : seulement pour les fichiers qui en proposent un classement (relevés)
-    const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.prep.nouvelles[0]?.proposition && f.statut === "pret");
+    const detail = FICHIERS_EN_COURS.find(f => f.statut === "pret" && f.lu.genre !== "releve_lcl" && ((f.prep?.nouvelles?.length && f.prep.nouvelles[0]?.proposition) || f.prep?.cartesSansTitulaire?.length));
     if (detail){
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Aperçu : " + detail.lu.nom));
       gauche.appendChild(tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Classement proposé"}, {titre: "Lieu"}, {titre: "Origine"}], detail.prep.nouvelles, {classe: "serre", limite: 60, ligne: l =>
