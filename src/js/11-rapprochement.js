@@ -256,11 +256,37 @@ function anomaliesRapprochement(){
     const cartes = new Set(comptes.filter(c => c.type === "carte").map(c => c.id));
     for (const o of vivants("operations").filter(o => cartes.has(o.compte) && o.montant < 0 && o.date >= depuis && !(o.justificatifs || []).length && !o.sansPiece && !o.ndf && !(o.commercant && obtenir("commercants", o.commercant)?.sansPiece))){
       if (pieces.some(j => j.statut === "a_rapprocher" && (j.propositions || []).some(p => p.op === o.id))) continue;
-      r.push({genre: "débit sans pièce", op: o, date: o.date, nom: (o.commercant && obtenir("commercants", o.commercant)?.nom) || o.libelle, montant: o.montant,
-        raison: "au relevé de " + libelleCompte(o.compte) + ", aucune pièce : ticket à saisir, ou rien à joindre"});
+      const nomO = (o.commercant && obtenir("commercants", o.commercant)?.nom) || o.libelle;
+      const pv = pieceVoisine(o, pieces);
+      r.push({genre: pv ? "montant différent" : "débit sans pièce", op: o, date: o.date, nom: nomO, montant: o.montant, piece: pv || null,
+        raison: pv ? "pièce voisine : " + nomJ(pv) + ", " + euros(pv.montant) + " du " + dateFr(pv.date) + " (écart " + eurosSigne(Math.abs(o.montant) - pv.montant) + ")"
+          : "au relevé de " + libelleCompte(o.compte) + ", aucune pièce : ticket à saisir, ou rien à joindre"});
     }
   }
-  return r.filter(a => a.date >= debutAnomalies()).sort((a, b) => a.date < b.date ? 1 : -1);
+  // Une pièce appariée à un débit n'est pas signalée une seconde fois de son côté
+  const appariees = new Set(r.filter(a => a.piece).map(a => a.piece.id));
+  return r.filter(a => a.date >= debutAnomalies() && !(a.j && appariees.has(a.j.id) && a.genre !== "fournisseur non reconnu")).sort((a, b) => a.date < b.date ? 1 : -1);
+}
+/* Pièce encore ouverte qui paraît être celle d'un débit, à un écart de montant près : même fournisseur (fiche
+   ou nom proche) et écart d'au plus 25 %, ou montant à 3 % près ; date à 7 jours près (facture : jusqu'à 30
+   jours avant le débit). Jamais rapprochée d'office : proposée avec l'écart (« Rapprocher quand même »). */
+function pieceVoisine(o, pieces){
+  const nomO = [(o.commercant && obtenir("commercants", o.commercant)?.nom) || "", o.libelle].join(" ");
+  const m = Math.abs(o.montant);
+  const ok = pieces.filter(j => pieceOuverte(j) && !j.aValider && j.carte !== "ESPECES" && !(j.operations || []).length).map(j => {
+    const d = ecartJours(j.date, o.date), facture = j.type === "facture" || j.type === "devis";
+    if (facture ? (d < -7 || d > 30) : Math.abs(d) > 7) return null;
+    const meme = (j.commercant && j.commercant === o.commercant) || similarite([j.commercantNom, j.raisonSociale, j.commercant && obtenir("commercants", j.commercant)?.nom].filter(Boolean).join(" "), nomO) >= 0.5;
+    const ecart = Math.abs(m - j.montant);
+    if (!(meme ? ecart <= m * 0.25 : ecart <= Math.max(0.1, m * 0.03)) || ecart < 0.005) return null;
+    return {j, cle: (meme ? 0 : 1000) + Math.abs(d) * 10 + ecart};
+  }).filter(Boolean).sort((a, b) => a.cle - b.cle);
+  return ok.length ? ok[0].j : null;
+}
+/* Rapprochement malgré un écart de montant, sur décision de l'utilisateur : l'écart est noté sur la pièce. */
+function rapprocherAvecEcart(j, op){
+  j.ecartMontant = Math.round((Math.abs(op.montant) - j.montant) * 100) / 100;
+  lier([j], op, false);
 }
 /* En-cours : justificatifs à rapprocher (hors espèces), regroupés par moyen de paiement. */
 function libelleMoyen(carte){

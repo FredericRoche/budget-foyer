@@ -518,6 +518,15 @@ async function autotest(){
       v("pièce antérieure au contrôle : close, hors en-cours ; note de frais et saisie à valider restent ouvertes",
         [pieceClose(jv), encoursSaisis().lignes.some(l => (l.justificatifs || []).includes?.(jv.id)) || JSON.stringify(encoursSaisis()).includes(jv.id), pieceOuverte(jn), pieceClose(Object.assign({}, jv, {aValider: true}))], [true, false, true, false]);
       supprimer("justificatifs", jv.id); supprimer("justificatifs", jn.id);
+      // Débit sans pièce et pièce du même fournisseur à un écart près : appariés, rapprochés seulement sur décision
+      const fq = enregistrer("commercants", {nom: "Hebergeur Essai", alias: [], stats: {}, natures: {}});
+      const oq = enregistrer("operations", {compte: carte.id, date: "2027-03-12", montant: -15.74, libelle: "HEBERGEUR ESSAI COM", commercant: fq.id});
+      const jq = enregistrer("justificatifs", {type: "facture", date: "2027-03-12", montant: 13.68, carte: "X333", commercant: fq.id, commercantNom: fq.nom, statut: "a_rapprocher", operations: []});
+      const aq = anomaliesRapprochement().find(a => a.op?.id === oq.id);
+      v("écart de montant : pièce voisine proposée, pas rapprochée d'office", [aq?.genre, aq?.piece?.id, obtenir("justificatifs", jq.id).statut], ["montant différent", jq.id, "a_rapprocher"]);
+      rapprocherAvecEcart(obtenir("justificatifs", jq.id), obtenir("operations", oq.id));
+      v("rapprocher quand même : lié, écart noté, plus d'anomalie", [obtenir("justificatifs", jq.id).statut, obtenir("justificatifs", jq.id).ecartMontant, anomaliesRapprochement().some(a => a.op?.id === oq.id)], ["rapproche", 2.06, false]);
+      supprimer("justificatifs", jq.id); supprimer("operations", oq.id); supprimer("commercants", fq.id);
       for (const x of [ja, jb, jc]) supprimer("justificatifs", x.id); supprimer("operations", oc.id); supprimer("operations", oa.id);
     }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
