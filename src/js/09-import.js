@@ -267,7 +267,7 @@ function preparerFacture(lu, compte){
   const fin = finPeriodeCarte(lu.arrete);
   const debut = ajouterJours(precedente ? (precedente.finPeriode || finPeriodeCarte(precedente.arrete)) : finPeriodeCarte(dernierJourOuvre(ajouterMois(debutDeMois(lu.arrete), -1))), 1);
   const cartes = vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL" && (c.compteDebit === compte?.id || !c.compteDebit));
-  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= fin && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && (!o.dateDebit || o.debitEstime))));
+  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= fin && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && (!o.dateDebit || o.debitEstime || o.dateDebit === lu.dateDebit))));   // déjà datés au même débit par l'export du compte
   const total = -somme(ops, o => versCentimes(o.montant)) / 100;
   const parCarte = cartes.map(c => ({compte: c, total: -somme(ops.filter(o => o.compte === c.id), o => versCentimes(o.montant)) / 100})).filter(x => x.total);
   return {lu, compte, deja, debut, fin, ops, total, parCarte, ecart: Math.round((lu.montant - total) * 100) / 100};
