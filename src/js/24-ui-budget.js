@@ -24,7 +24,11 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
     budget && !budget.fige ? h("button", {class: "discret", onclick: () => editerLigne(budget, null)}, "Ajouter une ligne") : null,
     budget && !budgetActif(an + 1) ? h("button", {class: "discret", onclick: async () => {
       if (!(await confirmer("Créer le budget " + (an + 1) + " en copiant « " + budget.nom + " » ? Vous l'ajusterez ensuite ligne par ligne.", "Copier"))) return;
+      const avant = instantaneLignesBudget();
       const b = enregistrer("budgets", {annee: an + 1, nom: "Budget " + (an + 1) + " (copie de " + an + ")", fige: false, actif: true, lignes: JSON.parse(JSON.stringify(budget.lignes)).map(l => Object.assign(l, {id: "lb-" + idAleatoire(8)}))});
+      // Échéances de l'année suivante liées à une ligne de cette année : elles suivent la ligne copiée.
+      const x = reporterLiensBudget(an + 1, avant);
+      if (x.reportes || x.nonReportes.length) message((x.reportes ? x.reportes + " échéance(s) " + (an + 1) + " rattachée(s) à la ligne copiée. " : "") + (x.nonReportes.length ? "Lien de budget à revoir (Trésorerie, échéances) : " + x.nonReportes.join(", ") + "." : ""), !!x.nonReportes.length);
       etat.mois = (an + 1) + "-01"; etat.budget = b.id; rafraichirEcran();
     }}, "Copier pour " + (an + 1)) : null]));
   if (!budget){ c.appendChild(h("p", {class: "vide"}, "Reprenez le budget depuis le classeur d'inventaire (écran Importer), ou copiez celui d'une autre année (Réglages).")); return; }

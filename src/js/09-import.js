@@ -449,11 +449,41 @@ function estimerDebitsCartes(){
   return n;
 }
 
+/* ---------- Liens « remplace sa ligne de budget » des échéances ----------
+   Quand le budget actif d'une année change (plan qui le remplace, copie pour l'année suivante),
+   ses lignes ont de nouveaux id : une échéance qui pointait vers l'ancienne ligne ne la retire plus
+   de la trésorerie et la dépense compte deux fois. On reporte le lien vers la ligne du budget actif
+   de même catégorie et sous-catégorie, si elle est unique ; sinon le lien est laissé et signalé.
+   « avant » : instantané des lignes de budget connues (id → {annee, categorie, sousCategorie}).
+   Concernées : les échéances qui commencent dans l'année, ou dont l'ancienne ligne était de l'année. */
+function instantaneLignesBudget(){
+  const m = new Map();
+  for (const b of vivants("budgets")) for (const l of b.lignes || []) if (l.id) m.set(l.id, {annee: b.annee, categorie: l.categorie, sousCategorie: l.sousCategorie});
+  return m;
+}
+function reporterLiensBudget(annee, avant){
+  const r = {reportes: 0, nonReportes: []};
+  const budget = budgetActif(annee);
+  if (!budget) return r;
+  const ids = new Set((budget.lignes || []).map(l => l.id));
+  for (const e of vivants("echeances")){
+    if (!e.ligneBudget || ids.has(e.ligneBudget)) continue;
+    const ancienne = avant.get(e.ligneBudget);
+    if (!(ancienne?.annee === annee || +(e.debut || "").slice(0, 4) === annee)) continue;
+    const k = cleLigne(ancienne ? ancienne.categorie : e.categorie, ancienne ? ancienne.sousCategorie : e.sousCategorie);
+    const cibles = (budget.lignes || []).filter(l => cleLigne(l.categorie, l.sousCategorie) === k);
+    if (cibles.length === 1){ enregistrer("echeances", Object.assign(e, {ligneBudget: cibles[0].id})); r.reportes++; }
+    else r.nonReportes.push(e.libelle + (cibles.length ? " (plusieurs lignes possibles)" : " (aucune ligne de même catégorie)"));
+  }
+  return r;
+}
+
 /* ---------- Plan importé d'un fichier JSON : budgets, échéances et règles ----------
    Un budget de même nom et de même année est remplacé ; une échéance de même libellé et de
    même date de début aussi. Rien d'autre n'est modifié. */
 function appliquerPlan(contenu){
   const r = {budgets: 0, echeances: 0, regles: 0};
+  const lignesAvant = instantaneLignesBudget();
   for (const b of contenu.budgets || []){
     for (const l of b.lignes || []){ if (!l.id) l.id = "lb-" + idAleatoire(8); ajouterCategorieSilencieuse(l.categorie, l.sousCategorie); }
     for (const lx of Object.keys(b.lignes?.[0]?.repartition || {})) ajouterLieu(lx);
@@ -469,6 +499,20 @@ function appliquerPlan(contenu){
     const existant = vivants("echeances").find(x => x.libelle === cle.libelle && x.debut === cle.debut);
     if (e.categorie) ajouterCategorieSilencieuse(e.categorie, e.sousCategorie);
     enregistrer("echeances", Object.assign(existant || {}, {compte: courant?.id || ""}, e)); r.echeances++;
+  }
+  // Budgets remplacés ou créés : les échéances liées à une ligne disparue suivent la ligne équivalente.
+  for (const an of new Set((contenu.budgets || []).map(b => b.annee))){
+    const x = reporterLiensBudget(an, lignesAvant);
+    if (x.reportes) r.liensReportes = (r.liensReportes || 0) + x.reportes;
+    if (x.nonReportes.length) r.liensNonReportes = [...(r.liensNonReportes || []), ...x.nonReportes];
+  }
+  // Budgets à supprimer, désignés par nom et année ; le budget actif de l'année n'est jamais supprimé.
+  // Les opérations ne sont pas touchées.
+  for (const x of contenu.supprimerBudgets || []){
+    const b = vivants("budgets").find(y => y.nom === x.nom && y.annee === x.annee);
+    if (!b) (r.budgetsIntrouvables = r.budgetsIntrouvables || []).push(x.nom + " (" + x.annee + ")");
+    else if (b.actif || budgetActif(b.annee)?.id === b.id) (r.budgetsNonSupprimes = r.budgetsNonSupprimes || []).push(b.nom + " (" + b.annee + ", budget actif)");
+    else { supprimer("budgets", b.id); r.budgetsSupprimes = (r.budgetsSupprimes || 0) + 1; }
   }
   // Comptes (ex. compte-titres) et leurs valorisations datées ; un compte de même nom et de même type est repris.
   for (const cp of contenu.comptes || []){

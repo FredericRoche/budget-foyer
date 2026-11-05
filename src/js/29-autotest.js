@@ -690,6 +690,37 @@ async function autotest(){
     const fp = trouverCommercant(cleLibelle("PISCINE ESSAI VILLE"), true);
     v("plan : fiche fournisseur fixée et vérifiée", [fp?.nom, fp?.sousCategorie, fp?.verifie], ["Pisciniste essai", "Piscine (entretien)", true]);
     {
+      // Plan qui remplace le budget actif d'une année : les échéances liées suivent la ligne équivalente
+      enregistrer("budgets", {annee: 2032, nom: "Plan essai v4", fige: false, actif: true, lignes: [
+        {id: "lb-v4-loyer", nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 24000},
+        {id: "lb-v4-abo", nature: "Courante", categorie: "Loisirs essai", sousCategorie: "Abonnement", annuel: 120}]});
+      enregistrer("budgets", {annee: 2031, nom: "Plan essai 2031", fige: false, actif: true, lignes: [{id: "lb-31-loyer", nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 23000}]});
+      const eL = enregistrer("echeances", {libelle: "Loyer essai", montant: -2000, recurrence: "mensuelle", debut: "2032-01-01", compte: cj.id, ligneBudget: "lb-v4-loyer"});
+      const eA = enregistrer("echeances", {libelle: "Abonnement essai", montant: -10, recurrence: "mensuelle", debut: "2032-01-05", compte: cj.id, ligneBudget: "lb-v4-abo"});
+      const e31 = enregistrer("echeances", {libelle: "Loyer essai 2031", montant: -1900, recurrence: "mensuelle", debut: "2031-01-01", compte: cj.id, ligneBudget: "lb-31-loyer"});
+      const rl = appliquerPlan({budgets: [{annee: 2032, nom: "Plan essai v5", fige: false, actif: true, lignes: [
+        {nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 24600}, {nature: "Courante", categorie: "Alimentation", sousCategorie: "Courses", annuel: 9000}]}]});
+      const b5 = budgetActif(2032), l5 = b5.lignes.find(l => l.sousCategorie === "Loyer");
+      v("plan : lien d'échéance reporté vers la ligne équivalente du nouveau budget", [b5.nom, rl.liensReportes, rl.liensNonReportes, obtenir("echeances", eL.id).ligneBudget === l5.id, obtenir("echeances", e31.id).ligneBudget],
+        ["Plan essai v5", 1, ["Abonnement essai (aucune ligne de même catégorie)"], true, "lb-31-loyer"]);
+      // Même nom, même année : budget remplacé en place, nouvelles lignes
+      const rl2 = appliquerPlan({budgets: [{annee: 2032, nom: "Plan essai v5", fige: false, actif: true, lignes: [{nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 25000}]}]});
+      v("plan : budget remplacé en place, lien suivi", [rl2.liensReportes, obtenir("echeances", eL.id).ligneBudget === budgetActif(2032).lignes[0].id], [1, true]);
+      // Copie pour l'année suivante : échéance de 2033 liée à une ligne de 2032
+      const eN = enregistrer("echeances", {libelle: "Loyer essai 2033", montant: -2100, recurrence: "mensuelle", debut: "2033-01-01", compte: cj.id, ligneBudget: budgetActif(2032).lignes[0].id});
+      const av = instantaneLignesBudget();
+      const b6 = enregistrer("budgets", {annee: 2033, nom: "Copie essai", fige: false, actif: true, lignes: JSON.parse(JSON.stringify(budgetActif(2032).lignes)).map(l => Object.assign(l, {id: "lb-" + idAleatoire(8)}))});
+      const rc6 = reporterLiensBudget(2033, av);
+      v("copie de budget : échéance de l'année suivante rattachée à la ligne copiée", [rc6.reportes, obtenir("echeances", eN.id).ligneBudget === b6.lignes[0].id, obtenir("echeances", eL.id).ligneBudget === budgetActif(2032).lignes[0].id], [1, true, true]);
+      // Suppression de budgets par plan : l'inactif part, l'actif reste, les opérations ne bougent pas
+      const nbOps = vivants("operations").length;
+      const rs = appliquerPlan({supprimerBudgets: [{nom: "Plan essai v4", annee: 2032}, {nom: "Plan essai v5", annee: 2032}, {nom: "Plan essai absent", annee: 2032}]});
+      v("plan : budget inactif supprimé, budget actif refusé", [rs.budgetsSupprimes, rs.budgetsNonSupprimes, rs.budgetsIntrouvables, vivants("budgets").filter(x => x.annee === 2032).map(x => x.nom), vivants("operations").length === nbOps],
+        [1, ["Plan essai v5 (2032, budget actif)"], ["Plan essai absent (2032)"], ["Plan essai v5"], true]);
+      for (const e of [eL, eA, e31, eN]) supprimer("echeances", e.id);
+      for (const b of vivants("budgets").filter(x => /^(Plan|Copie) essai/.test(x.nom))) supprimer("budgets", b.id);
+    }
+    {
       const epx = {depart: "2027-01-10", soldeDepart: 300, comptes: [], jours: [{date: "2027-01-11", flux: 50, solde: 350}], evenements: [
         {date: "2027-01-11", montant: 100, genre: "capital"}, {date: "2027-02-01", montant: -80, genre: "projet", echeance: {projet: "Toit"}},
         {date: "2027-02-01", montant: 30, genre: "projet", echeance: {projet: "Toit"}}, {date: "2027-03-01", montant: -20, genre: "courant"}]};
