@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-CIZ7JyhAt92LTeCztscJ0OZ2m9m9HYXn1Tey9JASInI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-TjOLVlaxOQwwfBeFyik33DsMUSIDE9pfX9HZxcRS23E=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-05.1312";
+const VERSION_APP = "2026-11-05.1317";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2350,15 +2350,20 @@ function preparerReleve(lu, compte){
     res.doublonsLcl = d.ecartees;
     const lcl = new Set(vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL").map(c => c.id));
     const reserve = new Map();
-    for (const o of vivants("operations").filter(o => lcl.has(o.compte))){ const k = o.date + "|" + versCentimes(o.montant); reserve.set(k, (reserve.get(k) || 0) + 1); }
-    const prendre = k => { const n = reserve.get(k) || 0; if (n > 0){ reserve.set(k, n - 1); return true; } return false; };
+    for (const o of vivants("operations").filter(o => lcl.has(o.compte))){ const k = o.date + "|" + versCentimes(o.montant); if (!reserve.has(k)) reserve.set(k, []); reserve.get(k).push(o); }
+    const prendre = k => { const l = reserve.get(k); return l && l.length ? l.shift() : null; };
+    // Les lignes carte de l'export du compte sont celles débitées en fin de mois (débit différé) : date de débit connue
+    const dDebit = dernierJourOuvre(lu.periode.fin) <= aujourdhui() ? dernierJourOuvre(lu.periode.fin) : null;
+    res.debitsCartes = [];
     const restent = [];
-    for (const l of d.gardees) (prendre(l.date + "|" + versCentimes(l.montant)) ? res.ecartees : restent).push(l);
+    for (const l of d.gardees){ const o = prendre(l.date + "|" + versCentimes(l.montant)); if (o){ res.ecartees.push(l); res.debitsCartes.push(o); } else restent.push(l); }
     res.cartesSansTitulaire = restent.filter(l => {
       const c = versCentimes(l.montant);
-      if (prendre(ajouterJours(l.date, -1) + "|" + c) || prendre(ajouterJours(l.date, 1) + "|" + c)){ res.ecartees.push(l); return false; }
+      const o = prendre(ajouterJours(l.date, -1) + "|" + c) || prendre(ajouterJours(l.date, 1) + "|" + c);
+      if (o){ res.ecartees.push(l); res.debitsCartes.push(o); return false; }
       return true;
-    });
+    }).map(l => Object.assign({}, l, {dateDebit: dDebit}));
+    res.dateDebitCartes = dDebit;
     // Contrôle du solde : solde initial + opérations hors carte + factures de cartes débitées = solde final
     const factures = vivants("factures").filter(f => f.compteDebit === compte?.id && f.dateDebit > lu.periode.debut && f.dateDebit <= lu.periode.fin);
     const calc = versCentimes(lu.soldeDebut) + somme(lignes, l => versCentimes(l.montant)) - somme(factures, f => versCentimes(f.montant));
@@ -2508,6 +2513,8 @@ function appliquerReleve(prep){
     date: new Date().toISOString(), nouvelles: prep.nouvelles.length, deja: prep.deja.length});
   for (const l of prep.nouvelles) creerOperation(prep.compte, l, imp.id);
   for (const r of prep.reattribuees) enregistrer("operations", Object.assign(r.op, {compte: prep.compte.id, empreinte: r.empreinte}));
+  // Achats carte retrouvés dans l'export du compte : débités en fin de mois (sans écraser une date de débit établie)
+  if (prep.dateDebitCartes) for (const o of prep.debitsCartes || []) if (!o.dateDebit || o.debitEstime) enregistrer("operations", Object.assign(o, {dateDebit: prep.dateDebitCartes, debitEstime: false}));
   if (prep.cartesSansTitulaire?.length){
     const nv = compteCartesNonVentilees(prep.compte.id);
     // Empreintes recalculées avec l'identifiant réel du compte (il peut naître ici).

@@ -75,15 +75,20 @@ function preparerReleve(lu, compte){
     res.doublonsLcl = d.ecartees;
     const lcl = new Set(vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL").map(c => c.id));
     const reserve = new Map();
-    for (const o of vivants("operations").filter(o => lcl.has(o.compte))){ const k = o.date + "|" + versCentimes(o.montant); reserve.set(k, (reserve.get(k) || 0) + 1); }
-    const prendre = k => { const n = reserve.get(k) || 0; if (n > 0){ reserve.set(k, n - 1); return true; } return false; };
+    for (const o of vivants("operations").filter(o => lcl.has(o.compte))){ const k = o.date + "|" + versCentimes(o.montant); if (!reserve.has(k)) reserve.set(k, []); reserve.get(k).push(o); }
+    const prendre = k => { const l = reserve.get(k); return l && l.length ? l.shift() : null; };
+    // Les lignes carte de l'export du compte sont celles débitées en fin de mois (débit différé) : date de débit connue
+    const dDebit = dernierJourOuvre(lu.periode.fin) <= aujourdhui() ? dernierJourOuvre(lu.periode.fin) : null;
+    res.debitsCartes = [];
     const restent = [];
-    for (const l of d.gardees) (prendre(l.date + "|" + versCentimes(l.montant)) ? res.ecartees : restent).push(l);
+    for (const l of d.gardees){ const o = prendre(l.date + "|" + versCentimes(l.montant)); if (o){ res.ecartees.push(l); res.debitsCartes.push(o); } else restent.push(l); }
     res.cartesSansTitulaire = restent.filter(l => {
       const c = versCentimes(l.montant);
-      if (prendre(ajouterJours(l.date, -1) + "|" + c) || prendre(ajouterJours(l.date, 1) + "|" + c)){ res.ecartees.push(l); return false; }
+      const o = prendre(ajouterJours(l.date, -1) + "|" + c) || prendre(ajouterJours(l.date, 1) + "|" + c);
+      if (o){ res.ecartees.push(l); res.debitsCartes.push(o); return false; }
       return true;
-    });
+    }).map(l => Object.assign({}, l, {dateDebit: dDebit}));
+    res.dateDebitCartes = dDebit;
     // Contrôle du solde : solde initial + opérations hors carte + factures de cartes débitées = solde final
     const factures = vivants("factures").filter(f => f.compteDebit === compte?.id && f.dateDebit > lu.periode.debut && f.dateDebit <= lu.periode.fin);
     const calc = versCentimes(lu.soldeDebut) + somme(lignes, l => versCentimes(l.montant)) - somme(factures, f => versCentimes(f.montant));
@@ -233,6 +238,8 @@ function appliquerReleve(prep){
     date: new Date().toISOString(), nouvelles: prep.nouvelles.length, deja: prep.deja.length});
   for (const l of prep.nouvelles) creerOperation(prep.compte, l, imp.id);
   for (const r of prep.reattribuees) enregistrer("operations", Object.assign(r.op, {compte: prep.compte.id, empreinte: r.empreinte}));
+  // Achats carte retrouvés dans l'export du compte : débités en fin de mois (sans écraser une date de débit établie)
+  if (prep.dateDebitCartes) for (const o of prep.debitsCartes || []) if (!o.dateDebit || o.debitEstime) enregistrer("operations", Object.assign(o, {dateDebit: prep.dateDebitCartes, debitEstime: false}));
   if (prep.cartesSansTitulaire?.length){
     const nv = compteCartesNonVentilees(prep.compte.id);
     // Empreintes recalculées avec l'identifiant réel du compte (il peut naître ici).
