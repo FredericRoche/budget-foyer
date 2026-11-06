@@ -106,7 +106,8 @@ function reglagesCategories(c){
   const liste = h("div");
   for (const [cat, sous] of Object.entries(p.categories)) liste.appendChild(h("p", null, h("strong", null, cat), " : " + sous.join(", ")));
   c.appendChild(h("section", {class: "carte", style: {marginTop: "1rem"}}, h("h2", null, "Catégories"), liste,
-    h("div", {class: "outils"}, h("button", {class: "mini discret", onclick: async () => { if (await dialogueAjouterSousCategorie()) rafraichirEcran(); }}, "Ajouter une sous-catégorie…"),
+    h("div", {class: "outils"}, h("button", {class: "mini discret", onclick: () => dialogueCreerCategorie()}, "Créer une catégorie…"),
+      h("button", {class: "mini discret", onclick: async () => { if (await dialogueAjouterSousCategorie()) rafraichirEcran(); }}, "Ajouter une sous-catégorie…"),
       h("button", {class: "mini discret", onclick: () => dialogueRenommerSousCategorie()}, "Renommer une sous-catégorie…"),
       h("button", {class: "mini discret", onclick: () => dialogueDeplacerSousCategorie()}, "Déplacer une sous-catégorie…"),
       h("button", {class: "mini discret", onclick: () => dialogueSupprimerCategorie()}, "Supprimer une catégorie vide…"))));
@@ -136,6 +137,38 @@ async function dialogueDeplacerSousCategorie(){
   if (cible === cat && nom === ancien) return;
   const n = deplacerSousCategorie(cat, ancien, cible, nom);
   message("« " + cat + " › " + ancien + " » déplacée vers « " + cible + " › " + nom + " » (" + n + " enregistrement(s) mis à jour).");
+  rafraichirEcran();
+}
+/* Crée une catégorie de premier niveau avec ses sous-catégories ; peut y ranger d'emblée une sous-catégorie
+   existante (ex. « Famille › Cadeaux » devient « Cadeaux › Famille »), ses enregistrements suivant partout. */
+async function dialogueCreerCategorie(){
+  const nom = h("input", {type: "text"});
+  const sous = h("input", {type: "text", placeholder: "ex. Famille, Amis, Fêtes"});
+  const reprise = selection([["", "— aucune —"], ...optionsSousCategories()], "");
+  const nomReprise = h("input", {type: "text"});
+  const blocReprise = champ("Son nom dans la nouvelle catégorie", nomReprise);
+  const voir = () => { blocReprise.hidden = !reprise.value; nomReprise.value = reprise.value.split("|").slice(1).join("|"); };
+  reprise.addEventListener("change", voir); blocReprise.hidden = true;
+  const r = await dialogue({titre: "Créer une catégorie", corps: h("div", null, champ("Nom de la catégorie", nom),
+      champ("Sous-catégories, séparées par des virgules", sous),
+      champ("Y ranger une sous-catégorie existante (facultatif)", reprise, "Ses opérations, règles, lignes de budget, échéances et fournisseurs la suivent."), blocReprise),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: null}, {libelle: "Créer", classe: "primaire", action: () => {
+      const cat = nom.value.trim(), liste = sous.value.split(",").map(x => x.trim()).filter(Boolean), nr = nomReprise.value.trim();
+      if (!cat){ message("Indiquez le nom de la catégorie.", true); return false; }
+      if (nomCategorieFautif(cat) || cat === "À préciser"){ message("« " + cat + " » ne peut pas servir de nom de catégorie.", true); return false; }
+      if (LIVRE.parametres.categories[cat]){ message("La catégorie « " + cat + " » existe déjà : utilisez « Ajouter une sous-catégorie ».", true); return false; }
+      if (!liste.length && !reprise.value){ message("Indiquez au moins une sous-catégorie, ou une sous-catégorie existante à y ranger.", true); return false; }
+      if (reprise.value && !nr){ message("Indiquez le nom de la sous-catégorie reprise.", true); return false; }
+      return {cat, liste, reprise: reprise.value, nr};
+    }}]});
+  if (!r) return;
+  for (const s of r.liste) ajouterCategorie(r.cat, s);
+  let n = 0;
+  if (r.reprise){
+    const [ac, ...reste] = r.reprise.split("|");
+    n = deplacerSousCategorie(ac, reste.join("|"), r.cat, r.nr);
+  }
+  message("Catégorie « " + r.cat + " » créée" + (r.reprise ? " ; « " + r.reprise.replace("|", " › ") + " » y est rangée sous « " + r.nr + " » (" + n + " enregistrement(s) mis à jour)." : "."));
   rafraichirEcran();
 }
 async function dialogueSupprimerCategorie(){
