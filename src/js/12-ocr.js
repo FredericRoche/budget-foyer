@@ -55,15 +55,50 @@ async function preparerImage(blob, cote){
   const c = document.createElement("canvas"); c.width = Math.round(z.l * kz); c.height = Math.round(z.h * kz);
   const ctx = c.getContext("2d"); ctx.imageSmoothingQuality = "high"; ctx.drawImage(img, z.x, z.y, z.l, z.h, 0, 0, c.width, c.height);
   const d = ctx.getImageData(0, 0, c.width, c.height); const p = d.data;
-  for (let i = 0; i < p.length; i += 4){ const g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; const v = g > 160 ? 255 : g < 90 ? 0 : g; p[i] = p[i + 1] = p[i + 2] = v; }
-  ctx.putImageData(d, 0, 0);
-  return {jpeg: new Uint8Array(await couleur.arrayBuffer()), lecture: c};
+  const gris = new Float32Array(c.width * c.height);
+  for (let i = 0, k = 0; i < p.length; i += 4, k++) gris[k] = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+  const canevas = v => { const x = document.createElement("canvas"); x.width = c.width; x.height = c.height; const cx = x.getContext("2d"); const e = cx.createImageData(c.width, c.height);
+    for (let k = 0, i = 0; k < v.length; k++, i += 4){ e.data[i] = e.data[i + 1] = e.data[i + 2] = v[k]; e.data[i + 3] = 255; } cx.putImageData(e, 0, 0); return x; };
+  const seuil = new Float32Array(gris.length); for (let k = 0; k < gris.length; k++){ const g = gris[k]; seuil[k] = g > 160 ? 255 : g < 90 ? 0 : g; }
+  // Préparations de secours (banc d'essai du 07/11/2026 sur 26 photos mal lues : 7 montants justes → 14) :
+  // niveaux de gris étirés sans seuil, puis seuil adaptatif (moyenne locale) qui résiste aux ombres et au papier courbé
+  return {jpeg: new Uint8Array(await couleur.arrayBuffer()), lecture: canevas(seuil),
+    secours: [() => canevas(etirerGris(gris)), () => canevas(seuilAdaptatif(gris, c.width, c.height))]};
 }
+function etirerGris(g){
+  const t = Array.from(g).sort((a, b) => a - b), lo = t[Math.floor(t.length * 0.02)], hi = t[Math.floor(t.length * 0.98)];
+  const r = new Float32Array(g.length); for (let k = 0; k < g.length; k++) r[k] = Math.max(0, Math.min(255, (g[k] - lo) * 255 / Math.max(1, hi - lo)));
+  return r;
+}
+// Seuil de Bradley : un point est noir s'il est 15 % plus sombre que la moyenne de son voisinage (1/16 de la largeur)
+function seuilAdaptatif(g, w, h){
+  const s = Math.max(15, Math.round(w / 16)) | 1, m = s >> 1, I = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++){ let ligne = 0; for (let x = 0; x < w; x++){ ligne += g[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + ligne; } }
+  const r = new Float32Array(g.length);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){
+    const x0 = Math.max(0, x - m), x1 = Math.min(w - 1, x + m), y0 = Math.max(0, y - m), y1 = Math.min(h - 1, y + m);
+    const n = (x1 - x0 + 1) * (y1 - y0 + 1), somme = I[(y1 + 1) * (w + 1) + x1 + 1] - I[y0 * (w + 1) + x1 + 1] - I[(y1 + 1) * (w + 1) + x0] + I[y0 * (w + 1) + x0];
+    r[y * w + x] = g[y * w + x] * n < somme * 0.85 ? 0 : 255;
+  }
+  return r;
+}
+/* Lecture en trois passes au plus : la préparation habituelle ; si le montant n'est pas sûr, les niveaux de gris ; puis le
+   seuil adaptatif lu comme un seul bloc de texte. La première lecture au montant sûr l'emporte ; sinon, la première. */
 async function lireTicket(blob, progression){
-  const {jpeg, lecture} = await preparerImage(blob);
+  const {jpeg, lecture, secours} = await preparerImage(blob);
   const moteur = await chargerOcr(progression);
-  const r = await moteur.recognize(lecture);
-  return Object.assign(extraireTicket(r.data.text || ""), {photo: {mime: "image/jpeg", octets: jpeg}});
+  const passes = [[() => lecture, "3"], [secours[0], "3"], [secours[1], "6"]];
+  let premier = null;
+  try {
+    for (const [i, [image, mode]] of passes.entries()){
+      if (i) await moteur.setParameters({tessedit_pageseg_mode: mode});
+      const r = await moteur.recognize(image());
+      const t = Object.assign(extraireTicket(r.data.text || ""), {passe: i + 1});
+      if (!premier) premier = t;
+      if (t.confiance.montant === "sûr") return Object.assign(t, {photo: {mime: "image/jpeg", octets: jpeg}});
+    }
+  } finally { await moteur.setParameters({tessedit_pageseg_mode: "3"}).catch(() => {}); }
+  return Object.assign(premier, {photo: {mime: "image/jpeg", octets: jpeg}});
 }
 
 /* ---------- Extraction (pure, testable) ---------- */

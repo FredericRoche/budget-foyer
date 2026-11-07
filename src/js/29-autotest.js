@@ -165,6 +165,13 @@ async function autotest(){
         v("lecture : « Total TTC (tva incl.) » retenu, en-tête de TVA écarté", [lire("PRESSING ESSAI", "1,00 NETTOYAGE MANTEAU 18,00", "Total TTC (tva incl.) 18.00", "Mont total HT : 15.00"),
           lire("CAVE ESSAI", "Total TTC : 142.00€", "Total TVA : 23.67€", "Tx TVA HT TTC TVA", "(1) 20.008 118.33 142.00 23.67")], [18, 142]);
         v("lecture : total HT + TVA l'emporte sur un total mal lu présent ailleurs", lire("CAVE ESSAI", "Total TTC - 36.60€", "Total HT : 30.00€", "Total TVA : 6.00€", "CB 36.00€"), 36);
+        {
+          // Préparations de secours : un trait sombre sur un fond qui s'assombrit (ombre) reste noir, le fond blanc
+          const w = 64, hh = 16, g = new Float32Array(w * hh);
+          for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) g[y * w + x] = (x >= 30 && x < 34) ? 40 + x : 220 - x * 2;
+          const sa = seuilAdaptatif(g, w, hh), eg = etirerGris(g);
+          v("lecture : seuil adaptatif (ombre) et gris étiré", [sa[8 * w + 31], sa[8 * w + 5], sa[8 * w + 60], Math.round(Math.min(...eg)), Math.round(Math.max(...eg))], [0, 255, 255, 0, 255]);
+        }
         v("lecture : lettres prises pour des chiffres (« Z0.40 »)", [lire("SUPERETTE ESSAI", "- A PAYER - Z0.40EU1"), reparerMontantsOcr("TOTAL 1O,5O")], [20.4, "TOTAL 10,50"]);
         const fx = [{id: "a", nom: "La Mirandelle Essai", alias: ["LA MIRANDELLE ESSAI"], categorie: ""}, {id: "b", nom: "Boucherie Valmont Essai", alias: ["BOUCHERIE VALMONT"], categorie: ""},
           {id: "c", nom: "Magasin Essai Villeessai", alias: ["VILLEESSAI"], categorie: ""}, {id: "d", nom: "Cave Essai Villeessai", alias: [], categorie: ""}, {id: "e", nom: "Tenard", alias: [], categorie: ""}];
