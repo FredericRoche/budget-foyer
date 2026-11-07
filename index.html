@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-37MHcDE1EXWqYa06LlZFB/gu0japINECWsg2bisgoNw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-eqYK89DzpI5F67/bJNg8Pa5sWymF9CyQy8KpbRF+fLM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-07.1325";
+const VERSION_APP = "2026-11-07.1331";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -5891,10 +5891,16 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       // Ligne en trop expliquée : présente sur un autre relevé déposé (achat de fin de période), ou même montant qu'une
       // ligne appariée du relevé à 3 jours près (doublon probable, libellé différent : CSV et reprise)
       const autresReleves = FICHIERS_EN_COURS.filter(x => x !== f && x.lu.genre === f.lu.genre && (x.lu.releveAmex || x.lu.releveCompte));
-      const surAutre = o => autresReleves.find(x => (x.lu.releveAmex || x.lu.releveCompte).operations.some(l => versCentimes(l.montant) === versCentimes(o.montant) && Math.abs(ecartJours(l.date, o.date)) <= 3));
+      // Autre relevé : l'opération y est appariée (une ligne du relevé pour une opération : deux achats identiques du même
+      // jour ne passent pour présents que si le relevé en porte deux)
+      const surAutre = o => autresReleves.find(x => x.prep?.apparies ? x.prep.apparies.some(a => a.id === o.id)
+        : (x.lu.releveAmex || x.lu.releveCompte).operations.some(l => versCentimes(l.montant) === versCentimes(o.montant) && Math.abs(ecartJours(l.date, o.date)) <= 3));
+      const dbl = new Set(enTrop.filter(o => p.doublonsExacts?.has(o.id) && !surAutre(o)).map(o => o.id));
+      // Une ligne retrouvée sur un autre relevé n'est jamais à supprimer : sa coche éventuelle est retirée
+      for (const o of enTrop) if (p.choixEnTrop.has(o.id) && surAutre(o)) p.choixEnTrop.delete(o.id);
       const jumeau = o => (p.apparies || []).find(a => a.id !== o.id && a.compte === o.compte && versCentimes(a.montant) === versCentimes(o.montant) && Math.abs(ecartJours(a.date, o.date)) <= 3);
       const explication = o => { const x = surAutre(o); if (x) return "sur le relevé suivant (" + x.lu.nom + ") : à garder";
-        const j = !p.doublonsExacts?.has(o.id) && jumeau(o); return j ? "doublon probable de « " + (j.libelle || "") + " » du " + dateFr(j.date) : null; };
+        const j = !dbl.has(o.id) && jumeau(o); return j ? "doublon probable de « " + (j.libelle || "") + " » du " + dateFr(j.date) : null; };
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Clôture sur le relevé : " + f.lu.titre));
       if (p.anciens?.length) gauche.append(h("p", null, h("label", null, h("input", {type: "checkbox", checked: p.choixAnciens, onchange: e => { p.choixAnciens = e.target.checked; }}),
         " Marquer comme réglés les " + p.anciens.length + " achat(s) Amex antérieurs au " + dateFr(p.lu.periode.debut) + " restés sans date de débit (" + euros(-somme(p.anciens, o => o.montant)) + ")"),
@@ -5909,11 +5915,11 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
         + p.cartes.nouvelles.slice(0, 15).map(l => dateCourte(l.date) + " " + l.libelle + " " + euros(l.montant)).join(" · ") + (p.cartes.nouvelles.length > 15 ? " …" : "")));
       if (enTrop.length) gauche.append(h("h3", null, "Dans l'application mais pas sur le relevé (" + enTrop.length + ") : doublons ou lignes en trop ?"),
         h("p", {class: "note"}, "Rien n'est supprimé sans votre coche. Un achat du dernier jour peut appartenir au relevé suivant.",
-          p.doublonsExacts?.size ? [" ", h("button", {class: "mini", onclick: () => { for (const id of p.doublonsExacts) p.choixEnTrop.add(id); rafraichirEcran(); }}, "Cocher les " + p.doublonsExacts.size + " doublon(s) exact(s)"),
+          dbl.size ? [" ", h("button", {class: "mini", onclick: () => { for (const id of dbl) p.choixEnTrop.add(id); rafraichirEcran(); }}, "Cocher les " + dbl.size + " doublon(s) exact(s)"),
             " ", h("span", {class: "discret"}, "(même compte, jour, montant et libellé qu'une ligne conservée ; l'original reste)")] : null),
         tableau([{titre: "Supprimer"}, {titre: "Date"}, {titre: "Compte"}, {titre: "Libellé"}, {titre: "Montant", num: true}], enTrop, {classe: "serre", ligne: o => h("tr", null,
           h("td", null, h("input", {type: "checkbox", checked: p.choixEnTrop.has(o.id), onchange: e => { e.target.checked ? p.choixEnTrop.add(o.id) : p.choixEnTrop.delete(o.id); }})),
-          h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, p.doublonsExacts?.has(o.id) ? h("span", {class: "libbanque"}, "doublon exact") : null, explication(o) ? h("span", {class: "libbanque"}, explication(o)) : null, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
+          h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, dbl.has(o.id) ? h("span", {class: "libbanque"}, "doublon exact") : null, explication(o) ? h("span", {class: "libbanque"}, explication(o)) : null, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
     }
     } catch (e){ console.error(e); gauche.appendChild(h("p", {class: "neg"}, "Aperçu impossible à afficher : " + e.message + " (le fichier peut quand même être enregistré ; signalez ce message).")); }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));
