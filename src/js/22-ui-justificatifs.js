@@ -288,11 +288,25 @@ async function dialogueFiabiliteLecture(){
     ecarts.length ? tableau([{titre: "Date"}, {titre: "Validé"}, {titre: "Montant lu", num: true}, {titre: "Fournisseur reconnu"}], ecarts, {classe: "serre", limite: 40, ligne: x => h("tr", null,
       h("td", null, dateFr(x.j.date)), h("td", null, nomF(x.fiche) + " · " + euros(x.j.montant)),
       h("td", {class: "num" + (x.montantOk ? "" : " neg")}, x.t.montant == null ? "—" : euros(x.t.montant)), h("td", {class: x.fournisseurOk ? "" : "neg"}, nomF(x.reconnu)))}) : null),
-    actions: [{libelle: "Fermer", classe: "discret", valeur: null}, {libelle: "Télécharger pour analyse", classe: "primaire", action: () => {
-      const donnees = {genre: "analyse_lecture", le: aujourdhui(), pieces: r.map(x => ({date: x.j.date, origine: x.j.origine || "", type: x.j.type, texte: x.j.texteOCR,
-        montantValide: x.j.montant, montantLu: x.t.montant, fournisseurValide: x.fiche ? {nom: x.fiche.nom, alias: x.fiche.alias || []} : null, fournisseurReconnu: x.reconnu ? x.reconnu.nom : null,
-        enseigneLue: x.t.enseigne, raisonSocialeLue: x.t.raisonSociale}))};
-      telecharger(new Blob([JSON.stringify(donnees, null, 1)], {type: "application/json"}), "analyse-lecture-" + aujourdhui() + ".json");
-      return null;
-    }}]});
+    actions: [{libelle: "Fermer", classe: "discret", valeur: null},
+      {libelle: "Avec les photos des écarts", classe: "discret", action: () => { exporterAnalyseLecture(r, true); return null; }},
+      {libelle: "Télécharger pour analyse", classe: "primaire", action: () => { exporterAnalyseLecture(r, false); return null; }}]});
+}
+/* Fichier d'analyse : texte lu et valeurs validées ; avec les photos (telles qu'enregistrées, 1 600 px) des pièces
+   du téléphone mal lues, pour éprouver la préparation de l'image. */
+async function exporterAnalyseLecture(r, avecPhotos){
+  const pieces = [];
+  for (const x of r){
+    const p = {id: x.j.id, date: x.j.date, origine: x.j.origine || "", type: x.j.type, texte: x.j.texteOCR,
+      montantValide: x.j.montant, montantLu: x.t.montant, fournisseurValide: x.fiche ? {nom: x.fiche.nom, alias: x.fiche.alias || []} : null, fournisseurReconnu: x.reconnu ? x.reconnu.nom : null,
+      enseigneLue: x.t.enseigne, raisonSocialeLue: x.t.raisonSociale};
+    if (avecPhotos && x.j.origine === "mobile" && (!x.montantOk || !x.fournisseurOk)){
+      const ph = await lirePiece(x.j.id).catch(() => null);
+      if (ph && /^image\//.test(ph.mime)) p.photo = {mime: ph.mime, b64: versB64(ph.octets)};
+    }
+    pieces.push(p);
+  }
+  telecharger(new Blob([JSON.stringify({genre: "analyse_lecture", le: aujourdhui(), pieces}, null, 1)], {type: "application/json"}),
+    "analyse-lecture-" + aujourdhui() + (avecPhotos ? "-photos" : "") + ".json");
+  message("Fichier d'analyse téléchargé" + (avecPhotos ? " (" + pieces.filter(p => p.photo).length + " photo(s))." : "."));
 }
