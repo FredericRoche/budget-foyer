@@ -138,6 +138,20 @@ async function autotest(){
     await sim.ecrire("budget.chiffre", new Uint8Array([2]), e0);
     let conflit = false; try { await sim.ecrire("budget.chiffre", new Uint8Array([3]), e0); } catch (e){ conflit = !!e.conflit; }
     vrai("écriture refusée si le fichier a changé (étiquette)", conflit);
+    {
+      // Dépôts repris du téléphone : retirés après 30 jours si la pièce est sur le stockage (ou s'il n'y en a pas)
+      const sb = adaptateurSimule(), vieux = ajouterJours(aujourdhui(), -40), recent = ajouterJours(aujourdhui(), -5);
+      const nA = vieux + "T10-00-00-000Z-essai-a.chiffre", nB = vieux + "T11-00-00-000Z-essai-b.chiffre", nC = recent + "T10-00-00-000Z-essai-c.chiffre";
+      for (const n of [nA, nB, nC]) await sb.ecrire("boite/traitees/" + n, new Uint8Array([1]));
+      const ja = enregistrer("justificatifs", {type: "ticket", date: vieux, montant: 1, saisie: nA, statut: "a_rapprocher", operations: []});
+      const jb = enregistrer("justificatifs", {type: "ticket", date: vieux, montant: 2, saisie: nB, statut: "a_rapprocher", operations: []});
+      await sb.ecrire("justificatifs/" + ja.id + ".chiffre", new Uint8Array([1]));
+      await idbEcrire("file", "piece:" + jb.id, true);   // pièce de B pas encore envoyée : son dépôt est gardé
+      const nb = await purgerBoiteTraitees(30, sb);
+      const reste = (await sb.lister("boite/traitees")).map(f => f.nom).sort();
+      v("boîte : dépôts repris de plus de 30 jours retirés, sauf pièce non encore envoyée ou dépôt récent", [nb, reste], [1, [nB, nC].sort()]);
+      await idbSuppr("file", "piece:" + jb.id); supprimer("justificatifs", ja.id); supprimer("justificatifs", jb.id);
+    }
 
     /* --- Lecture de tickets --- */
     {

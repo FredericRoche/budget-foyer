@@ -129,6 +129,8 @@ function entrerDansAppli(){
   ECRAN_COURANT = ECRANS[nom] ? nom : "accueil";
   rafraichirEcran();
   actualiserBoite().catch(() => {});
+  // Dépôts du téléphone repris depuis plus de 30 jours : retirés de OneDrive (doublons des pièces jointes)
+  purgerBoiteTraitees().then(n => { if (n) console.info(n + " dépôt(s) repris retiré(s) de boite/traitees"); }).catch(() => {});
 }
 async function actualiserBoite(){
   try { BOITE_CACHE = await lireBoite(); construireNavigation(); if (ECRAN_COURANT === "boite") rafraichirEcran(); } catch (e) {}

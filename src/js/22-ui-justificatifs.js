@@ -240,7 +240,7 @@ function ecranRapprochement(j, etat, attente){
 
 /* ---------- Boîte de saisies ---------- */
 declarerEcran("boite", {titre: "Boîte de saisies", rendre(c){
-  c.appendChild(entete("Boîte de saisies", "Dépôts chiffrés du téléphone, lus par ce PC. Reprises, elles arrivent dans Justificatifs « à valider », où tout se corrige ; le dépôt part dans « boite/traitees » : conservé, jamais effacé.",
+  c.appendChild(entete("Boîte de saisies", "Dépôts chiffrés du téléphone, lus par ce PC. Reprises, elles arrivent dans Justificatifs « à valider », où tout se corrige ; le dépôt part dans « boite/traitees », d'où il est retiré 30 jours plus tard (la photo reste dans la pièce jointe).",
     [h("button", {class: "discret", onclick: async () => { await actualiserBoite(); message(BOITE_CACHE.length + " saisie(s) en attente."); rafraichirEcran(); }}, "Relire la boîte"),
      BOITE_CACHE.length ? h("button", {class: "primaire", onclick: async (e) => {
        e.target.disabled = true;

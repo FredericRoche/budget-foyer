@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-0LZVVr4BKi2zcxuU1TlPRXmBhhQ3tF7DIODmfGPc8bI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AQM6ptlxL7sIIL3f3dCeSJbMLyOJgtloaRD77Bj/jW4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-07.1916";
+const VERSION_APP = "2026-11-07.1933";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1178,6 +1178,7 @@ function forceMotDePasse(m){
      ecrire(chemin, octets, etiquetteAttendue?) → nouvelle étiquette ; lève ConflitEcriture si le fichier a changé
      lister(dossier) → [{nom, chemin, etiquette}]
      deplacer(chemin, dossierCible)
+     supprimer(chemin) (sans erreur si le fichier n'existe plus)
    Les chemins sont relatifs au dossier de l'application (« budget.chiffre », « boite/xxx.chiffre »). */
 
 class ConflitEcriture extends Error { constructor(){ super("Le fichier a été modifié sur un autre appareil."); this.conflit = true; } }
@@ -1228,6 +1229,7 @@ const adaptateurLocal = {
     const v = await idbLire("fichiers", chemin); if (!v) return;
     await idbEcrire("fichiers", dossier + "/" + chemin.split("/").pop(), v); await idbSuppr("fichiers", chemin);
   },
+  async supprimer(chemin){ await idbSuppr("fichiers", chemin); },
   async pret(){ return true; }
 };
 
@@ -1283,6 +1285,11 @@ const adaptateurDossier = {
     const parts = chemin.split("/"); let d = this.racine;
     for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p);
     await d.removeEntry(parts[parts.length - 1]);
+  },
+  async supprimer(chemin){
+    const parts = chemin.split("/"); let d = this.racine;
+    try { for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p); await d.removeEntry(parts[parts.length - 1]); }
+    catch (e){ if (e.name !== "NotFoundError") throw e; }
   }
 };
 
@@ -1371,6 +1378,10 @@ const adaptateurGraph = {
     await this.ecrire(dossierCible + "/" + chemin.split("/").pop(), src.octets);
     const r = await this.requete(this.url(chemin), {method: "DELETE"});
     if (!r.ok && r.status !== 404) throw new Error("OneDrive : retrait de l'original impossible (" + r.status + ").");
+  },
+  async supprimer(chemin){
+    const r = await this.requete(this.url(chemin), {method: "DELETE"});
+    if (!r.ok && r.status !== 404) throw new Error("OneDrive : suppression impossible (" + r.status + ").");
   }
 };
 
@@ -1388,7 +1399,8 @@ function adaptateurSimule(){
     },
     async ecrireNouveau(c, octets){ if (fichiers.has(c)) throw new Error("existe"); return this.ecrire(c, octets); },
     async lister(d){ return [...fichiers.keys()].filter(k => k.startsWith(d + "/") && !k.slice(d.length + 1).includes("/")).map(k => ({nom: k.slice(d.length + 1), chemin: k})); },
-    async deplacer(c, d){ const v = fichiers.get(c); if (!v) return; fichiers.set(d + "/" + c.split("/").pop(), v); fichiers.delete(c); }
+    async deplacer(c, d){ const v = fichiers.get(c); if (!v) return; fichiers.set(d + "/" + c.split("/").pop(), v); fichiers.delete(c); },
+    async supprimer(c){ fichiers.delete(c); }
   };
 }
 
@@ -1586,6 +1598,28 @@ async function lirePiece(id){
 }
 
 /* ---------- Boîte de saisies (côté PC) ---------- */
+/* Dépôts du téléphone déjà repris (« boite/traitees ») : doublons chiffrés des pièces jointes, supprimés 30 jours après
+   leur dépôt. Un dépôt n'est retiré que si chaque justificatif qui en est issu a sa pièce sur OneDrive, ou n'en a pas
+   (saisie sans photo) ; une pièce encore en attente d'envoi depuis ce PC garde son dépôt. Renvoie le nombre retiré. */
+async function purgerBoiteTraitees(jours, adaptateur){
+  const ad = adaptateur || SESSION.adaptateur;
+  if ((!adaptateur && typeof DEMO !== "undefined" && DEMO) || !ad?.supprimer || !(await ad.pret(false).catch(() => false))) return 0;
+  const limite = ajouterJours(aujourdhui(), -(jours ?? 30));
+  const fichiers = (await ad.lister("boite/traitees")).filter(f => f.nom.endsWith(".chiffre"));
+  if (!fichiers.length) return 0;
+  const pieces = new Set((await ad.lister("justificatifs")).map(f => f.nom));
+  let n = 0;
+  for (const f of fichiers){
+    const m = f.nom.match(/^(\d{4}-\d{2}-\d{2})T/);
+    if (!m || m[1] > limite) continue;
+    let garder = false;
+    for (const j of vivants("justificatifs").filter(x => x.saisie === f.nom))
+      if (!pieces.has(j.id + ".chiffre") && await idbLire("file", "piece:" + j.id).catch(() => null)) garder = true;
+    if (garder) continue;
+    await ad.supprimer(f.chemin); n++;
+  }
+  return n;
+}
 async function lireBoite(){
   const ad = SESSION.adaptateur;
   if (!ad || !(await ad.pret(false).catch(() => false))) return [];
@@ -4207,14 +4241,18 @@ function cadrerPapier(src){
   const x0 = Math.max(0, (best.x0 - mx) * f), y0 = Math.max(0, (best.y0 - my) * f);
   return {x: x0, y: y0, l: Math.min(src.width, (best.x1 + 1 + mx) * f) - x0, h: Math.min(src.height, (best.y1 + 1 + my) * f) - y0};
 }
-/* Réduit la photo (1 600 px au plus) pour la garder ; pour la lire, cadre sur le ticket, agrandit si besoin
-   et passe en niveaux de gris contrastés. */
+/* Copie gardée de la photo : 1 200 px au plus, niveaux de gris, JPEG 0,6 (environ 0,1 Mo au lieu de 0,5 Mo en couleur
+   à 1 600 px, le 07/11/2026 ; le ticket reste lisible à l'écran). La lecture, elle, part de la photo d'origine :
+   cadrée sur le ticket, agrandie si besoin, en niveaux de gris contrastés. */
 async function preparerImage(blob, cote){
   const img = await createImageBitmap(blob);
-  const k = Math.min(1, (cote || 1600) / Math.max(img.width, img.height));
+  const k = Math.min(1, (cote || 1200) / Math.max(img.width, img.height));
   const photo = document.createElement("canvas"); photo.width = Math.round(img.width * k); photo.height = Math.round(img.height * k);
-  photo.getContext("2d").drawImage(img, 0, 0, photo.width, photo.height);
-  const couleur = await new Promise(r => photo.toBlob(r, "image/jpeg", 0.8));
+  const px = photo.getContext("2d"); px.drawImage(img, 0, 0, photo.width, photo.height);
+  const dp = px.getImageData(0, 0, photo.width, photo.height), q = dp.data;
+  for (let i = 0; i < q.length; i += 4){ const g = 0.299 * q[i] + 0.587 * q[i + 1] + 0.114 * q[i + 2]; q[i] = q[i + 1] = q[i + 2] = g; }
+  px.putImageData(dp, 0, 0);
+  const couleur = await new Promise(r => photo.toBlob(r, "image/jpeg", 0.6));
   const z = cadrerPapier(img) || {x: 0, y: 0, l: img.width, h: img.height};
   const kz = Math.min(3, Math.max(1, 1200 / z.l), 2000 / Math.max(z.l, z.h));
   const c = document.createElement("canvas"); c.width = Math.round(z.l * kz); c.height = Math.round(z.h * kz);
@@ -5405,6 +5443,8 @@ function entrerDansAppli(){
   ECRAN_COURANT = ECRANS[nom] ? nom : "accueil";
   rafraichirEcran();
   actualiserBoite().catch(() => {});
+  // Dépôts du téléphone repris depuis plus de 30 jours : retirés de OneDrive (doublons des pièces jointes)
+  purgerBoiteTraitees().then(n => { if (n) console.info(n + " dépôt(s) repris retiré(s) de boite/traitees"); }).catch(() => {});
 }
 async function actualiserBoite(){
   try { BOITE_CACHE = await lireBoite(); construireNavigation(); if (ECRAN_COURANT === "boite") rafraichirEcran(); } catch (e) {}
@@ -6838,7 +6878,7 @@ function ecranRapprochement(j, etat, attente){
 
 /* ---------- Boîte de saisies ---------- */
 declarerEcran("boite", {titre: "Boîte de saisies", rendre(c){
-  c.appendChild(entete("Boîte de saisies", "Dépôts chiffrés du téléphone, lus par ce PC. Reprises, elles arrivent dans Justificatifs « à valider », où tout se corrige ; le dépôt part dans « boite/traitees » : conservé, jamais effacé.",
+  c.appendChild(entete("Boîte de saisies", "Dépôts chiffrés du téléphone, lus par ce PC. Reprises, elles arrivent dans Justificatifs « à valider », où tout se corrige ; le dépôt part dans « boite/traitees », d'où il est retiré 30 jours plus tard (la photo reste dans la pièce jointe).",
     [h("button", {class: "discret", onclick: async () => { await actualiserBoite(); message(BOITE_CACHE.length + " saisie(s) en attente."); rafraichirEcran(); }}, "Relire la boîte"),
      BOITE_CACHE.length ? h("button", {class: "primaire", onclick: async (e) => {
        e.target.disabled = true;
@@ -8531,6 +8571,20 @@ async function autotest(){
     await sim.ecrire("budget.chiffre", new Uint8Array([2]), e0);
     let conflit = false; try { await sim.ecrire("budget.chiffre", new Uint8Array([3]), e0); } catch (e){ conflit = !!e.conflit; }
     vrai("écriture refusée si le fichier a changé (étiquette)", conflit);
+    {
+      // Dépôts repris du téléphone : retirés après 30 jours si la pièce est sur le stockage (ou s'il n'y en a pas)
+      const sb = adaptateurSimule(), vieux = ajouterJours(aujourdhui(), -40), recent = ajouterJours(aujourdhui(), -5);
+      const nA = vieux + "T10-00-00-000Z-essai-a.chiffre", nB = vieux + "T11-00-00-000Z-essai-b.chiffre", nC = recent + "T10-00-00-000Z-essai-c.chiffre";
+      for (const n of [nA, nB, nC]) await sb.ecrire("boite/traitees/" + n, new Uint8Array([1]));
+      const ja = enregistrer("justificatifs", {type: "ticket", date: vieux, montant: 1, saisie: nA, statut: "a_rapprocher", operations: []});
+      const jb = enregistrer("justificatifs", {type: "ticket", date: vieux, montant: 2, saisie: nB, statut: "a_rapprocher", operations: []});
+      await sb.ecrire("justificatifs/" + ja.id + ".chiffre", new Uint8Array([1]));
+      await idbEcrire("file", "piece:" + jb.id, true);   // pièce de B pas encore envoyée : son dépôt est gardé
+      const nb = await purgerBoiteTraitees(30, sb);
+      const reste = (await sb.lister("boite/traitees")).map(f => f.nom).sort();
+      v("boîte : dépôts repris de plus de 30 jours retirés, sauf pièce non encore envoyée ou dépôt récent", [nb, reste], [1, [nB, nC].sort()]);
+      await idbSuppr("file", "piece:" + jb.id); supprimer("justificatifs", ja.id); supprimer("justificatifs", jb.id);
+    }
 
     /* --- Lecture de tickets --- */
     {

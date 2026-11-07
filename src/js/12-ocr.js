@@ -42,14 +42,18 @@ function cadrerPapier(src){
   const x0 = Math.max(0, (best.x0 - mx) * f), y0 = Math.max(0, (best.y0 - my) * f);
   return {x: x0, y: y0, l: Math.min(src.width, (best.x1 + 1 + mx) * f) - x0, h: Math.min(src.height, (best.y1 + 1 + my) * f) - y0};
 }
-/* Réduit la photo (1 600 px au plus) pour la garder ; pour la lire, cadre sur le ticket, agrandit si besoin
-   et passe en niveaux de gris contrastés. */
+/* Copie gardée de la photo : 1 200 px au plus, niveaux de gris, JPEG 0,6 (environ 0,1 Mo au lieu de 0,5 Mo en couleur
+   à 1 600 px, le 07/11/2026 ; le ticket reste lisible à l'écran). La lecture, elle, part de la photo d'origine :
+   cadrée sur le ticket, agrandie si besoin, en niveaux de gris contrastés. */
 async function preparerImage(blob, cote){
   const img = await createImageBitmap(blob);
-  const k = Math.min(1, (cote || 1600) / Math.max(img.width, img.height));
+  const k = Math.min(1, (cote || 1200) / Math.max(img.width, img.height));
   const photo = document.createElement("canvas"); photo.width = Math.round(img.width * k); photo.height = Math.round(img.height * k);
-  photo.getContext("2d").drawImage(img, 0, 0, photo.width, photo.height);
-  const couleur = await new Promise(r => photo.toBlob(r, "image/jpeg", 0.8));
+  const px = photo.getContext("2d"); px.drawImage(img, 0, 0, photo.width, photo.height);
+  const dp = px.getImageData(0, 0, photo.width, photo.height), q = dp.data;
+  for (let i = 0; i < q.length; i += 4){ const g = 0.299 * q[i] + 0.587 * q[i + 1] + 0.114 * q[i + 2]; q[i] = q[i + 1] = q[i + 2] = g; }
+  px.putImageData(dp, 0, 0);
+  const couleur = await new Promise(r => photo.toBlob(r, "image/jpeg", 0.6));
   const z = cadrerPapier(img) || {x: 0, y: 0, l: img.width, h: img.height};
   const kz = Math.min(3, Math.max(1, 1200 / z.l), 2000 / Math.max(z.l, z.h));
   const c = document.createElement("canvas"); c.width = Math.round(z.l * kz); c.height = Math.round(z.h * kz);

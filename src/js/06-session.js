@@ -189,6 +189,28 @@ async function lirePiece(id){
 }
 
 /* ---------- Boîte de saisies (côté PC) ---------- */
+/* Dépôts du téléphone déjà repris (« boite/traitees ») : doublons chiffrés des pièces jointes, supprimés 30 jours après
+   leur dépôt. Un dépôt n'est retiré que si chaque justificatif qui en est issu a sa pièce sur OneDrive, ou n'en a pas
+   (saisie sans photo) ; une pièce encore en attente d'envoi depuis ce PC garde son dépôt. Renvoie le nombre retiré. */
+async function purgerBoiteTraitees(jours, adaptateur){
+  const ad = adaptateur || SESSION.adaptateur;
+  if ((!adaptateur && typeof DEMO !== "undefined" && DEMO) || !ad?.supprimer || !(await ad.pret(false).catch(() => false))) return 0;
+  const limite = ajouterJours(aujourdhui(), -(jours ?? 30));
+  const fichiers = (await ad.lister("boite/traitees")).filter(f => f.nom.endsWith(".chiffre"));
+  if (!fichiers.length) return 0;
+  const pieces = new Set((await ad.lister("justificatifs")).map(f => f.nom));
+  let n = 0;
+  for (const f of fichiers){
+    const m = f.nom.match(/^(\d{4}-\d{2}-\d{2})T/);
+    if (!m || m[1] > limite) continue;
+    let garder = false;
+    for (const j of vivants("justificatifs").filter(x => x.saisie === f.nom))
+      if (!pieces.has(j.id + ".chiffre") && await idbLire("file", "piece:" + j.id).catch(() => null)) garder = true;
+    if (garder) continue;
+    await ad.supprimer(f.chemin); n++;
+  }
+  return n;
+}
 async function lireBoite(){
   const ad = SESSION.adaptateur;
   if (!ad || !(await ad.pret(false).catch(() => false))) return [];
