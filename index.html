@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3+fp0U9RaWw+QpfnNS5viHT5PHchwjT9yM90JRuCsls=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-4ZtSIKPNriE7HAsjus7zd/Xi3oekslnaOy/qZwVY1tM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-07.1254";
+const VERSION_APP = "2026-11-07.1303";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -5681,7 +5681,7 @@ declarerEcran("operations", {titre: "Opérations", rendre(c, etat){
       const cm = o.commercant ? obtenir("commercants", o.commercant) : null;
       const compte = obtenir("comptes", o.compte);
       return h("tr", {class: "cliquable" + (choisie === o ? " choisie" : ""), onclick: () => { etat.choisie = o.id; rafraichirEcran(); }},
-        h("td", null, dateCourte(o.date)), h("td", {class: !o.dateDebit ? "discret" : ""}, o.dateDebit ? dateCourte(o.dateDebit) : (compte?.type === "carte" ? h("em", null, "à venir") : "")),
+        h("td", null, dateFr(o.date)), h("td", {class: !o.dateDebit ? "discret" : ""}, o.dateDebit ? dateFr(o.dateDebit) : (compte?.type === "carte" ? h("em", null, "à venir") : "")),
         h("td", null, compte ? (compte.carte && compte.carte !== "LCL-NV" ? compte.carte : compte.nom) : "—"),
         h("td", null, cm ? cm.nom : o.libelle, cm ? h("span", {class: "libbanque", title: o.libelle}, o.libelle) : null),
         h("td", {class: o.natureExacte ? "" : "discret"}, o.natureExacte || "—", o.ventilation ? h("span", {class: "libbanque"}, "ventilée en " + o.ventilation.length) : null),
