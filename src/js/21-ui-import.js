@@ -258,7 +258,7 @@ async function importerJustificatifPc(lu, depuisDepot){
   if (double && !(await confirmer("Une pièce identique est déjà enregistrée : " + (double.commercantNom || double.raisonSociale || "fournisseur ?") + (double.numero ? ", facture n° " + double.numero : "") + ", " + euros(double.montant) + " du " + dateFr(double.date)
     + ". L'ajouter quand même ?", "Ajouter quand même"))) return;
   const j = await creerJustificatif({type: t.type, date: t.date || aujourdhui(), heure: t.heure, montant: t.montant || 0, raisonSociale: t.raisonSociale, commercantNom: c ? c.nom : nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")),
-    commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
+    commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4) || (/AMERICAN EXPRESS|\bAMEX\b/i.test(t.texte || "") && vivants("comptes").some(c => c.carte === "AMEX") ? "AMEX" : ""), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
     categorie: precedente?.categorie || c?.categorie || "", sousCategorie: precedente ? precedente.sousCategorie || "" : c?.sousCategorie || "", lieu: precedente?.lieu || c?.lieu || "", aVerifier: true,
     fournisseurDevine: devine, natureExacte: ndf ? "Note de frais n° " + ndf.numero + " (" + ndf.periode.toLowerCase() + ")" : "", lignesNdf: ndf ? ndf.lignes : undefined,
     aValider: !!depuisDepot}, t.photo);

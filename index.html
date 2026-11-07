@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-eqYK89DzpI5F67/bJNg8Pa5sWymF9CyQy8KpbRF+fLM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-UJNE03JxZ803DZ61aT19M1Ay8wdHv4q4oeHgDlMJARI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-07.1331";
+const VERSION_APP = "2026-11-07.1340";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -6085,7 +6085,7 @@ async function importerJustificatifPc(lu, depuisDepot){
   if (double && !(await confirmer("Une pièce identique est déjà enregistrée : " + (double.commercantNom || double.raisonSociale || "fournisseur ?") + (double.numero ? ", facture n° " + double.numero : "") + ", " + euros(double.montant) + " du " + dateFr(double.date)
     + ". L'ajouter quand même ?", "Ajouter quand même"))) return;
   const j = await creerJustificatif({type: t.type, date: t.date || aujourdhui(), heure: t.heure, montant: t.montant || 0, raisonSociale: t.raisonSociale, commercantNom: c ? c.nom : nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")),
-    commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
+    commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4) || (/AMERICAN EXPRESS|\bAMEX\b/i.test(t.texte || "") && vivants("comptes").some(c => c.carte === "AMEX") ? "AMEX" : ""), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
     categorie: precedente?.categorie || c?.categorie || "", sousCategorie: precedente ? precedente.sousCategorie || "" : c?.sousCategorie || "", lieu: precedente?.lieu || c?.lieu || "", aVerifier: true,
     fournisseurDevine: devine, natureExacte: ndf ? "Note de frais n° " + ndf.numero + " (" + ndf.periode.toLowerCase() + ")" : "", lignesNdf: ndf ? ndf.lignes : undefined,
     aValider: !!depuisDepot}, t.photo);
@@ -8085,7 +8085,9 @@ async function formulaireMobile(corps, saisie, t){
   const chiffres = String(t?.carte4 || "").replace(/\D/g, "");
   const carteLue = chiffres ? (cartes.find(x => (x.chiffres || []).includes(chiffres.slice(-4)))
     || cartes.find(x => { const d = String(x.carte).replace(/\D/g, ""); return d.length >= 3 && chiffres.endsWith(d); })) : null;
-  const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || carteLue?.carte || dernier.carte || cartes[0]?.carte || "");
+  // Ticket qui nomme Amex (« CARTE AMEX », « AMERICAN EXPRESS ») : la carte Amex passe avant la dernière carte utilisée
+  const amexLue = /AMERICAN EXPRESS|\bAMEX\b/i.test(t?.texte || "") ? cartes.find(x => x.carte === "AMEX") : null;
+  const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || carteLue?.carte || amexLue?.carte || dernier.carte || cartes[0]?.carte || "");
   const nomPropose = fiche ? fiche.nom : t ? nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")) : "";
   const cm = h("input", {type: "text", value: nomPropose, autocomplete: "off", autocorrect: "off", spellcheck: "false", placeholder: "tapez une partie du nom"});
   const liste = h("div", {class: "liste-fournisseurs"});

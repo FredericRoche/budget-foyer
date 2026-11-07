@@ -138,7 +138,9 @@ async function formulaireMobile(corps, saisie, t){
   const chiffres = String(t?.carte4 || "").replace(/\D/g, "");
   const carteLue = chiffres ? (cartes.find(x => (x.chiffres || []).includes(chiffres.slice(-4)))
     || cartes.find(x => { const d = String(x.carte).replace(/\D/g, ""); return d.length >= 3 && chiffres.endsWith(d); })) : null;
-  const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || carteLue?.carte || dernier.carte || cartes[0]?.carte || "");
+  // Ticket qui nomme Amex (« CARTE AMEX », « AMERICAN EXPRESS ») : la carte Amex passe avant la dernière carte utilisée
+  const amexLue = /AMERICAN EXPRESS|\bAMEX\b/i.test(t?.texte || "") ? cartes.find(x => x.carte === "AMEX") : null;
+  const carte = selection([...cartes.map(x => [x.carte, x.nom]), ["ESPECES", "Espèces"], ["", "Autre"]], saisie.carte || carteLue?.carte || amexLue?.carte || dernier.carte || cartes[0]?.carte || "");
   const nomPropose = fiche ? fiche.nom : t ? nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")) : "";
   const cm = h("input", {type: "text", value: nomPropose, autocomplete: "off", autocorrect: "off", spellcheck: "false", placeholder: "tapez une partie du nom"});
   const liste = h("div", {class: "liste-fournisseurs"});
