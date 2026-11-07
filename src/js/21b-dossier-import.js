@@ -43,6 +43,7 @@ function reglesRangement(){ return LIVRE.parametres.rangement || {}; }
 /* Clé de la règle qui s'applique au fichier : un compte, ou une famille de pièces. */
 function cleRangement(lu, compte){
   // Relevé d'un autre compte LCL que le compte principal (compte personnel…) : sa propre règle, son propre dossier
+  if (lu.genre === "releve_amex") return compte ? "releves_pdf:" + compte.id : null;
   if (lu.genre === "releve_lcl" && compte && compte.id !== compteCourantLcl()?.id) return "releves_pdf:" + compte.id;
   if (lu.genre === "cartes_lcl" || lu.genre === "releve_lcl") return "releves_pdf_lcl";
   if (["compte", "carte", "valorisation"].includes(lu.genre)) return compte ? "compte:" + compte.id : null;
@@ -77,6 +78,7 @@ function proposerRangement(lu, compte, index){
   const courant = () => { const c = compteCourantLcl(); return c ? parNumero(c.numero) : null; };
   if (lu.genre === "compte"){ const b = parNumero(compte?.numero); return b ? b + "/Historiques CSV" : (compte ? compte.nom : null); }
   if (lu.genre === "releve_lcl" && compte && compte.id !== compteCourantLcl()?.id){ const b = parNumero(compte.numero); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés PDF" : compte.nom + "/Relevés PDF"); }
+  if (lu.genre === "releve_amex"){ const b = parNom(/^amex$/i) || "Amex"; return enfant(b, /relev[ée]s pdf/i) || b + "/Relevés PDF"; }
   if (lu.genre === "cartes_lcl" || lu.genre === "releve_lcl"){ const b = courant(); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés" : "Relevés PDF LCL"); }
   if (lu.genre === "carte"){
     if (lu.banque === "Amex"){ const b = parNom(/^amex$/i); return (b || "Amex") + "/Relevés"; }
@@ -270,14 +272,16 @@ async function rangerFichier(f){
     const pris = new Set();
     for await (const [nom] of d.entries()) pris.add(nom);
     // Même nom déjà rangé : un PDF retéléchargé (quelques octets de différence) dont le texte est identique est le même document
-    const memeNom = await memePdfDejaRange(d, f.source.nom, octets);
+    // Relevé Amex téléchargé sous la seule date (« 2026-11-06.pdf ») : nommé pour être reconnu dans les archives
+    const nomCible = f.lu.genre === "releve_amex" && f.lu.periode ? "Relevé Amex " + f.lu.periode.fin + ".pdf" : f.source.nom;
+    const memeNom = await memePdfDejaRange(d, nomCible, octets);
     if (memeNom){
       await f.source.dossier.removeEntry(f.source.nom);
       if (r.propose) modifierParametres({rangement: Object.assign({}, reglesRangement(), {[r.cle]: r.dossier})});
       f.rangement = {chemin: chemin.join("/") + "/" + memeNom, identique: true};
       return;
     }
-    const final = nomLibre(f.source.nom, pris);
+    const final = nomLibre(nomCible, pris);
     const fh = await d.getFileHandle(final, {create: true});
     const w = await fh.createWritable(); await w.write(octets); await w.close();
     const relu = new Uint8Array(await (await fh.getFile()).arrayBuffer());

@@ -553,6 +553,37 @@ async function autotest(){
         const cl = Object.assign({}, LIVRE.parametres.clotures); delete cl[cj.id + "|2027-05-07"]; modifierParametres({clotures: cl});
       }
       {
+        // Relevé PDF Amex : en-tête des soldes, période, prélèvement, libellé sur la ligne suivante, « CR » de crédit
+        const rel = ["American Express Relevé de compte", "Nom Numéro de Compte Date de relevé Prochain relevé", "TITULAIRE ESSAI xxxx-xxxxxx-99001 06/01/28 06/02/28",
+          "Solde Précédent Nouveau Crédit Nouveau Débit Nouveau Solde Montant Dû en Euros", "100,00 - 105,00 + 1 230,50 = 1 225,50 1 225,50",
+          "Le relevé du 7 décembre au 6 janvier 2028 comprend tous les frais et paiements reçus au 6 janvier 2028.",
+          "Le règlement de votre relevé est prévu par prélèvement automatique sur votre compte bancaire à partir du 10/01/2028.",
+          "12 déc 12 déc PRELEVEMENT AUTOMATIQUE ENREGISTRE-MERCI 100,00", "CR", "Opérations pour TITULAIRE ESSAI", "Carte xxxx-xxxxxx-99001",
+          "6 déc 6 déc EPICERIE ESSAI VILLEESSAI 30,50", "20 déc 21 déc 1 200,00", "MAGASIN ESSAI VILLEESSAI", "2 janv 2 janv 5,00", "LIBRAIRIE ESSAI", "CR",
+          "Total des dépenses pour TITULAIRE ESSAI 1 225,50"].join(String.fromCharCode(10));
+        const ra = extraireReleveAmex(rel);
+        v("relevé Amex : écritures, sens, années, libellé suivant, soldes cohérents", [ra.operations.map(o => o.date + " " + o.montant + " " + o.libelle).join(" | "), ra.periode.debut, ra.periode.fin, ra.prelevement, ra.soldeFin, ra.controle.ok, ra.numero],
+          ["2027-12-12 100 PRELEVEMENT AUTOMATIQUE ENREGISTRE-MERCI | 2027-12-06 -30.5 EPICERIE ESSAI VILLEESSAI | 2027-12-20 -1200 MAGASIN ESSAI VILLEESSAI | 2028-01-02 5 LIBRAIRIE ESSAI", "2027-12-07", "2028-01-06", "2028-01-10", 1225.5, true, "99001"]);
+        const amexAvant = compteAmex();
+        const ax = amexAvant || enregistrer("comptes", {nom: "Amex essai", type: "carte", banque: "Amex", carte: "AMEX", compteDebit: cj.id, actif: true});
+        const a1 = enregistrer("operations", {compte: ax.id, date: "2027-12-07", montant: -30.5, libelle: "EPICERIE ESSAI"});
+        const a2 = enregistrer("operations", {compte: ax.id, date: "2027-12-22", montant: -9.99, libelle: "EN TROP ESSAI"});
+        const pa = preparerClotureAmex({nom: "amex-essai.pdf", genre: "releve_amex", releveAmex: ra, periode: ra.periode});
+        v("clôture Amex : conforme à 3 jours, manquants proposés, en trop signalé, encours comparé", [pa.conformes, pa.manquants.map(l => l.montant).join(","), pa.enTrop.map(o => o.id), pa.controles.map(c => c.ok).join(",")],
+          [1, "100,-1200,5", [a2.id], "true,false,false,true"]);
+        const rx = appliquerClotureAmex(pa);
+        const mag = vivants("operations").find(o => o.compte === ax.id && o.libelle === "MAGASIN ESSAI VILLEESSAI");
+        v("clôture Amex appliquée : ajouts datés du prélèvement, apparié marqué, en trop gardé, clôture notée",
+          [rx.ajoutees, rx.supprimees, mag?.dateDebit, obtenir("operations", a1.id).dateDebit, obtenir("operations", a1.id).releveAmex, !!obtenir("operations", a2.id), !!(LIVRE.parametres.clotures || {})[ax.id + "|2028-01-06"]],
+          [3, 0, "2028-01-10", "2028-01-10", "2028-01-06", true, true]);
+        const pa2 = preparerClotureAmex({nom: "amex-essai.pdf", genre: "releve_amex", releveAmex: ra, periode: ra.periode});
+        v("clôture Amex refaite : tout conforme sauf la ligne en trop", [pa2.conformes, pa2.manquants.length, pa2.enTrop.length], [4, 0, 1]);
+        for (const o of vivants("operations").filter(o => o.compte === ax.id && o.date >= "2027-12-01" && o.date <= "2028-01-10")) supprimer("operations", o.id);
+        for (const i of vivants("imports").filter(i => i.fichier === "amex-essai.pdf")) supprimer("imports", i.id);
+        const cl = Object.assign({}, LIVRE.parametres.clotures); delete cl[ax.id + "|2028-01-06"]; modifierParametres({clotures: cl});
+        if (!amexAvant) supprimer("comptes", ax.id);
+      }
+      {
         // Chèque importé sans son numéro (colonne à part de l'export LCL) : rapproché au montant ; avec numéro, il doit correspondre
         const oc1 = enregistrer("operations", {compte: cj.id, date: "2027-03-20", montant: -524.03, libelle: "", type: "Chèque", dateDebit: "2027-03-20"});
         const jc1 = enregistrer("justificatifs", {type: "facture", date: "2027-03-13", montant: 524.03, carte: "CPT:" + cj.id, cheque: "5367918", statut: "a_rapprocher", operations: []});

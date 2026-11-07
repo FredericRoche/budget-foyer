@@ -188,6 +188,53 @@ function extraireReleveCompteLcl(texte){
     controle: {ok, texte: "relevé du compte : " + operations.length + " écriture(s)" + (final === null ? ", solde final illisible" : ok ? ", soldes cohérents au centime" : ", écart de " + euros((versCentimes(final) - calc) / 100) + " entre les écritures et le solde final")}};
 }
 
+/* ---------- Relevé mensuel Amex (PDF, la pièce qui fait foi) ----------
+   En-tête « Solde Précédent − Nouveau Crédit + Nouveau Débit = Nouveau Solde » ; période « Le relevé du 7 octobre
+   au 6 novembre 2026 » ; prélèvement « à partir du jj/mm/aaaa ». Écritures « 6 oct 7 oct LIBELLE 11,15 » : date de
+   la transaction, date d'enregistrement, libellé (parfois sur la ligne suivante), montant ; un « CR » qui suit
+   marque un crédit (paiement reçu, remboursement). Contrôle : somme des débits et des crédits égale à l'en-tête. */
+const MOIS_AMEX = {jan: 1, fev: 2, mar: 3, avr: 4, mai: 5, juin: 6, juil: 7, jui: 7, aou: 8, sep: 9, oct: 10, nov: 11, dec: 12};
+const moisAmex = t => { const n = norm(t).replace(/\./g, ""); return MOIS_AMEX[n.slice(0, 4)] || MOIS_AMEX[n.slice(0, 3)] || null; };
+function extraireReleveAmex(texte){
+  const T = String(texte || "").replace(/[   ]/g, " ");
+  if (!/American Express/i.test(T) || !/Solde Pr[ée]c[ée]dent/i.test(T) || !/Nouveau Solde/i.test(T)) return null;
+  const mt = "(\\d{1,3}(?: \\d{3})*,\\d{2})";
+  const tete = T.match(new RegExp(mt + " - " + mt + " \\+ " + mt + " = " + mt));
+  const per = norm(T).match(/le releve du (\d{1,2}) ([a-z]+) au (\d{1,2}) ([a-z]+) (\d{4})/);
+  if (!tete || !per || !MOIS_TEXTE[per[2]] || !MOIS_TEXTE[per[4]]) return null;
+  const anFin = +per[5], moisFin = MOIS_TEXTE[per[4]];
+  const fin = anFin + "-" + pad2(moisFin) + "-" + pad2(per[3]);
+  const debut = (MOIS_TEXTE[per[2]] > moisFin ? anFin - 1 : anFin) + "-" + pad2(MOIS_TEXTE[per[2]]) + "-" + pad2(per[1]);
+  const dateDe = (j, m) => (m > moisFin + 1 ? anFin - 1 : anFin) + "-" + pad2(m) + "-" + pad2(j);
+  const prelevement = lireDate(premier(T, /pr[ée]l[èe]vement automatique sur votre compte bancaire [àa] partir du (\d{2}\/\d{2}\/\d{4})/i)) || null;
+  const numero = premier(T, /x{4}-x{6}-(\d{4,6})/i);
+  const operations = []; let derniere = null, attendLibelle = false, titulaire = "";
+  const reLigne = /^(\d{1,2}) ([a-zéûô]+)\.? (\d{1,2}) ([a-zéûô]+)\.?(?: (.*))?$/i;
+  for (const brut of T.split(/\n/)){
+    const l = brut.trim();
+    const pour = l.match(/^Op[ée]rations pour (.+)$/i); if (pour){ titulaire = pour[1].trim(); attendLibelle = false; continue; }
+    if (/^Autres transactions/i.test(l)){ titulaire = ""; attendLibelle = false; continue; }
+    if (l === "CR"){ if (derniere && derniere.montant < 0) derniere.montant = -derniere.montant; continue; }
+    const m = l.match(reLigne);
+    const reste = m ? (m[5] || "").trim() : "", cr = / ?\bCR$/.test(reste), sansCr = reste.replace(/ ?\bCR$/, "");
+    const mm = m ? sansCr.match(/(?:^| )(\d{1,3}(?: \d{3})*,\d{2})$/) : null;
+    if (m && moisAmex(m[2]) && moisAmex(m[4]) && mm){
+      derniere = {date: dateDe(+m[1], moisAmex(m[2])), dateEnregistrement: dateDe(+m[3], moisAmex(m[4])), libelle: sansCr.slice(0, mm.index).trim(), montant: -lireMontant(mm[1]), detail: titulaire};
+      if (cr) derniere.montant = -derniere.montant;
+      operations.push(derniere); attendLibelle = !derniere.libelle; continue;
+    }
+    if (attendLibelle && derniere && l && !/^(Total|Carte |Num[ée]ro|Nom |Date de)/i.test(l)){ derniere.libelle = l; attendLibelle = false; }
+  }
+  if (!operations.length) return null;
+  const [soldeDebut, credits, debits, soldeFin] = tete.slice(1, 5).map(lireMontant);
+  const sd = somme(operations.filter(o => o.montant < 0), o => -versCentimes(o.montant)), sc = somme(operations.filter(o => o.montant > 0), o => versCentimes(o.montant));
+  const ok = sd === versCentimes(debits) && sc === versCentimes(credits) && versCentimes(soldeDebut) - versCentimes(credits) + versCentimes(debits) === versCentimes(soldeFin);
+  for (const o of operations) o.montant = Math.round(o.montant * 100) / 100;
+  return {numero, periode: {debut, fin}, prelevement, soldeDebut, soldeFin, credits, debits, operations,
+    controle: {ok, texte: "relevé Amex : " + operations.length + " écriture(s)" + (ok ? ", débits, crédits et soldes cohérents au centime"
+      : ", écart : débits " + euros(sd / 100) + " pour " + euros(debits) + ", crédits " + euros(sc / 100) + " pour " + euros(credits))}};
+}
+
 /* Relevé annuel d'un livret (période de février à janvier) : solde au 31/12 compris dans la période, tiré des
    écritures (ancien solde + écritures jusqu'au 31/12). Sert de valeur de fin d'année pour la comparaison du patrimoine. */
 function soldesFinAnnee(texte){
@@ -317,6 +364,10 @@ function echeancesAvisImpot(texte, quoi){
 function reconnaitrePdf(nom, texte, octets){
   const T = texte; const N = norm(texte);
   const base = {nom, texte: T, octets};
+  // Relevé mensuel Amex : clôture du mois de la carte, il fait foi (le CSV ne sert qu'au suivi du mois en cours)
+  const amex = extraireReleveAmex(T);
+  if (amex) return Object.assign(base, {genre: "releve_amex", banque: "Amex", releveAmex: amex, numero: amex.numero, periode: amex.periode,
+    titre: "Relevé Amex du " + dateFr(amex.periode.debut) + " au " + dateFr(amex.periode.fin)});
   // Relevé de compte LCL : on n'en garde que le détail des cartes (le compte vient des exports CSV)
   const cartesPdf = extraireCartesReleveLcl(T);
   // Relevé mensuel complet (écritures du compte + détail des cartes) : clôture du mois, il fait foi

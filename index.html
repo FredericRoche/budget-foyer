@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-XqvIT8wRon65dAjzkp2CVN6ESjQndfhptAftQlmNSGk=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-jDcwFEOHLztluAjm9kAWLoWjfYQFH7wgtq/FvZ0GDQI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-06.0945";
+const VERSION_APP = "2026-11-07.1238";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -2081,6 +2081,53 @@ function extraireReleveCompteLcl(texte){
     controle: {ok, texte: "relevé du compte : " + operations.length + " écriture(s)" + (final === null ? ", solde final illisible" : ok ? ", soldes cohérents au centime" : ", écart de " + euros((versCentimes(final) - calc) / 100) + " entre les écritures et le solde final")}};
 }
 
+/* ---------- Relevé mensuel Amex (PDF, la pièce qui fait foi) ----------
+   En-tête « Solde Précédent − Nouveau Crédit + Nouveau Débit = Nouveau Solde » ; période « Le relevé du 7 octobre
+   au 6 novembre 2026 » ; prélèvement « à partir du jj/mm/aaaa ». Écritures « 6 oct 7 oct LIBELLE 11,15 » : date de
+   la transaction, date d'enregistrement, libellé (parfois sur la ligne suivante), montant ; un « CR » qui suit
+   marque un crédit (paiement reçu, remboursement). Contrôle : somme des débits et des crédits égale à l'en-tête. */
+const MOIS_AMEX = {jan: 1, fev: 2, mar: 3, avr: 4, mai: 5, juin: 6, juil: 7, jui: 7, aou: 8, sep: 9, oct: 10, nov: 11, dec: 12};
+const moisAmex = t => { const n = norm(t).replace(/\./g, ""); return MOIS_AMEX[n.slice(0, 4)] || MOIS_AMEX[n.slice(0, 3)] || null; };
+function extraireReleveAmex(texte){
+  const T = String(texte || "").replace(/[   ]/g, " ");
+  if (!/American Express/i.test(T) || !/Solde Pr[ée]c[ée]dent/i.test(T) || !/Nouveau Solde/i.test(T)) return null;
+  const mt = "(\\d{1,3}(?: \\d{3})*,\\d{2})";
+  const tete = T.match(new RegExp(mt + " - " + mt + " \\+ " + mt + " = " + mt));
+  const per = norm(T).match(/le releve du (\d{1,2}) ([a-z]+) au (\d{1,2}) ([a-z]+) (\d{4})/);
+  if (!tete || !per || !MOIS_TEXTE[per[2]] || !MOIS_TEXTE[per[4]]) return null;
+  const anFin = +per[5], moisFin = MOIS_TEXTE[per[4]];
+  const fin = anFin + "-" + pad2(moisFin) + "-" + pad2(per[3]);
+  const debut = (MOIS_TEXTE[per[2]] > moisFin ? anFin - 1 : anFin) + "-" + pad2(MOIS_TEXTE[per[2]]) + "-" + pad2(per[1]);
+  const dateDe = (j, m) => (m > moisFin + 1 ? anFin - 1 : anFin) + "-" + pad2(m) + "-" + pad2(j);
+  const prelevement = lireDate(premier(T, /pr[ée]l[èe]vement automatique sur votre compte bancaire [àa] partir du (\d{2}\/\d{2}\/\d{4})/i)) || null;
+  const numero = premier(T, /x{4}-x{6}-(\d{4,6})/i);
+  const operations = []; let derniere = null, attendLibelle = false, titulaire = "";
+  const reLigne = /^(\d{1,2}) ([a-zéûô]+)\.? (\d{1,2}) ([a-zéûô]+)\.?(?: (.*))?$/i;
+  for (const brut of T.split(/\n/)){
+    const l = brut.trim();
+    const pour = l.match(/^Op[ée]rations pour (.+)$/i); if (pour){ titulaire = pour[1].trim(); attendLibelle = false; continue; }
+    if (/^Autres transactions/i.test(l)){ titulaire = ""; attendLibelle = false; continue; }
+    if (l === "CR"){ if (derniere && derniere.montant < 0) derniere.montant = -derniere.montant; continue; }
+    const m = l.match(reLigne);
+    const reste = m ? (m[5] || "").trim() : "", cr = / ?\bCR$/.test(reste), sansCr = reste.replace(/ ?\bCR$/, "");
+    const mm = m ? sansCr.match(/(?:^| )(\d{1,3}(?: \d{3})*,\d{2})$/) : null;
+    if (m && moisAmex(m[2]) && moisAmex(m[4]) && mm){
+      derniere = {date: dateDe(+m[1], moisAmex(m[2])), dateEnregistrement: dateDe(+m[3], moisAmex(m[4])), libelle: sansCr.slice(0, mm.index).trim(), montant: -lireMontant(mm[1]), detail: titulaire};
+      if (cr) derniere.montant = -derniere.montant;
+      operations.push(derniere); attendLibelle = !derniere.libelle; continue;
+    }
+    if (attendLibelle && derniere && l && !/^(Total|Carte |Num[ée]ro|Nom |Date de)/i.test(l)){ derniere.libelle = l; attendLibelle = false; }
+  }
+  if (!operations.length) return null;
+  const [soldeDebut, credits, debits, soldeFin] = tete.slice(1, 5).map(lireMontant);
+  const sd = somme(operations.filter(o => o.montant < 0), o => -versCentimes(o.montant)), sc = somme(operations.filter(o => o.montant > 0), o => versCentimes(o.montant));
+  const ok = sd === versCentimes(debits) && sc === versCentimes(credits) && versCentimes(soldeDebut) - versCentimes(credits) + versCentimes(debits) === versCentimes(soldeFin);
+  for (const o of operations) o.montant = Math.round(o.montant * 100) / 100;
+  return {numero, periode: {debut, fin}, prelevement, soldeDebut, soldeFin, credits, debits, operations,
+    controle: {ok, texte: "relevé Amex : " + operations.length + " écriture(s)" + (ok ? ", débits, crédits et soldes cohérents au centime"
+      : ", écart : débits " + euros(sd / 100) + " pour " + euros(debits) + ", crédits " + euros(sc / 100) + " pour " + euros(credits))}};
+}
+
 /* Relevé annuel d'un livret (période de février à janvier) : solde au 31/12 compris dans la période, tiré des
    écritures (ancien solde + écritures jusqu'au 31/12). Sert de valeur de fin d'année pour la comparaison du patrimoine. */
 function soldesFinAnnee(texte){
@@ -2210,6 +2257,10 @@ function echeancesAvisImpot(texte, quoi){
 function reconnaitrePdf(nom, texte, octets){
   const T = texte; const N = norm(texte);
   const base = {nom, texte: T, octets};
+  // Relevé mensuel Amex : clôture du mois de la carte, il fait foi (le CSV ne sert qu'au suivi du mois en cours)
+  const amex = extraireReleveAmex(T);
+  if (amex) return Object.assign(base, {genre: "releve_amex", banque: "Amex", releveAmex: amex, numero: amex.numero, periode: amex.periode,
+    titre: "Relevé Amex du " + dateFr(amex.periode.debut) + " au " + dateFr(amex.periode.fin)});
   // Relevé de compte LCL : on n'en garde que le détail des cartes (le compte vient des exports CSV)
   const cartesPdf = extraireCartesReleveLcl(T);
   // Relevé mensuel complet (écritures du compte + détail des cartes) : clôture du mois, il fait foi
@@ -2571,6 +2622,63 @@ function appliquerClotureLcl(prep){
     conforme: prep.controles.every(c => c.ok) || (ajoutees === prep.manquants.length && supprimees === prep.enTrop.length + prep.enTropCartes.length)};
   modifierParametres({clotures});
   return {ajoutees, supprimees, cartes};
+}
+/* ---------- Clôture du mois de la carte Amex sur son relevé PDF ----------
+   Chaque écriture du relevé cherche sur le compte Amex une opération de même montant à 3 jours près (une opération
+   déjà rattachée à un autre relevé Amex est hors jeu). Manquantes : à ajouter (cochées d'office). En trop : opérations
+   de la période absentes du relevé, à décider. À l'enregistrement, les achats du relevé reçoivent la date du
+   prélèvement annoncé (fin de l'encours estimé) et la marque du relevé. Contrôle : l'encours de la carte à la fin
+   de la période, après clôture, égal au nouveau solde du relevé. */
+function compteAmex(){ return vivants("comptes").find(c => c.carte === "AMEX") || null; }
+function preparerClotureAmex(lu){
+  const r = lu.releveAmex, compte = compteAmex();
+  if (!compte) return null;
+  const {debut, fin} = r.periode;
+  const d0 = r.operations.map(o => o.date).sort()[0] < debut ? r.operations.map(o => o.date).sort()[0] : debut;
+  const libre = o => !o.releveAmex || o.releveAmex === fin;
+  const ops = vivants("operations").filter(o => o.compte === compte.id && libre(o) && o.date >= ajouterJours(d0, -3) && o.date <= ajouterJours(fin, 3));
+  const a = apparier(r.operations, ops, 3);
+  // Paires retrouvées (pour poser la date de débit) : les opérations appariées sont celles qui ne restent pas en trop
+  const enTropTous = new Set(a.enTrop.map(o => o.id));
+  const apparies = ops.filter(o => !enTropTous.has(o.id));
+  const enTrop = a.enTrop.filter(o => o.date >= debut && o.date <= fin);
+  const emp = empreintes(compte.id, a.manquants);
+  const manquants = a.manquants.map((l, i) => Object.assign({}, l, {empreinte: "pdf|" + emp[i], proposition: proposerClassement({libelle: l.libelle, montant: l.montant, date: l.date, compte: compte.id})}));
+  // Encours après clôture : achats et remboursements jusqu'à la fin, non débités à cette date, hors paiements reçus
+  const paiement = o => o.montant > 0 && (o.lien || /PRELEVEMENT AUTOMATIQUE|PAIEMENT RE[CÇ]U/i.test(o.libelle || ""));
+  const appIds = new Set(apparies.map(o => o.id));
+  const autres = vivants("operations").filter(o => o.compte === compte.id && !appIds.has(o.id) && o.date <= fin && !paiement(o) && (!o.dateDebit || o.dateDebit > fin));
+  const encours = somme(r.operations.filter(o => !paiement(o)), o => o.montant) + somme(autres, o => o.montant);
+  const ecart = Math.round((-r.soldeFin - encours) * 100) / 100;
+  const controles = [r.controle,
+    {ok: !manquants.length && !enTrop.length, texte: "carte : " + a.conformes + " écriture(s) conforme(s)" + (manquants.length ? ", " + manquants.length + " manquante(s)" : "") + (enTrop.length ? ", " + enTrop.length + " en trop dans l'application" : "")},
+    {ok: Math.abs(ecart) < 0.01, texte: Math.abs(ecart) < 0.01 ? "encours au " + dateFr(fin) + " : " + euros(r.soldeFin) + ", identique au nouveau solde"
+      : "encours au " + dateFr(fin) + " : relevé " + euros(r.soldeFin) + ", application " + euros(-encours) + " (après ajouts ; " + autres.length + " achat(s) non débité(s) hors relevé)"},
+    r.prelevement ? {ok: true, texte: "prélèvement de " + euros(r.soldeFin) + " à partir du " + dateFr(r.prelevement)} : null].filter(Boolean);
+  const cleDbl = o => [o.compte, o.date, versCentimes(o.montant), (o.libelle || "").trim().toUpperCase()].join("|");
+  const ids = new Set(enTrop.map(o => o.id)), groupes = regrouper(vivants("operations"), cleDbl), doublonsExacts = new Set();
+  for (const o of enTrop){ const g = groupes.get(cleDbl(o)) || []; if (g.length < 2) continue; const garde = g.find(x => !ids.has(x.id)) || g[0]; if (garde.id !== o.id) doublonsExacts.add(o.id); }
+  return {lu, compte, manquants, enTrop, enTropCartes: [], doublonsExacts, conformes: a.conformes, cartes: null, apparies, controles, nb: manquants.length,
+    choixManquants: new Set(manquants.map((l, i) => i)), choixEnTrop: new Set()};
+}
+function appliquerClotureAmex(prep){
+  const r = prep.lu.releveAmex, compte = prep.compte;
+  const imp = enregistrer("imports", {genre: "releve_amex", banque: "Amex", fichier: prep.lu.nom, compte: compte.id, periode: r.periode, date: new Date().toISOString(),
+    nouvelles: prep.choixManquants.size, deja: prep.conformes});
+  const marquer = o => { if (!(o.montant > 0 && o.lien)) Object.assign(o, {dateDebit: r.prelevement || o.dateDebit || null, debitEstime: false}); o.releveAmex = r.periode.fin; enregistrer("operations", o); };
+  let ajoutees = 0, supprimees = 0;
+  prep.manquants.forEach((l, i) => { if (!prep.choixManquants.has(i)) return; const op = creerOperation(compte, l, imp.id); marquer(op); ajoutees++; });
+  for (const o of prep.apparies) if (obtenir("operations", o.id)) marquer(o);
+  for (const o of prep.enTrop) if (prep.choixEnTrop.has(o.id) && obtenir("operations", o.id)){
+    for (const id of o.justificatifs || []){ const j = obtenir("justificatifs", id); if (j) delier(j); }
+    supprimer("operations", o.id); supprimees++;
+  }
+  const clotures = Object.assign({}, LIVRE.parametres.clotures || {});
+  clotures[compte.id + "|" + r.periode.fin] = {debut: r.periode.debut, fin: r.periode.fin, le: new Date().toISOString(), fichier: prep.lu.nom, ajoutees, supprimees, cartes: 0,
+    conforme: prep.controles.every(c => c.ok) || (ajoutees === prep.manquants.length && supprimees === prep.enTrop.length)};
+  modifierParametres({clotures});
+  apresImport();
+  return {ajoutees, supprimees, cartes: 0};
 }
 function periodesCartes(){
   return vivants("imports").filter(i => i.genre === "carte" && i.banque === "LCL").map(i => i.periode);
@@ -5721,7 +5829,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
     gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
-        corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), releve_lcl: "Relevé LCL (PDF, fait foi)", cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+        corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), releve_lcl: "Relevé LCL (PDF, fait foi)", releve_amex: "Relevé Amex (PDF, fait foi)", cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
         document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : lu.sousGenre === "achat_sncf" ? "Justificatif SNCF Connect · " + lu.titre : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nb != null ? p.nb : p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
@@ -5745,7 +5853,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
     }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs sans changement de fournisseur ni de catégorie s'appliqueront d'office, les autres seront proposés.")));
     // Aperçu des opérations nouvelles : seulement pour les fichiers qui en proposent un classement (relevés)
     try {
-    const detail = FICHIERS_EN_COURS.find(f => f.statut === "pret" && f.lu.genre !== "releve_lcl" && ((f.prep?.nouvelles?.length && f.prep.nouvelles[0]?.proposition) || f.prep?.cartesSansTitulaire?.length));
+    const detail = FICHIERS_EN_COURS.find(f => f.statut === "pret" && !["releve_lcl", "releve_amex"].includes(f.lu.genre) && ((f.prep?.nouvelles?.length && f.prep.nouvelles[0]?.proposition) || f.prep?.cartesSansTitulaire?.length));
     if (detail){
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Aperçu : " + detail.lu.nom));
       gauche.appendChild(tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Classement proposé"}, {titre: "Lieu"}, {titre: "Origine"}], detail.prep.nouvelles, {classe: "serre", limite: 60, ligne: l =>
@@ -5758,7 +5866,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
         (detail.prep.doublonsLcl ? detail.prep.doublonsLcl + " doublon(s) LCL écarté(s) (règle ⌈n/2⌉). " : "")));
     }
     // Clôture sur le relevé PDF : écarts à trancher avant d'enregistrer
-    for (const f of FICHIERS_EN_COURS.filter(x => x.lu.genre === "releve_lcl" && x.statut === "pret" && x.prep)){
+    for (const f of FICHIERS_EN_COURS.filter(x => ["releve_lcl", "releve_amex"].includes(x.lu.genre) && x.statut === "pret" && x.prep)){
       const p = f.prep, enTrop = [...p.enTrop, ...p.enTropCartes];
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Clôture sur le relevé : " + f.lu.titre));
       if (!p.manquants.length && !enTrop.length && !p.cartes?.nouvelles?.length){ gauche.appendChild(h("p", {class: "note"}, "Tout est conforme au relevé : « Enregistrer » marque le mois comme clôturé.")); continue; }
@@ -5845,10 +5953,11 @@ function preparerFichier(f){
       f.statut = "pret";
     } else if (lu.genre === "reprise_v7"){ f.prep = preparerReprise(lu); f.statut = "pret"; }
     else if (lu.genre === "cartes_lcl"){ f.prep = preparerCartesPdf(lu); f.statut = "pret"; }
-    else if (lu.genre === "releve_lcl"){
+    else if (lu.genre === "releve_lcl" || lu.genre === "releve_amex"){
       // Recalcul (après l'enregistrement d'un autre fichier) : les choix de l'utilisateur sont gardés
       const avant = f.prep;
-      f.prep = preparerClotureLcl(lu); if (f.prep) f.compte = f.prep.compte; f.statut = f.prep ? "pret" : "erreur"; if (!f.prep) f.erreur = "compte LCL introuvable";
+      const amex = lu.genre === "releve_amex";
+      f.prep = amex ? preparerClotureAmex(lu) : preparerClotureLcl(lu); if (f.prep) f.compte = f.prep.compte; f.statut = f.prep ? "pret" : "erreur"; if (!f.prep) f.erreur = amex ? "compte Amex introuvable : créez d'abord la carte Amex (import d'un CSV Amex)" : "compte LCL introuvable";
       if (avant && f.prep){
         const cle = l => l.date + "|" + versCentimes(l.montant) + "|" + l.libelle;
         const refuses = new Set(avant.manquants.filter((l, i) => !avant.choixManquants.has(i)).map(cle));
@@ -5885,6 +5994,8 @@ async function enregistrerFichier(f, enLot){
     if (lu.genre === "compte" || lu.genre === "carte"){ const imp = appliquerReleve(f.prep); f.resultat = imp.nouvelles + " opération(s)"; }
     else if (lu.genre === "facture_cb") appliquerFacture(f.prep);
     else if (lu.genre === "cartes_lcl"){ const n = appliquerCartesPdf(f.prep); f.resultat = n + " opération(s)"; }
+    else if (lu.genre === "releve_amex"){ const r = appliquerClotureAmex(f.prep); f.resultat = r.ajoutees + " ajoutée(s), " + r.supprimees + " supprimée(s)";
+      message("Mois de la carte Amex clôturé sur le relevé : " + r.ajoutees + " écriture(s) ajoutée(s), " + r.supprimees + " ligne(s) en trop supprimée(s)."); }
     else if (lu.genre === "releve_lcl"){ const r = appliquerClotureLcl(f.prep); f.resultat = r.ajoutees + r.cartes + " ajoutée(s), " + r.supprimees + " supprimée(s)";
       message("Mois clôturé sur le relevé : " + r.ajoutees + " écriture(s) et " + r.cartes + " achat(s) carte ajoutés, " + r.supprimees + " ligne(s) en trop supprimée(s)."); }
     else if (lu.genre === "corrections"){
@@ -5990,6 +6101,7 @@ function reglesRangement(){ return LIVRE.parametres.rangement || {}; }
 /* Clé de la règle qui s'applique au fichier : un compte, ou une famille de pièces. */
 function cleRangement(lu, compte){
   // Relevé d'un autre compte LCL que le compte principal (compte personnel…) : sa propre règle, son propre dossier
+  if (lu.genre === "releve_amex") return compte ? "releves_pdf:" + compte.id : null;
   if (lu.genre === "releve_lcl" && compte && compte.id !== compteCourantLcl()?.id) return "releves_pdf:" + compte.id;
   if (lu.genre === "cartes_lcl" || lu.genre === "releve_lcl") return "releves_pdf_lcl";
   if (["compte", "carte", "valorisation"].includes(lu.genre)) return compte ? "compte:" + compte.id : null;
@@ -6024,6 +6136,7 @@ function proposerRangement(lu, compte, index){
   const courant = () => { const c = compteCourantLcl(); return c ? parNumero(c.numero) : null; };
   if (lu.genre === "compte"){ const b = parNumero(compte?.numero); return b ? b + "/Historiques CSV" : (compte ? compte.nom : null); }
   if (lu.genre === "releve_lcl" && compte && compte.id !== compteCourantLcl()?.id){ const b = parNumero(compte.numero); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés PDF" : compte.nom + "/Relevés PDF"); }
+  if (lu.genre === "releve_amex"){ const b = parNom(/^amex$/i) || "Amex"; return enfant(b, /relev[ée]s pdf/i) || b + "/Relevés PDF"; }
   if (lu.genre === "cartes_lcl" || lu.genre === "releve_lcl"){ const b = courant(); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés" : "Relevés PDF LCL"); }
   if (lu.genre === "carte"){
     if (lu.banque === "Amex"){ const b = parNom(/^amex$/i); return (b || "Amex") + "/Relevés"; }
@@ -6217,14 +6330,16 @@ async function rangerFichier(f){
     const pris = new Set();
     for await (const [nom] of d.entries()) pris.add(nom);
     // Même nom déjà rangé : un PDF retéléchargé (quelques octets de différence) dont le texte est identique est le même document
-    const memeNom = await memePdfDejaRange(d, f.source.nom, octets);
+    // Relevé Amex téléchargé sous la seule date (« 2026-11-06.pdf ») : nommé pour être reconnu dans les archives
+    const nomCible = f.lu.genre === "releve_amex" && f.lu.periode ? "Relevé Amex " + f.lu.periode.fin + ".pdf" : f.source.nom;
+    const memeNom = await memePdfDejaRange(d, nomCible, octets);
     if (memeNom){
       await f.source.dossier.removeEntry(f.source.nom);
       if (r.propose) modifierParametres({rangement: Object.assign({}, reglesRangement(), {[r.cle]: r.dossier})});
       f.rangement = {chemin: chemin.join("/") + "/" + memeNom, identique: true};
       return;
     }
-    const final = nomLibre(f.source.nom, pris);
+    const final = nomLibre(nomCible, pris);
     const fh = await d.getFileHandle(final, {create: true});
     const w = await fh.createWritable(); await w.write(octets); await w.close();
     const relu = new Uint8Array(await (await fh.getFile()).arrayBuffer());
@@ -8594,6 +8709,37 @@ async function autotest(){
         for (const s of vivants("soldes").filter(s => s.source === "essai.pdf")) supprimer("soldes", s.id);
         for (const i of vivants("imports").filter(i => i.fichier === "essai.pdf")) supprimer("imports", i.id);
         const cl = Object.assign({}, LIVRE.parametres.clotures); delete cl[cj.id + "|2027-05-07"]; modifierParametres({clotures: cl});
+      }
+      {
+        // Relevé PDF Amex : en-tête des soldes, période, prélèvement, libellé sur la ligne suivante, « CR » de crédit
+        const rel = ["American Express Relevé de compte", "Nom Numéro de Compte Date de relevé Prochain relevé", "TITULAIRE ESSAI xxxx-xxxxxx-99001 06/01/28 06/02/28",
+          "Solde Précédent Nouveau Crédit Nouveau Débit Nouveau Solde Montant Dû en Euros", "100,00 - 105,00 + 1 230,50 = 1 225,50 1 225,50",
+          "Le relevé du 7 décembre au 6 janvier 2028 comprend tous les frais et paiements reçus au 6 janvier 2028.",
+          "Le règlement de votre relevé est prévu par prélèvement automatique sur votre compte bancaire à partir du 10/01/2028.",
+          "12 déc 12 déc PRELEVEMENT AUTOMATIQUE ENREGISTRE-MERCI 100,00", "CR", "Opérations pour TITULAIRE ESSAI", "Carte xxxx-xxxxxx-99001",
+          "6 déc 6 déc EPICERIE ESSAI VILLEESSAI 30,50", "20 déc 21 déc 1 200,00", "MAGASIN ESSAI VILLEESSAI", "2 janv 2 janv 5,00", "LIBRAIRIE ESSAI", "CR",
+          "Total des dépenses pour TITULAIRE ESSAI 1 225,50"].join(String.fromCharCode(10));
+        const ra = extraireReleveAmex(rel);
+        v("relevé Amex : écritures, sens, années, libellé suivant, soldes cohérents", [ra.operations.map(o => o.date + " " + o.montant + " " + o.libelle).join(" | "), ra.periode.debut, ra.periode.fin, ra.prelevement, ra.soldeFin, ra.controle.ok, ra.numero],
+          ["2027-12-12 100 PRELEVEMENT AUTOMATIQUE ENREGISTRE-MERCI | 2027-12-06 -30.5 EPICERIE ESSAI VILLEESSAI | 2027-12-20 -1200 MAGASIN ESSAI VILLEESSAI | 2028-01-02 5 LIBRAIRIE ESSAI", "2027-12-07", "2028-01-06", "2028-01-10", 1225.5, true, "99001"]);
+        const amexAvant = compteAmex();
+        const ax = amexAvant || enregistrer("comptes", {nom: "Amex essai", type: "carte", banque: "Amex", carte: "AMEX", compteDebit: cj.id, actif: true});
+        const a1 = enregistrer("operations", {compte: ax.id, date: "2027-12-07", montant: -30.5, libelle: "EPICERIE ESSAI"});
+        const a2 = enregistrer("operations", {compte: ax.id, date: "2027-12-22", montant: -9.99, libelle: "EN TROP ESSAI"});
+        const pa = preparerClotureAmex({nom: "amex-essai.pdf", genre: "releve_amex", releveAmex: ra, periode: ra.periode});
+        v("clôture Amex : conforme à 3 jours, manquants proposés, en trop signalé, encours comparé", [pa.conformes, pa.manquants.map(l => l.montant).join(","), pa.enTrop.map(o => o.id), pa.controles.map(c => c.ok).join(",")],
+          [1, "100,-1200,5", [a2.id], "true,false,false,true"]);
+        const rx = appliquerClotureAmex(pa);
+        const mag = vivants("operations").find(o => o.compte === ax.id && o.libelle === "MAGASIN ESSAI VILLEESSAI");
+        v("clôture Amex appliquée : ajouts datés du prélèvement, apparié marqué, en trop gardé, clôture notée",
+          [rx.ajoutees, rx.supprimees, mag?.dateDebit, obtenir("operations", a1.id).dateDebit, obtenir("operations", a1.id).releveAmex, !!obtenir("operations", a2.id), !!(LIVRE.parametres.clotures || {})[ax.id + "|2028-01-06"]],
+          [3, 0, "2028-01-10", "2028-01-10", "2028-01-06", true, true]);
+        const pa2 = preparerClotureAmex({nom: "amex-essai.pdf", genre: "releve_amex", releveAmex: ra, periode: ra.periode});
+        v("clôture Amex refaite : tout conforme sauf la ligne en trop", [pa2.conformes, pa2.manquants.length, pa2.enTrop.length], [4, 0, 1]);
+        for (const o of vivants("operations").filter(o => o.compte === ax.id && o.date >= "2027-12-01" && o.date <= "2028-01-10")) supprimer("operations", o.id);
+        for (const i of vivants("imports").filter(i => i.fichier === "amex-essai.pdf")) supprimer("imports", i.id);
+        const cl = Object.assign({}, LIVRE.parametres.clotures); delete cl[ax.id + "|2028-01-06"]; modifierParametres({clotures: cl});
+        if (!amexAvant) supprimer("comptes", ax.id);
       }
       {
         // Chèque importé sans son numéro (colonne à part de l'export LCL) : rapproché au montant ; avec numéro, il doit correspondre
