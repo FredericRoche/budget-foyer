@@ -75,6 +75,13 @@ function montantsDe(ligne){
   if (!r.length) for (const m of ligne.matchAll(RE_MONTANT_ENTIER)) r.push(parseFloat(m[1].replace(/[ .\u00a0\u202f]/g, "")));
   return r;
 }
+/* Montant lu avec des lettres pour des chiffres (« Z0.40 », « 1O,5O ») : dans un groupe « x,yy » qui porte au moins
+   un chiffre, O/Q → 0, Z → 2, S → 5, I/l/| → 1, B → 8. Le reste de la ligne n'est pas touché. */
+function reparerMontantsOcr(l){
+  const carte = {O: "0", o: "0", Q: "0", Z: "2", z: "2", S: "5", s: "5", I: "1", l: "1", "|": "1", B: "8"};
+  return String(l).replace(/(^|[\s:=\-])([0-9OoQZzSsIl|B]{1,6})([,.])([0-9OoQZzSsIl|B]{2})(?!\d)/g,
+    (t, avant, e, sep, c) => /\d/.test(e + c) && /\d/.test(e.slice(-1) + c) ? avant + e.replace(/[^\d]/g, x => carte[x] || x) + sep + c.replace(/[^\d]/g, x => carte[x] || x) : t);
+}
 function extraireTicket(texte){
   const lignes = texte.split(/\r?\n/).map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean);
   const N = lignes.map(l => norm(l).toUpperCase());
@@ -87,16 +94,38 @@ function extraireTicket(texte){
   const noteFrais = N.some(l => /NOTE DE FRAIS|NOTES DE FRAIS|NOTE DE DEPENSES|EXPENSE REPORT|EXPENSE CLAIM|^NDF ?# ?\d/.test(l));
   res.type = noteFrais ? "notefrais" : facture ? "facture" : facturette ? "facturette" : "ticket";
 
-  /* Montant : ligne « TOTAL / À PAYER / NET / MONTANT », sinon le plus grand montant */
+  /* Montant. Mesuré le 07/11/2026 sur 67 pièces réelles : les erreurs venaient de « 20,60 EUR » délaissé pour
+     un montant d'article, de « Total: 104 44 » (virgule non lue), de « Total Avantages » ou « Total TTC (tva incl.) »
+     mal triés, de « Z0.40 » (2 lu Z). Ordre : facturette (montant suivi de « EUR ») ; ligne de total ; total HT + TVA
+     s'il contredit le total lu ; sinon le plus grand montant (à vérifier). */
+  const L = lignes.map(reparerMontantsOcr);
   const motsTotal = /(TOTAL TTC|NET A PAYER|A PAYER|TOTAL|MONTANT( TTC)?|SOMME|TTC|PAYE|CB )/;
+  const horsTotal = l => /SOUS.?TOTAL|RENDU|REMISE|ECONOMIE|AVANTAGE|FIDELITE|POINTS|ELIGIBLE/.test(l)
+    || (/TVA|\bHT\b/.test(l) && !/TVA INCL/.test(l));
+  // Montant d'une ligne de total : avec centimes, ou « 104 44 » (virgule perdue) en fin de ligne
+  const montantsTotal = s => { const m = montantsDe(s); if (m.length) return m; const x = s.match(/(\d{1,5}) (\d{2})\s*[€E]?\s*$/); return x ? [+(x[1] + "." + x[2])] : []; };
   let candidat = null;
-  N.forEach((l, i) => {
-    if (!motsTotal.test(l) || /SOUS.?TOTAL|TVA|HT\b|RENDU|REMISE|ECONOMIE/.test(l)) return;
-    const m = montantsDe(lignes[i]).concat(i + 1 < lignes.length && !montantsDe(lignes[i]).length ? montantsDe(lignes[i + 1]) : []);
-    if (m.length){ const v = Math.max(...m); if (!candidat || /TOTAL TTC|NET A PAYER|A PAYER/.test(l) || v > candidat) candidat = v; }
+  // Facturette (ou ticket qui en porte une : « AUTO : », « SANS CONTACT ») : le montant payé est imprimé « 12,10 EUR »
+  if (res.type === "facturette" || N.some(l => /AUTO ?:|SANS CONTACT|CARTE BANCAIRE/.test(l))){
+    for (const l of L){ const m = l.match(/(\d{1,5})[,.](\d{2})\s*EUR\b/i); if (m){ candidat = +(m[1] + "." + m[2]); break; } }
+  }
+  if (candidat === null) N.forEach((l, i) => {
+    if (!motsTotal.test(l) || horsTotal(l)) return;
+    const m = montantsTotal(L[i]).concat(i + 1 < L.length && !montantsTotal(L[i]).length ? montantsDe(L[i + 1]) : []);
+    if (m.length){ const v = Math.max(...m); if (candidat === null || /TOTAL TTC|NET A PAYER|A PAYER/.test(l) || v > candidat) candidat = v; }
   });
+  // Total HT + TVA : si la somme figure ailleurs sur la pièce et contredit le total lu, elle l'emporte (36,60 lu pour 36,00)
+  const ht = N.findIndex(l => /TOTAL HT|MONTANT HT/.test(l)), tva = N.findIndex(l => /TOTAL TVA|MONTANT TVA/.test(l));
+  if (ht >= 0 && tva >= 0){
+    const [a] = montantsDe(L[ht]), [b] = montantsDe(L[tva]);
+    if (a > 0 && b >= 0){
+      const s = Math.round((a + b) * 100) / 100;
+      if (candidat !== null && versCentimes(s) !== versCentimes(candidat) && L.some(l => montantsDe(l).some(v => versCentimes(v) === versCentimes(s)))) candidat = s;
+    }
+  }
+  if (candidat !== null && candidat >= 100000) candidat = null;
   if (candidat !== null){ res.montant = candidat; res.confiance.montant = "sûr"; }
-  else { const tous = lignes.flatMap(montantsDe).filter(v => v < 100000); if (tous.length){ res.montant = Math.max(...tous); res.confiance.montant = "à vérifier"; } }
+  else { const tous = L.flatMap(montantsDe).filter(v => v < 100000); if (tous.length){ res.montant = Math.max(...tous); res.confiance.montant = "à vérifier"; } }
 
   /* Numéro de facture : « Facture n° X », « N°D26-011 », ou le n° posé sur la ligne suivante (les dates en sont retirées) */
   res.numero = numeroFacture(lignes);
@@ -173,24 +202,73 @@ const motsNom = s => [...new Set(norm(s || "").toLowerCase().split(/[^a-z0-9]+/)
    ils ne prouvent rien (le 04/11, un alias fait de lieux avait fait prendre des factures d'hébergeur pour la charcuterie). */
 const MOTS_LIEUX = new Set(["paris", "lyon", "valence", "saint", "sainte", "germain", "boulevard", "avenue", "place", "route",
   "chemin", "quai", "allee", "impasse", "centre", "ville", "gare", "marche"]);
-function commercantDansTexte(texte, fiches){
-  const mots = new Set(motsNom(texte)); let meilleur = null, score = 0;
-  for (const f of fiches){
-    if (["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne"].includes(f.categorie)) continue;
-    for (const nom of [f.nom, ...(f.alias || [])]){
-      const m = motsNom(nom);
-      if (m.length >= 2 && m.some(w => !MOTS_LIEUX.has(w)) && m.every(w => mots.has(w)) && m.length > score){ meilleur = f; score = m.length; }
-    }
+/* Lecture tolérante (mesurée le 07/11/2026 : « LA SAVOURFINE », « BOUCHERITE JLM », « SOUCHERTE PARISIENNE ») :
+   un mot de 5 lettres et plus est retrouvé à une lettre près (deux à partir de 8 lettres) ; les mots courts
+   (« JLM », « BHV ») doivent être exacts. */
+const MOTS_OUTILS_NOM = new Set(["les", "des", "une", "sur", "par", "aux", "rue", "pour", "avec", "the", "and", "ste", "cie", "dit"]);
+const motsFiche = s => [...new Set(norm(s || "").toLowerCase().replace(/['’]/g, " ").split(/[^a-z0-9]+/)
+  .filter(w => w.length >= 3 && !/^\d+$/.test(w) && !MOTS_OUTILS_NOM.has(w) && !MOTS_GENERIQUES.has(w)))];
+// Noms de métier : jamais distinctifs seuls, même portés par une seule fiche (« BOUCHERIE » ne désigne pas une boucherie précise)
+const METIERS = new Set(["boucherie", "boulangerie", "patisserie", "pharmacie", "fromagerie", "poissonnerie", "epicerie", "primeurs",
+  "librairie", "pressing", "garage", "station", "restaurant", "brasserie", "traiteur", "charcuterie", "caviste", "superette",
+  "supermarche", "magasin", "bijouterie", "fleuriste", "opticien", "tabac", "presse", "parfumerie", "quincaillerie", "droguerie",
+  "pizzeria", "boutique", "marche", "cordonnerie", "coiffure", "coiffeur", "cafe", "hotel", "bazar"]);
+function distanceAuPlus(a, b, max){
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prec = Array.from({length: b.length + 1}, (_, j) => j);
+  for (let i = 1; i <= a.length; i++){
+    const cur = [i]; let mini = i;
+    for (let j = 1; j <= b.length; j++){ cur[j] = Math.min(prec[j] + 1, cur[j - 1] + 1, prec[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); if (cur[j] < mini) mini = cur[j]; }
+    if (mini > max) return false;
+    prec = cur;
   }
-  return meilleur;
+  return prec[b.length] <= max;
+}
+function commercantDansTexte(texte, fiches){
+  const brut = norm(texte || "").toLowerCase().replace(/['’]/g, " ").split(/[^a-z0-9]+/).filter(w => w.length >= 3);
+  const exacts = new Set(brut), longs = [...exacts].filter(w => w.length >= 4);
+  const memo = new Map();
+  const present = w => {
+    if (memo.has(w)) return memo.get(w);
+    const r = exacts.has(w) || (w.length >= 5 && longs.some(t => distanceAuPlus(w, t, w.length >= 8 ? 2 : 1)));
+    memo.set(w, r); return r;
+  };
+  const retenues = fiches.filter(f => !["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne"].includes(f.categorie));
+  // Mot distinctif : propre à une seule fiche, 6 lettres et plus, pas un lieu ; il suffit seul à désigner la fiche
+  const freq = new Map();
+  for (const f of retenues) for (const w of new Set([f.nom, ...(f.alias || [])].flatMap(motsFiche))) freq.set(w, (freq.get(w) || 0) + 1);
+  let meilleur = null, score = 0, egalite = false;
+  for (const f of retenues){
+    let s = 0;
+    for (const nom of [f.nom, ...(f.alias || [])]){
+      const m = motsFiche(nom), utiles = m.filter(w => !MOTS_LIEUX.has(w));
+      if (m.length >= 2 && utiles.length && m.every(present)) s = Math.max(s, somme(utiles, w => w.length) + 1);
+      // Seul, un mot n'est admis à une lettre près qu'à partir de 7 lettres (« TENANT » lu ne désigne pas « Tenart »)
+      for (const w of utiles) if (w.length >= 6 && freq.get(w) === 1 && !METIERS.has(w) && (w.length >= 7 ? present(w) : exacts.has(w))) s = Math.max(s, w.length);
+    }
+    if (!s) continue;
+    if (s > score){ meilleur = f; score = s; egalite = false; } else if (s === score && meilleur !== f) egalite = true;
+  }
+  return egalite ? null : meilleur;
+}
+/* Alias et nom lu : égaux, ou l'un commence l'autre, les deux d'au moins 6 caractères (un nom de ville lu seul
+   faisait prendre le bureau de poste pour l'alias « VILLE… » d'un autre commerce). */
+const aliasCorrespond = (a, k) => a === k || (a.length >= 6 && k.length >= 6 && (k.startsWith(a) || a.startsWith(k)));
+/* Alias faible : un seul mot court qui figure dans le nom de plusieurs fiches (le nom de la ville, appris comme alias
+   d'un supermarché, désignait toute pièce où il était lu seul) ou un nom de lieu. Il ne sert pas à reconnaître. */
+function aliasFaibles(fiches){
+  const n = new Map();
+  for (const f of fiches) for (const w of motsFiche(f.nom)) n.set(w, (n.get(w) || 0) + 1);
+  return a => { const w = norm(a).toLowerCase(); return !/\s/.test(w) && w.length < 8 && ((n.get(w) || 0) >= 2 || MOTS_LIEUX.has(w)); };
 }
 /* Reconnaissance sûre : alias (raison sociale, enseigne) ou SIRET. Le reste n'est qu'une supposition, à faire confirmer. */
 function commercantSur(t, liste){
   const fiches = liste || vivants("commercants");
   const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
+  const faible = aliasFaibles(fiches);
   for (const f of fiches){
     if (t.siret && f.siret === t.siret) return f;
-    for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
+    for (const a of f.alias || []) if (!faible(a)) for (const k of cles) if (aliasCorrespond(a, k)) return f;
   }
   return null;
 }
@@ -198,18 +276,22 @@ function commercantSur(t, liste){
 function commercantPourTicket(t, liste){
   const fiches = liste || vivants("commercants");
   const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
+  const faible = aliasFaibles(fiches);
   for (const f of fiches){
     if (t.siret && f.siret === t.siret) return f;
-    for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
+    for (const a of f.alias || []) if (!faible(a)) for (const k of cles) if (aliasCorrespond(a, k)) return f;
   }
   if (!t.texte) return null;
   const parTexte = commercantDansTexte(t.texte, fiches);
   // Émetteur lisible sur la pièce et inconnu des fiches : une fiche trouvée ailleurs dans le texte n'est retenue que si
   // l'un de ses mots figure dans ce nom (sinon, nouveau fournisseur à ce nom plutôt qu'un rapprochement de hasard)
+  // Seulement pour une facture ou un devis (l'adresse du client y figure) ; sur un ticket, l'émetteur lu est trop souvent
+  // une ligne mal lue (« CARTE BANCaIkE ») pour écarter une fiche nommée dans le texte. Comparaison tolérante.
   const emetteur = [t.raisonSociale, t.enseigne].filter(s => s && nomPlausible(s)).join(" ");
-  if (parTexte && emetteur){
-    const motsEmetteur = new Set(motsNom(emetteur));
-    if (![parTexte.nom, ...(parTexte.alias || [])].some(n => motsNom(n).some(w => !MOTS_LIEUX.has(w) && motsEmetteur.has(w)))) return null;
+  if (parTexte && emetteur && !["ticket", "facturette"].includes(t.type)){
+    const motsEmetteur = norm(emetteur).toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3);
+    const dans = w => motsEmetteur.some(e => e === w || (w.length >= 5 && distanceAuPlus(w, e, w.length >= 8 ? 2 : 1)));
+    if (![parTexte.nom, ...(parTexte.alias || [])].some(n => motsFiche(n).some(w => !MOTS_LIEUX.has(w) && dans(w)))) return null;
   }
   return parTexte;
 }

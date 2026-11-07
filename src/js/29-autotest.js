@@ -156,6 +156,25 @@ async function autotest(){
         supprimer("commercants", fc.id);
       }
       {
+        // Lecture des tickets (cas mesurés le 07/11/2026 sur des pièces réelles, reproduits avec des noms fictifs)
+        const nl = String.fromCharCode(10), lire = (...l) => extraireTicket(l.join(nl)).montant;
+        v("lecture : facturette, montant « EUR » plutôt qu'un article en € ou un reçu mal lu",
+          lire("CARTE BANCAIRE", "SANS CONTACT", "LE 07/11/26 A 10:37:34", "EPICERIE ESSAI", "2,95 € ART", "MONTANT", "20,60 EUR", "TOTAL RECU:260,60", "TICKET CLIENT"), 20.6);
+        v("lecture : « Total: 104 44 » (virgule perdue)", lire("POISSONNERIE ESSAI", "SAUMON 0,330 kg 29,63 €", "Articles: 5 Total: 104 44"), 104.44);
+        v("lecture : « Total Avantages » écarté", lire("LIBRAIRIE ESSAI", "REMISE ADHERENT 1,05€", "Total Avantages 4,64€", "TOTAL 154.13€", "8 Article(s)"), 154.13);
+        v("lecture : « Total TTC (tva incl.) » retenu, en-tête de TVA écarté", [lire("PRESSING ESSAI", "1,00 NETTOYAGE MANTEAU 18,00", "Total TTC (tva incl.) 18.00", "Mont total HT : 15.00"),
+          lire("CAVE ESSAI", "Total TTC : 142.00€", "Total TVA : 23.67€", "Tx TVA HT TTC TVA", "(1) 20.008 118.33 142.00 23.67")], [18, 142]);
+        v("lecture : total HT + TVA l'emporte sur un total mal lu présent ailleurs", lire("CAVE ESSAI", "Total TTC - 36.60€", "Total HT : 30.00€", "Total TVA : 6.00€", "CB 36.00€"), 36);
+        v("lecture : lettres prises pour des chiffres (« Z0.40 »)", [lire("SUPERETTE ESSAI", "- A PAYER - Z0.40EU1"), reparerMontantsOcr("TOTAL 1O,5O")], [20.4, "TOTAL 10,50"]);
+        const fx = [{id: "a", nom: "La Mirandelle Essai", alias: ["LA MIRANDELLE ESSAI"], categorie: ""}, {id: "b", nom: "Boucherie Valmont Essai", alias: ["BOUCHERIE VALMONT"], categorie: ""},
+          {id: "c", nom: "Magasin Essai Villeessai", alias: ["VILLEESSAI"], categorie: ""}, {id: "d", nom: "Cave Essai Villeessai", alias: [], categorie: ""}, {id: "e", nom: "Tenard", alias: [], categorie: ""}];
+        const quel = (t, type) => commercantPourTicket(Object.assign(extraireTicket(t), type ? {type} : {}), fx)?.id || null;
+        v("fournisseur : nom lu à une ou deux lettres près", [quel(["LA MIRANDFLLE", "12 RUE ESSAI", "TOTAL 12,00"].join(nl)), quel(["BOUCHERTE VALMONT", "TOTAL 9,00"].join(nl))], ["a", "b"]);
+        const fv = [{id: "p", nom: "Magasin Essai Valdor", alias: ["VALDOR", "MAGASIN ESSAI VALDOR"], categorie: ""}, {id: "q", nom: "Cave Essai Valdor", alias: [], categorie: ""}];
+        v("fournisseur : alias réduit à un lieu commun à plusieurs fiches ignoré", [commercantSur({raisonSociale: "VALDOR", enseigne: "VALDOR"}, fv), commercantSur({raisonSociale: "MAGASIN ESSAI VALDOR"}, fv)?.id], [null, "p"]);
+        v("fournisseur : un mot courant de 6 lettres ne désigne pas une fiche à une lettre près", quel(["BOUCHERIE ESSAI", "7 ALLEE TENANT", "TOTAL 23,00"].join(nl)), null);
+      }
+      {
         const nb0 = vivants("commercants").length;
         const jm = await creerJustificatif({type: "ticket", date: "2027-03-10", montant: 12, commercantNom: "Boulangrie Nouvele", origine: "mobile"});
         v("téléphone : fournisseur inconnu laissé provisoire, aucune fiche créée", [vivants("commercants").length - nb0, jm.fournisseurProvisoire], [0, true]);
