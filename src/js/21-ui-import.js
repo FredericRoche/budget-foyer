@@ -61,6 +61,13 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
     // Clôture sur le relevé PDF : écarts à trancher avant d'enregistrer
     for (const f of FICHIERS_EN_COURS.filter(x => ["releve_lcl", "releve_amex"].includes(x.lu.genre) && x.statut === "pret" && x.prep)){
       const p = f.prep, enTrop = [...p.enTrop, ...p.enTropCartes];
+      // Ligne en trop expliquée : présente sur un autre relevé déposé (achat de fin de période), ou même montant qu'une
+      // ligne appariée du relevé à 3 jours près (doublon probable, libellé différent : CSV et reprise)
+      const autresReleves = FICHIERS_EN_COURS.filter(x => x !== f && x.lu.genre === f.lu.genre && (x.lu.releveAmex || x.lu.releveCompte));
+      const surAutre = o => autresReleves.find(x => (x.lu.releveAmex || x.lu.releveCompte).operations.some(l => versCentimes(l.montant) === versCentimes(o.montant) && Math.abs(ecartJours(l.date, o.date)) <= 3));
+      const jumeau = o => (p.apparies || []).find(a => a.id !== o.id && a.compte === o.compte && versCentimes(a.montant) === versCentimes(o.montant) && Math.abs(ecartJours(a.date, o.date)) <= 3);
+      const explication = o => { const x = surAutre(o); if (x) return "sur le relevé suivant (" + x.lu.nom + ") : à garder";
+        const j = !p.doublonsExacts?.has(o.id) && jumeau(o); return j ? "doublon probable de « " + (j.libelle || "") + " » du " + dateFr(j.date) : null; };
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Clôture sur le relevé : " + f.lu.titre));
       if (p.anciens?.length) gauche.append(h("p", null, h("label", null, h("input", {type: "checkbox", checked: p.choixAnciens, onchange: e => { p.choixAnciens = e.target.checked; }}),
         " Marquer comme réglés les " + p.anciens.length + " achat(s) Amex antérieurs au " + dateFr(p.lu.periode.debut) + " restés sans date de débit (" + euros(-somme(p.anciens, o => o.montant)) + ")"),
@@ -79,7 +86,7 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
             " ", h("span", {class: "discret"}, "(même compte, jour, montant et libellé qu'une ligne conservée ; l'original reste)")] : null),
         tableau([{titre: "Supprimer"}, {titre: "Date"}, {titre: "Compte"}, {titre: "Libellé"}, {titre: "Montant", num: true}], enTrop, {classe: "serre", ligne: o => h("tr", null,
           h("td", null, h("input", {type: "checkbox", checked: p.choixEnTrop.has(o.id), onchange: e => { e.target.checked ? p.choixEnTrop.add(o.id) : p.choixEnTrop.delete(o.id); }})),
-          h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, p.doublonsExacts?.has(o.id) ? h("span", {class: "libbanque"}, "doublon exact") : null, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
+          h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, p.doublonsExacts?.has(o.id) ? h("span", {class: "libbanque"}, "doublon exact") : null, explication(o) ? h("span", {class: "libbanque"}, explication(o)) : null, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
     }
     } catch (e){ console.error(e); gauche.appendChild(h("p", {class: "neg"}, "Aperçu impossible à afficher : " + e.message + " (le fichier peut quand même être enregistré ; signalez ce message).")); }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));
