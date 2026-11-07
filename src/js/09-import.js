@@ -283,17 +283,26 @@ function preparerClotureAmex(lu){
   const paiement = o => o.montant > 0 && (o.lien || /PRELEVEMENT AUTOMATIQUE|PAIEMENT RE[CÇ]U/i.test(o.libelle || ""));
   const appIds = new Set(apparies.map(o => o.id));
   const autres = vivants("operations").filter(o => o.compte === compte.id && !appIds.has(o.id) && o.date <= fin && !paiement(o) && (!o.dateDebit || o.dateDebit > fin));
-  const encours = somme(r.operations.filter(o => !paiement(o)), o => o.montant) + somme(autres, o => o.montant);
+  // Achats antérieurs au relevé restés sans date de débit : si le relevé constate le paiement du solde précédent,
+  // ils ont été réglés par les relevés précédents (proposé, coché d'office, appliqué à l'enregistrement).
+  const paie = r.operations.find(o => o.montant > 0 && /PRELEVEMENT AUTOMATIQUE|PAIEMENT RE[CÇ]U/i.test(o.libelle || ""));
+  const soldePaye = !!paie && versCentimes(paie.montant) === versCentimes(r.soldeDebut);
+  const anteriors = autres.filter(o => o.date < debut);
+  const anciens = soldePaye ? anteriors : [];
+  const encours = somme(r.operations.filter(o => !paiement(o)), o => o.montant) + somme(autres, o => o.montant) - somme(anciens, o => o.montant);
   const ecart = Math.round((-r.soldeFin - encours) * 100) / 100;
+  const horsReleve = autres.length - anciens.length;
   const controles = [r.controle,
     {ok: !manquants.length && !enTrop.length, texte: "carte : " + a.conformes + " écriture(s) conforme(s)" + (manquants.length ? ", " + manquants.length + " manquante(s)" : "") + (enTrop.length ? ", " + enTrop.length + " en trop dans l'application" : "")},
-    {ok: Math.abs(ecart) < 0.01, texte: Math.abs(ecart) < 0.01 ? "encours au " + dateFr(fin) + " : " + euros(r.soldeFin) + ", identique au nouveau solde"
-      : "encours au " + dateFr(fin) + " : relevé " + euros(r.soldeFin) + ", application " + euros(-encours) + " (après ajouts ; " + autres.length + " achat(s) non débité(s) hors relevé)"},
+    {ok: Math.abs(ecart) < 0.01, texte: Math.abs(ecart) < 0.01 ? "encours au " + dateFr(fin) + " : " + euros(r.soldeFin) + ", identique au nouveau solde" + (anciens.length ? " (après ajouts et " + anciens.length + " achat(s) antérieur(s) réglés par les relevés précédents)" : "")
+      : "encours au " + dateFr(fin) + " : relevé " + euros(r.soldeFin) + ", application " + euros(-encours) + " (après ajouts" + (anciens.length ? " et " + anciens.length + " achat(s) antérieur(s) réglés" : "") + (horsReleve ? " ; " + horsReleve + " achat(s) non débité(s) hors relevé" : "") + ")"},
+    anteriors.length && !soldePaye ? {ok: false, texte: anteriors.length + " achat(s) antérieur(s) au " + dateFr(debut) + " sans date de débit : le relevé ne montre pas le paiement du solde précédent, ils restent en encours"} : null,
     r.prelevement ? {ok: true, texte: "prélèvement de " + euros(r.soldeFin) + " à partir du " + dateFr(r.prelevement)} : null].filter(Boolean);
   const cleDbl = o => [o.compte, o.date, versCentimes(o.montant), (o.libelle || "").trim().toUpperCase()].join("|");
   const ids = new Set(enTrop.map(o => o.id)), groupes = regrouper(vivants("operations"), cleDbl), doublonsExacts = new Set();
   for (const o of enTrop){ const g = groupes.get(cleDbl(o)) || []; if (g.length < 2) continue; const garde = g.find(x => !ids.has(x.id)) || g[0]; if (garde.id !== o.id) doublonsExacts.add(o.id); }
   return {lu, compte, manquants, enTrop, enTropCartes: [], doublonsExacts, conformes: a.conformes, cartes: null, apparies, controles, nb: manquants.length,
+    anciens, paiementPrecedent: paie ? paie.date : null, choixAnciens: true,
     choixManquants: new Set(manquants.map((l, i) => i)), choixEnTrop: new Set()};
 }
 function appliquerClotureAmex(prep){
@@ -304,6 +313,17 @@ function appliquerClotureAmex(prep){
   let ajoutees = 0, supprimees = 0;
   prep.manquants.forEach((l, i) => { if (!prep.choixManquants.has(i)) return; const op = creerOperation(compte, l, imp.id); marquer(op); ajoutees++; });
   for (const o of prep.apparies) if (obtenir("operations", o.id)) marquer(o);
+  // Achats antérieurs réglés par les relevés précédents : débités au prélèvement Amex du compte de débit qui les suit,
+  // au plus tard au paiement du solde précédent constaté par ce relevé (date estimée)
+  let anciens = 0;
+  if (prep.choixAnciens && prep.paiementPrecedent){
+    const prlvs = vivants("operations").filter(o => o.compte === compte.compteDebit && o.montant < 0 && /AMERICAN EXPRESS/i.test(o.libelle || "")).map(o => o.date).sort();
+    for (const o of prep.anciens || []){
+      const x = obtenir("operations", o.id); if (!x || (x.dateDebit && x.dateDebit <= r.periode.fin)) continue;
+      const d = prlvs.find(p => p >= x.date && p <= prep.paiementPrecedent) || prep.paiementPrecedent;
+      enregistrer("operations", Object.assign(x, {dateDebit: d, debitEstime: true})); anciens++;
+    }
+  }
   for (const o of prep.enTrop) if (prep.choixEnTrop.has(o.id) && obtenir("operations", o.id)){
     for (const id of o.justificatifs || []){ const j = obtenir("justificatifs", id); if (j) delier(j); }
     supprimer("operations", o.id); supprimees++;
@@ -313,7 +333,7 @@ function appliquerClotureAmex(prep){
     conforme: prep.controles.every(c => c.ok) || (ajoutees === prep.manquants.length && supprimees === prep.enTrop.length)};
   modifierParametres({clotures});
   apresImport();
-  return {ajoutees, supprimees, cartes: 0};
+  return {ajoutees, supprimees, cartes: 0, anciens};
 }
 function periodesCartes(){
   return vivants("imports").filter(i => i.genre === "carte" && i.banque === "LCL").map(i => i.periode);

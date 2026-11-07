@@ -568,6 +568,7 @@ async function autotest(){
         const ax = amexAvant || enregistrer("comptes", {nom: "Amex essai", type: "carte", banque: "Amex", carte: "AMEX", compteDebit: cj.id, actif: true});
         const a1 = enregistrer("operations", {compte: ax.id, date: "2027-12-07", montant: -30.5, libelle: "EPICERIE ESSAI"});
         const a2 = enregistrer("operations", {compte: ax.id, date: "2027-12-22", montant: -9.99, libelle: "EN TROP ESSAI"});
+        const a0 = enregistrer("operations", {compte: ax.id, date: "2027-11-20", montant: -50, libelle: "ANCIEN ESSAI"});
         const pa = preparerClotureAmex({nom: "amex-essai.pdf", genre: "releve_amex", releveAmex: ra, periode: ra.periode});
         v("clôture Amex : conforme à 3 jours, manquants proposés, en trop signalé, encours comparé", [pa.conformes, pa.manquants.map(l => l.montant).join(","), pa.enTrop.map(o => o.id), pa.controles.map(c => c.ok).join(",")],
           [1, "100,-1200,5", [a2.id], "true,false,false,true"]);
@@ -576,9 +577,11 @@ async function autotest(){
         v("clôture Amex appliquée : ajouts datés du prélèvement, apparié marqué, en trop gardé, clôture notée",
           [rx.ajoutees, rx.supprimees, mag?.dateDebit, obtenir("operations", a1.id).dateDebit, obtenir("operations", a1.id).releveAmex, !!obtenir("operations", a2.id), !!(LIVRE.parametres.clotures || {})[ax.id + "|2028-01-06"]],
           [3, 0, "2028-01-10", "2028-01-10", "2028-01-06", true, true]);
+        v("clôture Amex : achat antérieur sans débit réputé réglé au paiement du solde précédent", [pa.anciens.map(o => o.id), rx.anciens, obtenir("operations", a0.id).dateDebit, obtenir("operations", a0.id).debitEstime],
+          [[a0.id], 1, "2027-12-12", true]);
         const pa2 = preparerClotureAmex({nom: "amex-essai.pdf", genre: "releve_amex", releveAmex: ra, periode: ra.periode});
         v("clôture Amex refaite : tout conforme sauf la ligne en trop", [pa2.conformes, pa2.manquants.length, pa2.enTrop.length], [4, 0, 1]);
-        for (const o of vivants("operations").filter(o => o.compte === ax.id && o.date >= "2027-12-01" && o.date <= "2028-01-10")) supprimer("operations", o.id);
+        for (const o of vivants("operations").filter(o => o.compte === ax.id && o.date >= "2027-11-01" && o.date <= "2028-01-10")) supprimer("operations", o.id);
         for (const i of vivants("imports").filter(i => i.fichier === "amex-essai.pdf")) supprimer("imports", i.id);
         const cl = Object.assign({}, LIVRE.parametres.clotures); delete cl[ax.id + "|2028-01-06"]; modifierParametres({clotures: cl});
         if (!amexAvant) supprimer("comptes", ax.id);

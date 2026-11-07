@@ -62,6 +62,10 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
     for (const f of FICHIERS_EN_COURS.filter(x => ["releve_lcl", "releve_amex"].includes(x.lu.genre) && x.statut === "pret" && x.prep)){
       const p = f.prep, enTrop = [...p.enTrop, ...p.enTropCartes];
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Clôture sur le relevé : " + f.lu.titre));
+      if (p.anciens?.length) gauche.append(h("p", null, h("label", null, h("input", {type: "checkbox", checked: p.choixAnciens, onchange: e => { p.choixAnciens = e.target.checked; }}),
+        " Marquer comme réglés les " + p.anciens.length + " achat(s) Amex antérieurs au " + dateFr(p.lu.periode.debut) + " restés sans date de débit (" + euros(-somme(p.anciens, o => o.montant)) + ")"),
+        h("div", {class: "note"}, "Le relevé constate le paiement du solde précédent le " + dateFr(p.paiementPrecedent) + " : ces achats ont été réglés par les relevés précédents. Ils reçoivent la date du prélèvement Amex qui les suit (date estimée) et sortent de l'encours. "
+          + "Pour les dater exactement et repérer d'éventuels doublons, importez d'abord les relevés PDF Amex précédents, du plus ancien au plus récent.")));
       if (!p.manquants.length && !enTrop.length && !p.cartes?.nouvelles?.length){ gauche.appendChild(h("p", {class: "note"}, "Tout est conforme au relevé : « Enregistrer » marque le mois comme clôturé.")); continue; }
       if (p.manquants.length) gauche.append(h("h3", null, "Écritures du relevé absentes de l'application (" + p.manquants.length + ") : à ajouter"),
         tableau([{titre: ""}, {titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}], p.manquants.map((l, i) => ({l, i})), {classe: "serre", ligne: ({l, i}) => h("tr", null,
@@ -157,6 +161,7 @@ function preparerFichier(f){
         f.prep.choixManquants = new Set(f.prep.manquants.map((l, i) => i).filter(i => !refuses.has(cle(f.prep.manquants[i]))));
         const presents = new Set([...f.prep.enTrop, ...f.prep.enTropCartes].map(o => o.id));
         f.prep.choixEnTrop = new Set([...avant.choixEnTrop].filter(id => presents.has(id)));
+        if (avant.choixAnciens === false) f.prep.choixAnciens = false;
       }
     }
     else if (lu.genre === "corrections"){ f.prep = preparerCorrections(lu); f.statut = "pret"; }
@@ -188,7 +193,7 @@ async function enregistrerFichier(f, enLot){
     else if (lu.genre === "facture_cb") appliquerFacture(f.prep);
     else if (lu.genre === "cartes_lcl"){ const n = appliquerCartesPdf(f.prep); f.resultat = n + " opération(s)"; }
     else if (lu.genre === "releve_amex"){ const r = appliquerClotureAmex(f.prep); f.resultat = r.ajoutees + " ajoutée(s), " + r.supprimees + " supprimée(s)";
-      message("Mois de la carte Amex clôturé sur le relevé : " + r.ajoutees + " écriture(s) ajoutée(s), " + r.supprimees + " ligne(s) en trop supprimée(s)."); }
+      message("Mois de la carte Amex clôturé sur le relevé : " + r.ajoutees + " écriture(s) ajoutée(s), " + r.supprimees + " ligne(s) en trop supprimée(s)" + (r.anciens ? ", " + r.anciens + " achat(s) antérieur(s) marqués réglés" : "") + "."); }
     else if (lu.genre === "releve_lcl"){ const r = appliquerClotureLcl(f.prep); f.resultat = r.ajoutees + r.cartes + " ajoutée(s), " + r.supprimees + " supprimée(s)";
       message("Mois clôturé sur le relevé : " + r.ajoutees + " écriture(s) et " + r.cartes + " achat(s) carte ajoutés, " + r.supprimees + " ligne(s) en trop supprimée(s)."); }
     else if (lu.genre === "corrections"){
