@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-bsoBiRXUyh6hgfTj1AI/nbI7Wal8k9tCfXrzAe/+cMM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Mf8qjoPbqzqTufEMTUUo7qfCgX3ZN0BCkkIFgTkIPYA=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-07.1341";
+const VERSION_APP = "2026-11-07.1430";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -6465,7 +6465,8 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " pièce(s) à valider (téléphone ou dépôt) · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
-     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office ; ceux qui changeraient fournisseur ou catégorie sont proposés, à confirmer."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
+     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office ; ceux qui changeraient fournisseur ou catégorie sont proposés, à confirmer."); rafraichirEcran(); }}, "Relancer le rapprochement"),
+     h("button", {class: "discret", onclick: () => dialogueFiabiliteLecture()}, "Fiabilité de la lecture…")]));
   const anomalies = anomaliesRapprochement(), raisonDe = new Map(anomalies.filter(a => a.j && a.genre !== "fournisseur non reconnu").map(a => [a.j.id, a.raison]));
   const depuis = debutAnomalies();
   const champDepuis = champDate({value: depuis, onchange: e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)){ modifierParametres({anomaliesDepuis: e.target.value}); rafraichirEcran(); } }});
@@ -6713,6 +6714,42 @@ declarerEcran("boite", {titre: "Boîte de saisies", rendre(c){
     }}));
   c.appendChild(h("p", {class: "note"}, "Une saisie sans opération au relevé après " + LIVRE.parametres.delaiSansOperation + " jours remonte dans « À traiter » (paiement en espèces, relevé manquant)."));
 }});
+
+/* ---------- Fiabilité de la lecture des tickets ----------
+   La lecture (extraireTicket) est rejouée sur le texte lu de chaque pièce et comparée à ce qui a été validé :
+   montant au centime, fournisseur reconnu. Les écarts se téléchargent (texte lu, valeurs validées) pour analyse. */
+function bilanLecture(){
+  const r = [];
+  for (const j of vivants("justificatifs")){
+    if (!j.texteOCR || estNoteFrais(j) || !(j.montant > 0) || j.aValider) continue;
+    const t = extraireTicket(j.texteOCR);
+    const fiche = j.commercant ? obtenir("commercants", j.commercant) : null;
+    const reconnu = commercantPourTicket(t);
+    r.push({j, t, fiche, reconnu, montantOk: t.montant != null && versCentimes(t.montant) === versCentimes(j.montant), fournisseurOk: !fiche || (reconnu && reconnu.id === fiche.id)});
+  }
+  return r.sort((a, b) => (a.j.date || "") < (b.j.date || "") ? 1 : -1);
+}
+async function dialogueFiabiliteLecture(){
+  const r = bilanLecture();
+  if (!r.length) return message("Aucune pièce avec un texte lu à contrôler.");
+  const pct = n => Math.round(n / r.length * 100) + " %";
+  const nm = r.filter(x => x.montantOk).length, nf = r.filter(x => x.fournisseurOk).length;
+  const ecarts = r.filter(x => !x.montantOk || !x.fournisseurOk);
+  const nomF = f => f ? f.nom : "—";
+  await dialogue({titre: "Fiabilité de la lecture des tickets", corps: h("div", null,
+    h("p", null, r.length + " pièce(s) lue(s) : montant juste " + nm + " (" + pct(nm) + "), fournisseur reconnu " + nf + " (" + pct(nf) + ")."),
+    h("p", {class: "note"}, "La lecture est rejouée aujourd'hui sur le texte lu de chaque pièce, avec les fiches et alias actuels, et comparée à ce que vous avez validé."),
+    ecarts.length ? tableau([{titre: "Date"}, {titre: "Validé"}, {titre: "Montant lu", num: true}, {titre: "Fournisseur reconnu"}], ecarts, {classe: "serre", limite: 40, ligne: x => h("tr", null,
+      h("td", null, dateFr(x.j.date)), h("td", null, nomF(x.fiche) + " · " + euros(x.j.montant)),
+      h("td", {class: "num" + (x.montantOk ? "" : " neg")}, x.t.montant == null ? "—" : euros(x.t.montant)), h("td", {class: x.fournisseurOk ? "" : "neg"}, nomF(x.reconnu)))}) : null),
+    actions: [{libelle: "Fermer", classe: "discret", valeur: null}, {libelle: "Télécharger pour analyse", classe: "primaire", action: () => {
+      const donnees = {genre: "analyse_lecture", le: aujourdhui(), pieces: r.map(x => ({date: x.j.date, origine: x.j.origine || "", type: x.j.type, texte: x.j.texteOCR,
+        montantValide: x.j.montant, montantLu: x.t.montant, fournisseurValide: x.fiche ? {nom: x.fiche.nom, alias: x.fiche.alias || []} : null, fournisseurReconnu: x.reconnu ? x.reconnu.nom : null,
+        enseigneLue: x.t.enseigne, raisonSocialeLue: x.t.raisonSociale}))};
+      telecharger(new Blob([JSON.stringify(donnees, null, 1)], {type: "application/json"}), "analyse-lecture-" + aujourdhui() + ".json");
+      return null;
+    }}]});
+}
 
 /* ===== 23-ui-commercants.js ===== */
 /* ================= Fournisseurs (fiches « commercants ») ================= */
