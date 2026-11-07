@@ -176,6 +176,15 @@ async function autotest(){
         const fx = [{id: "a", nom: "La Mirandelle Essai", alias: ["LA MIRANDELLE ESSAI"], categorie: ""}, {id: "b", nom: "Boucherie Valmont Essai", alias: ["BOUCHERIE VALMONT"], categorie: ""},
           {id: "c", nom: "Magasin Essai Villeessai", alias: ["VILLEESSAI"], categorie: ""}, {id: "d", nom: "Cave Essai Villeessai", alias: [], categorie: ""}, {id: "e", nom: "Tenard", alias: [], categorie: ""}];
         const quel = (t, type) => commercantPourTicket(Object.assign(extraireTicket(t), type ? {type} : {}), fx)?.id || null;
+        {
+          // Ticket de supermarché net (07/11/2026) : articles en « EUR », « MONTANT DU », « pour échange », date avec l'heure en bas
+          const auj = aujourdhui(), fr = d => d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4), avant = ajouterJours(auj, -6);
+          const tk = extraireTicket(["SUPERMARCHE ESSAI", "SAS ESSAI 5", "TEL: " + fr(avant).replace(/\//g, "."), "BISCUITS 1,48 EUR A", "THE 2,11 EUR A", "MONTANT DU 15,40 EUR",
+            "AMERICAN EXPRESS 15,40 EUR", "TOTAL ELIGIBLE TRD 15,40 EUR", "A RENDRE 0,00 EUR", "18:00:16 " + fr(auj).replace(/^0/, ""), "TICKET A CONSERVER POUR ECHANGE"].join(nl));
+          const fe = [{id: "x", nom: "Echeance Mensuelle Essai", alias: [], categorie: ""}, {id: "y", nom: "Echeance Pret Essai", alias: [], categorie: "Crédit"}];
+          v("lecture : ticket net, montant dû (pas le premier article), date imprimée avec l'heure, « échange » ne désigne pas « échéance »",
+            [tk.montant, tk.date, tk.heure, commercantPourTicket(tk, fe)], [15.4, auj, "18:00", null]);
+        }
         v("fournisseur : nom lu à une ou deux lettres près", [quel(["LA MIRANDFLLE", "12 RUE ESSAI", "TOTAL 12,00"].join(nl)), quel(["BOUCHERTE VALMONT", "TOTAL 9,00"].join(nl))], ["a", "b"]);
         const fv = [{id: "p", nom: "Magasin Essai Valdor", alias: ["VALDOR", "MAGASIN ESSAI VALDOR"], categorie: ""}, {id: "q", nom: "Cave Essai Valdor", alias: [], categorie: ""}];
         v("fournisseur : alias réduit à un lieu commun à plusieurs fiches ignoré", [commercantSur({raisonSociale: "VALDOR", enseigne: "VALDOR"}, fv), commercantSur({raisonSociale: "MAGASIN ESSAI VALDOR"}, fv)?.id], [null, "p"]);

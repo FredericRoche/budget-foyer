@@ -140,9 +140,12 @@ function extraireTicket(texte){
   // Montant d'une ligne de total : avec centimes, ou « 104 44 » (virgule perdue) en fin de ligne
   const montantsTotal = s => { const m = montantsDe(s); if (m.length) return m; const x = s.match(/(\d{1,5}) (\d{2})\s*[€E]?\s*$/); return x ? [+(x[1] + "." + x[2])] : []; };
   let candidat = null;
-  // Facturette (ou ticket qui en porte une : « AUTO : », « SANS CONTACT ») : le montant payé est imprimé « 12,10 EUR »
-  if (res.type === "facturette" || N.some(l => /AUTO ?:|SANS CONTACT|CARTE BANCAIRE/.test(l))){
-    for (const l of L){ const m = l.match(/(\d{1,5})[,.](\d{2})\s*EUR\b/i); if (m){ candidat = +(m[1] + "." + m[2]); break; } }
+  // Facturette : le montant payé suit « MONTANT » (même ligne ou les deux suivantes), imprimé « 12,10 EUR ». Seulement
+  // là : un ticket de caisse imprime aussi « 1,48 EUR » sur chaque article (pris pour le total le 07/11/2026).
+  const iMontant = N.findIndex(l => /M?ONTANT/.test(l) && !/ELIGIBLE/.test(l));
+  if (iMontant >= 0) for (const [k, l] of L.slice(iMontant, iMontant + 3).entries()){
+    if (/TVA|\bHT\b/.test(N[iMontant + k])) continue;
+    const m = l.match(/(\d{1,5})[,.](\d{2})\s*EUR\b/i); if (m){ candidat = +(m[1] + "." + m[2]); break; }
   }
   if (candidat === null) N.forEach((l, i) => {
     if (!motsTotal.test(l) || horsTotal(l)) return;
@@ -166,8 +169,9 @@ function extraireTicket(texte){
   res.numero = numeroFacture(lignes);
 
   /* Date et heure */
-  const dates = [];
+  const dates = [], datesHeure = [];
   for (const l of lignes){
+    const n0 = dates.length;
     // (les PDF découpent parfois la date : « 12 / 10 /202 6 »)
     for (const m of l.matchAll(/\b(\d{1,2}) ?[\/.\-] ?(\d{1,2}) ?[\/.\-] ?(\d ?\d ?\d ?\d|\d{2})(?!\d)/g)){ const d = lireDate(m[0].replace(/ /g, "")); if (d) dates.push(d); }
     for (const m of norm(l).matchAll(/\b(\d{1,2}) (janv|fevr|mars|avr|mai|juin|juil|aout|sept|oct|nov|dec)[a-z]*\.? (\d{4})\b/g)){
@@ -175,6 +179,8 @@ function extraireTicket(texte){
       dates.push(`${m[3]}-${pad2(mois)}-${pad2(m[1])}`);
     }
     const h = l.match(/\b([01]?\d|2[0-3])[:hH]([0-5]\d)(?:[:]([0-5]\d))?\b/); if (h && !res.heure) res.heure = pad2(h[1]) + ":" + h[2];
+    // Date imprimée avec l'heure (« 18:00:16 7/11/2026 ») : c'est celle de l'achat ; elle passe avant toute autre suite de chiffres
+    if (h && dates.length > n0){ datesHeure.push(...dates.slice(n0)); res.heure = pad2(h[1]) + ":" + h[2]; }
   }
   const auj = aujourdhui();
   if (!dates.length) for (const l of lignes){
@@ -184,7 +190,7 @@ function extraireTicket(texte){
     if (d > ajouterJours(auj, 1)) d = (+auj.slice(0, 4) - 1) + "-" + pad2(+m[2]) + "-" + pad2(+m[1]);
     if (lireDate(d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4))){ dates.push(d); break; }
   }
-  const plausibles = dates.filter(d => d <= ajouterJours(auj, 1) && d >= ajouterJours(auj, -400));
+  const plausibles = [...datesHeure, ...dates].filter(d => d <= ajouterJours(auj, 1) && d >= ajouterJours(auj, -400));
   if (plausibles.length){ res.date = plausibles[0]; res.confiance.date = "sûr"; }
 
   /* Carte (4 derniers chiffres), SIRET, TVA */
@@ -268,7 +274,9 @@ function commercantDansTexte(texte, fiches){
     const r = exacts.has(w) || (w.length >= 5 && longs.some(t => distanceAuPlus(w, t, w.length >= 8 ? 2 : 1)));
     memo.set(w, r); return r;
   };
-  const retenues = fiches.filter(f => !["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne"].includes(f.categorie));
+  const presentUn = w => exacts.has(w) || longs.some(t => distanceAuPlus(w, t, 1));
+  // Ni famille, ni virements, ni crédit, banque ou impôts : ces fiches ne délivrent pas de ticket (« Echeance Pret… » proposé le 07/11/2026)
+  const retenues = fiches.filter(f => !["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne", "Crédit", "Crédits", "Emprunts", "Banque", "Impôts"].includes(f.categorie));
   // Mot distinctif : propre à une seule fiche, 6 lettres et plus, pas un lieu ; il suffit seul à désigner la fiche
   const freq = new Map();
   for (const f of retenues) for (const w of new Set([f.nom, ...(f.alias || [])].flatMap(motsFiche))) freq.set(w, (freq.get(w) || 0) + 1);
@@ -279,7 +287,8 @@ function commercantDansTexte(texte, fiches){
       const m = motsFiche(nom), utiles = m.filter(w => !MOTS_LIEUX.has(w));
       if (m.length >= 2 && utiles.length && m.every(present)) s = Math.max(s, somme(utiles, w => w.length) + 1);
       // Seul, un mot n'est admis à une lettre près qu'à partir de 7 lettres (« TENANT » lu ne désigne pas « Tenart »)
-      for (const w of utiles) if (w.length >= 6 && freq.get(w) === 1 && !METIERS.has(w) && (w.length >= 7 ? present(w) : exacts.has(w))) s = Math.max(s, w.length);
+      // (et jamais à deux lettres près : « ECHANGE » lu avait désigné « Echeance »)
+      for (const w of utiles) if (w.length >= 6 && freq.get(w) === 1 && !METIERS.has(w) && (w.length >= 7 ? presentUn(w) : exacts.has(w))) s = Math.max(s, w.length);
     }
     if (!s) continue;
     if (s > score){ meilleur = f; score = s; egalite = false; } else if (s === score && meilleur !== f) egalite = true;

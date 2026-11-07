@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-9UpaGXfkXUsiTXX4C4mdSFZQIw2aHRcLP5taB2pDD9E=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-WYW0GjlvrmmN6fZ1wBfsCdNSpgPqHJNZnr4hBCyq6X4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-07.1501";
+const VERSION_APP = "2026-11-07.1856";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4305,9 +4305,12 @@ function extraireTicket(texte){
   // Montant d'une ligne de total : avec centimes, ou « 104 44 » (virgule perdue) en fin de ligne
   const montantsTotal = s => { const m = montantsDe(s); if (m.length) return m; const x = s.match(/(\d{1,5}) (\d{2})\s*[€E]?\s*$/); return x ? [+(x[1] + "." + x[2])] : []; };
   let candidat = null;
-  // Facturette (ou ticket qui en porte une : « AUTO : », « SANS CONTACT ») : le montant payé est imprimé « 12,10 EUR »
-  if (res.type === "facturette" || N.some(l => /AUTO ?:|SANS CONTACT|CARTE BANCAIRE/.test(l))){
-    for (const l of L){ const m = l.match(/(\d{1,5})[,.](\d{2})\s*EUR\b/i); if (m){ candidat = +(m[1] + "." + m[2]); break; } }
+  // Facturette : le montant payé suit « MONTANT » (même ligne ou les deux suivantes), imprimé « 12,10 EUR ». Seulement
+  // là : un ticket de caisse imprime aussi « 1,48 EUR » sur chaque article (pris pour le total le 07/11/2026).
+  const iMontant = N.findIndex(l => /M?ONTANT/.test(l) && !/ELIGIBLE/.test(l));
+  if (iMontant >= 0) for (const [k, l] of L.slice(iMontant, iMontant + 3).entries()){
+    if (/TVA|\bHT\b/.test(N[iMontant + k])) continue;
+    const m = l.match(/(\d{1,5})[,.](\d{2})\s*EUR\b/i); if (m){ candidat = +(m[1] + "." + m[2]); break; }
   }
   if (candidat === null) N.forEach((l, i) => {
     if (!motsTotal.test(l) || horsTotal(l)) return;
@@ -4331,8 +4334,9 @@ function extraireTicket(texte){
   res.numero = numeroFacture(lignes);
 
   /* Date et heure */
-  const dates = [];
+  const dates = [], datesHeure = [];
   for (const l of lignes){
+    const n0 = dates.length;
     // (les PDF découpent parfois la date : « 12 / 10 /202 6 »)
     for (const m of l.matchAll(/\b(\d{1,2}) ?[\/.\-] ?(\d{1,2}) ?[\/.\-] ?(\d ?\d ?\d ?\d|\d{2})(?!\d)/g)){ const d = lireDate(m[0].replace(/ /g, "")); if (d) dates.push(d); }
     for (const m of norm(l).matchAll(/\b(\d{1,2}) (janv|fevr|mars|avr|mai|juin|juil|aout|sept|oct|nov|dec)[a-z]*\.? (\d{4})\b/g)){
@@ -4340,6 +4344,8 @@ function extraireTicket(texte){
       dates.push(`${m[3]}-${pad2(mois)}-${pad2(m[1])}`);
     }
     const h = l.match(/\b([01]?\d|2[0-3])[:hH]([0-5]\d)(?:[:]([0-5]\d))?\b/); if (h && !res.heure) res.heure = pad2(h[1]) + ":" + h[2];
+    // Date imprimée avec l'heure (« 18:00:16 7/11/2026 ») : c'est celle de l'achat ; elle passe avant toute autre suite de chiffres
+    if (h && dates.length > n0){ datesHeure.push(...dates.slice(n0)); res.heure = pad2(h[1]) + ":" + h[2]; }
   }
   const auj = aujourdhui();
   if (!dates.length) for (const l of lignes){
@@ -4349,7 +4355,7 @@ function extraireTicket(texte){
     if (d > ajouterJours(auj, 1)) d = (+auj.slice(0, 4) - 1) + "-" + pad2(+m[2]) + "-" + pad2(+m[1]);
     if (lireDate(d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4))){ dates.push(d); break; }
   }
-  const plausibles = dates.filter(d => d <= ajouterJours(auj, 1) && d >= ajouterJours(auj, -400));
+  const plausibles = [...datesHeure, ...dates].filter(d => d <= ajouterJours(auj, 1) && d >= ajouterJours(auj, -400));
   if (plausibles.length){ res.date = plausibles[0]; res.confiance.date = "sûr"; }
 
   /* Carte (4 derniers chiffres), SIRET, TVA */
@@ -4433,7 +4439,9 @@ function commercantDansTexte(texte, fiches){
     const r = exacts.has(w) || (w.length >= 5 && longs.some(t => distanceAuPlus(w, t, w.length >= 8 ? 2 : 1)));
     memo.set(w, r); return r;
   };
-  const retenues = fiches.filter(f => !["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne"].includes(f.categorie));
+  const presentUn = w => exacts.has(w) || longs.some(t => distanceAuPlus(w, t, 1));
+  // Ni famille, ni virements, ni crédit, banque ou impôts : ces fiches ne délivrent pas de ticket (« Echeance Pret… » proposé le 07/11/2026)
+  const retenues = fiches.filter(f => !["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne", "Crédit", "Crédits", "Emprunts", "Banque", "Impôts"].includes(f.categorie));
   // Mot distinctif : propre à une seule fiche, 6 lettres et plus, pas un lieu ; il suffit seul à désigner la fiche
   const freq = new Map();
   for (const f of retenues) for (const w of new Set([f.nom, ...(f.alias || [])].flatMap(motsFiche))) freq.set(w, (freq.get(w) || 0) + 1);
@@ -4444,7 +4452,8 @@ function commercantDansTexte(texte, fiches){
       const m = motsFiche(nom), utiles = m.filter(w => !MOTS_LIEUX.has(w));
       if (m.length >= 2 && utiles.length && m.every(present)) s = Math.max(s, somme(utiles, w => w.length) + 1);
       // Seul, un mot n'est admis à une lettre près qu'à partir de 7 lettres (« TENANT » lu ne désigne pas « Tenart »)
-      for (const w of utiles) if (w.length >= 6 && freq.get(w) === 1 && !METIERS.has(w) && (w.length >= 7 ? present(w) : exacts.has(w))) s = Math.max(s, w.length);
+      // (et jamais à deux lettres près : « ECHANGE » lu avait désigné « Echeance »)
+      for (const w of utiles) if (w.length >= 6 && freq.get(w) === 1 && !METIERS.has(w) && (w.length >= 7 ? presentUn(w) : exacts.has(w))) s = Math.max(s, w.length);
     }
     if (!s) continue;
     if (s > score){ meilleur = f; score = s; egalite = false; } else if (s === score && meilleur !== f) egalite = true;
@@ -8542,6 +8551,15 @@ async function autotest(){
         const fx = [{id: "a", nom: "La Mirandelle Essai", alias: ["LA MIRANDELLE ESSAI"], categorie: ""}, {id: "b", nom: "Boucherie Valmont Essai", alias: ["BOUCHERIE VALMONT"], categorie: ""},
           {id: "c", nom: "Magasin Essai Villeessai", alias: ["VILLEESSAI"], categorie: ""}, {id: "d", nom: "Cave Essai Villeessai", alias: [], categorie: ""}, {id: "e", nom: "Tenard", alias: [], categorie: ""}];
         const quel = (t, type) => commercantPourTicket(Object.assign(extraireTicket(t), type ? {type} : {}), fx)?.id || null;
+        {
+          // Ticket de supermarché net (07/11/2026) : articles en « EUR », « MONTANT DU », « pour échange », date avec l'heure en bas
+          const auj = aujourdhui(), fr = d => d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4), avant = ajouterJours(auj, -6);
+          const tk = extraireTicket(["SUPERMARCHE ESSAI", "SAS ESSAI 5", "TEL: " + fr(avant).replace(/\//g, "."), "BISCUITS 1,48 EUR A", "THE 2,11 EUR A", "MONTANT DU 15,40 EUR",
+            "AMERICAN EXPRESS 15,40 EUR", "TOTAL ELIGIBLE TRD 15,40 EUR", "A RENDRE 0,00 EUR", "18:00:16 " + fr(auj).replace(/^0/, ""), "TICKET A CONSERVER POUR ECHANGE"].join(nl));
+          const fe = [{id: "x", nom: "Echeance Mensuelle Essai", alias: [], categorie: ""}, {id: "y", nom: "Echeance Pret Essai", alias: [], categorie: "Crédit"}];
+          v("lecture : ticket net, montant dû (pas le premier article), date imprimée avec l'heure, « échange » ne désigne pas « échéance »",
+            [tk.montant, tk.date, tk.heure, commercantPourTicket(tk, fe)], [15.4, auj, "18:00", null]);
+        }
         v("fournisseur : nom lu à une ou deux lettres près", [quel(["LA MIRANDFLLE", "12 RUE ESSAI", "TOTAL 12,00"].join(nl)), quel(["BOUCHERTE VALMONT", "TOTAL 9,00"].join(nl))], ["a", "b"]);
         const fv = [{id: "p", nom: "Magasin Essai Valdor", alias: ["VALDOR", "MAGASIN ESSAI VALDOR"], categorie: ""}, {id: "q", nom: "Cave Essai Valdor", alias: [], categorie: ""}];
         v("fournisseur : alias réduit à un lieu commun à plusieurs fiches ignoré", [commercantSur({raisonSociale: "VALDOR", enseigne: "VALDOR"}, fv), commercantSur({raisonSociale: "MAGASIN ESSAI VALDOR"}, fv)?.id], [null, "p"]);
