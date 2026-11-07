@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-WYW0GjlvrmmN6fZ1wBfsCdNSpgPqHJNZnr4hBCyq6X4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-8ydKN/heO0gFPtAmVYuDsAktIJ34HU57hyOx+5Xc16U=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-07.1856";
+const VERSION_APP = "2026-11-07.1902";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4491,6 +4491,11 @@ function commercantPourTicket(t, liste){
     for (const a of f.alias || []) if (!faible(a)) for (const k of cles) if (aliasCorrespond(a, k)) return f;
   }
   if (!t.texte) return null;
+  // Alias imprimé sur une ligne quelconque de la pièce (raison sociale « SAS … » sous un logo illisible, alors que
+  // l'en-tête lu est une autre ligne) : la ligne commence par l'alias, d'au moins 6 caractères
+  const lignesCles = t.texte.split(/\n/).map(cleLibelle).filter(k => k && k.length >= 6);
+  for (const f of fiches) for (const a of f.alias || [])
+    if (a.length >= 6 && !faible(a) && lignesCles.some(k => k === a || k.startsWith(a + " "))) return f;
   const parTexte = commercantDansTexte(t.texte, fiches);
   // Émetteur lisible sur la pièce et inconnu des fiches : une fiche trouvée ailleurs dans le texte n'est retenue que si
   // l'un de ses mots figure dans ce nom (sinon, nouveau fournisseur à ce nom plutôt qu'un rapprochement de hasard)
@@ -8559,6 +8564,12 @@ async function autotest(){
           const fe = [{id: "x", nom: "Echeance Mensuelle Essai", alias: [], categorie: ""}, {id: "y", nom: "Echeance Pret Essai", alias: [], categorie: "Crédit"}];
           v("lecture : ticket net, montant dû (pas le premier article), date imprimée avec l'heure, « échange » ne désigne pas « échéance »",
             [tk.montant, tk.date, tk.heure, commercantPourTicket(tk, fe)], [15.4, auj, "18:00", null]);
+        }
+        {
+          // Logo illisible : l'en-tête lu est du bruit, la raison sociale (alias) figure plus bas sur une ligne à part
+          const fa = [{id: "s", nom: "Supermarche Essai Centre", alias: ["SAS ESSAIRIVE 5"], categorie: ""}];
+          const ta = extraireTicket(["MURS U AL LILIEGS VENOUS", "SAS ESSAIRIVE 5", "9 BOULEVARD ESSAI", "MONTANT DU 15,40 EUR"].join(nl));
+          v("fournisseur : alias imprimé sur une autre ligne que l'en-tête lu", commercantPourTicket(ta, fa)?.id, "s");
         }
         v("fournisseur : nom lu à une ou deux lettres près", [quel(["LA MIRANDFLLE", "12 RUE ESSAI", "TOTAL 12,00"].join(nl)), quel(["BOUCHERTE VALMONT", "TOTAL 9,00"].join(nl))], ["a", "b"]);
         const fv = [{id: "p", nom: "Magasin Essai Valdor", alias: ["VALDOR", "MAGASIN ESSAI VALDOR"], categorie: ""}, {id: "q", nom: "Cave Essai Valdor", alias: [], categorie: ""}];

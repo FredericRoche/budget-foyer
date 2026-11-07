@@ -326,6 +326,11 @@ function commercantPourTicket(t, liste){
     for (const a of f.alias || []) if (!faible(a)) for (const k of cles) if (aliasCorrespond(a, k)) return f;
   }
   if (!t.texte) return null;
+  // Alias imprimé sur une ligne quelconque de la pièce (raison sociale « SAS … » sous un logo illisible, alors que
+  // l'en-tête lu est une autre ligne) : la ligne commence par l'alias, d'au moins 6 caractères
+  const lignesCles = t.texte.split(/\n/).map(cleLibelle).filter(k => k && k.length >= 6);
+  for (const f of fiches) for (const a of f.alias || [])
+    if (a.length >= 6 && !faible(a) && lignesCles.some(k => k === a || k.startsWith(a + " "))) return f;
   const parTexte = commercantDansTexte(t.texte, fiches);
   // Émetteur lisible sur la pièce et inconnu des fiches : une fiche trouvée ailleurs dans le texte n'est retenue que si
   // l'un de ses mots figure dans ce nom (sinon, nouveau fournisseur à ce nom plutôt qu'un rapprochement de hasard)

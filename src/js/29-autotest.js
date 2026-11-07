@@ -185,6 +185,12 @@ async function autotest(){
           v("lecture : ticket net, montant dû (pas le premier article), date imprimée avec l'heure, « échange » ne désigne pas « échéance »",
             [tk.montant, tk.date, tk.heure, commercantPourTicket(tk, fe)], [15.4, auj, "18:00", null]);
         }
+        {
+          // Logo illisible : l'en-tête lu est du bruit, la raison sociale (alias) figure plus bas sur une ligne à part
+          const fa = [{id: "s", nom: "Supermarche Essai Centre", alias: ["SAS ESSAIRIVE 5"], categorie: ""}];
+          const ta = extraireTicket(["MURS U AL LILIEGS VENOUS", "SAS ESSAIRIVE 5", "9 BOULEVARD ESSAI", "MONTANT DU 15,40 EUR"].join(nl));
+          v("fournisseur : alias imprimé sur une autre ligne que l'en-tête lu", commercantPourTicket(ta, fa)?.id, "s");
+        }
         v("fournisseur : nom lu à une ou deux lettres près", [quel(["LA MIRANDFLLE", "12 RUE ESSAI", "TOTAL 12,00"].join(nl)), quel(["BOUCHERTE VALMONT", "TOTAL 9,00"].join(nl))], ["a", "b"]);
         const fv = [{id: "p", nom: "Magasin Essai Valdor", alias: ["VALDOR", "MAGASIN ESSAI VALDOR"], categorie: ""}, {id: "q", nom: "Cave Essai Valdor", alias: [], categorie: ""}];
         v("fournisseur : alias réduit à un lieu commun à plusieurs fiches ignoré", [commercantSur({raisonSociale: "VALDOR", enseigne: "VALDOR"}, fv), commercantSur({raisonSociale: "MAGASIN ESSAI VALDOR"}, fv)?.id], [null, "p"]);
