@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-8ydKN/heO0gFPtAmVYuDsAktIJ34HU57hyOx+5Xc16U=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-0LZVVr4BKi2zcxuU1TlPRXmBhhQ3tF7DIODmfGPc8bI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-07.1902";
+const VERSION_APP = "2026-11-07.1916";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4328,7 +4328,20 @@ function extraireTicket(texte){
   }
   if (candidat !== null && candidat >= 100000) candidat = null;
   if (candidat !== null){ res.montant = candidat; res.confiance.montant = "sûr"; }
-  else { const tous = L.flatMap(montantsDe).filter(v => v < 100000); if (tous.length){ res.montant = Math.max(...tous); res.confiance.montant = "à vérifier"; } }
+  else {
+    // Sans ligne de total lisible (07/11/2026 : moitié haute du ticket perdue à la lecture, « 1112.12 » de « Ver 1.1.12.1 » retenu) :
+    // le montant en EUR ou € qui revient le plus souvent (le total est imprimé plusieurs fois), sinon le plus grand montant,
+    // hors numéros de téléphone et de version
+    const bruit = i => /\bT[EÉ]L\b|\bVER\b|SIRET|SIREN/.test(N[i]);
+    const eur = L.flatMap((l, i) => bruit(i) ? [] : [...l.matchAll(/(\d{1,5})[,.](\d{2})\s*(?:EUR|€)/gi)].map(m => +(m[1] + "." + m[2]))).filter(v => v > 0 && v < 100000);
+    if (eur.length){
+      const n = new Map(); for (const v of eur) n.set(v, (n.get(v) || 0) + 1);
+      res.montant = [...n].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0]; res.confiance.montant = "à vérifier";
+    } else {
+      const tous = L.flatMap((l, i) => bruit(i) ? [] : montantsDe(l)).filter(v => v < 100000);
+      if (tous.length){ res.montant = Math.max(...tous); res.confiance.montant = "à vérifier"; }
+    }
+  }
 
   /* Numéro de facture : « Facture n° X », « N°D26-011 », ou le n° posé sur la ligne suivante (les dates en sont retirées) */
   res.numero = numeroFacture(lignes);
@@ -4366,7 +4379,7 @@ function extraireTicket(texte){
     if (s && !res.siret) res.siret = s[1].replace(/\s/g, "");
   }
   /* Raison sociale et enseigne : premières lignes significatives */
-  const ignorer = /BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
+  const ignorer = /ARTICLES?\b|VENDUS|=|BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
   const nomPossible = i => /[A-Za-z]{3}/.test(lignes[i]) && !ignorer.test(N[i]) && !estBanqueTerminal(lignes[i]) && nomPlausible(lignes[i]) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[i]) && !montantsDe(lignes[i]).length && lignes[i].length <= 40;
   const tete = lignes.slice(0, 8).filter((l, i) => nomPossible(i));
   /* Facturette CB : le commerçant suit la ligne « LE jj/mm/aa A hh:mm » ; ce qui précède (banque, AID, broderie
@@ -8570,6 +8583,13 @@ async function autotest(){
           const fa = [{id: "s", nom: "Supermarche Essai Centre", alias: ["SAS ESSAIRIVE 5"], categorie: ""}];
           const ta = extraireTicket(["MURS U AL LILIEGS VENOUS", "SAS ESSAIRIVE 5", "9 BOULEVARD ESSAI", "MONTANT DU 15,40 EUR"].join(nl));
           v("fournisseur : alias imprimé sur une autre ligne que l'en-tête lu", commercantPourTicket(ta, fa)?.id, "s");
+        }
+        {
+          // Moitié haute du ticket perdue à la lecture : ni « MONTANT » ni total sûr ; le montant en EUR répété l'emporte
+          // sur le numéro de version de la caisse ; « Nombre d'articles vendus= 6 » n'est pas un nom de fournisseur
+          const tm = extraireTicket(["Nombre d'articles vendus= 6", "TOTAL ELIGIBLE TRO 15,40 EUR", "A RENDRE 0,00 EUR", "ESPECES 0,00 EUR",
+            "CODE TVA MT. HI MT. TVA MI. TC", "A 5,50 14,60 = 0.80 15,40", "TEL: 01.87.58.41.95", "40L18,0.0,2-981 - 1112.12 60", "Ver:8.6.8,2-981 - 1112.12"].join(nl));
+          v("lecture : ticket tronqué, montant EUR répété plutôt qu'un numéro de caisse, en-tête de bruit écarté", [tm.montant, tm.confiance.montant, /articles/i.test(tm.enseigne)], [15.4, "à vérifier", false]);
         }
         v("fournisseur : nom lu à une ou deux lettres près", [quel(["LA MIRANDFLLE", "12 RUE ESSAI", "TOTAL 12,00"].join(nl)), quel(["BOUCHERTE VALMONT", "TOTAL 9,00"].join(nl))], ["a", "b"]);
         const fv = [{id: "p", nom: "Magasin Essai Valdor", alias: ["VALDOR", "MAGASIN ESSAI VALDOR"], categorie: ""}, {id: "q", nom: "Cave Essai Valdor", alias: [], categorie: ""}];

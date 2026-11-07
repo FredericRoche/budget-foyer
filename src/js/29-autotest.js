@@ -191,6 +191,13 @@ async function autotest(){
           const ta = extraireTicket(["MURS U AL LILIEGS VENOUS", "SAS ESSAIRIVE 5", "9 BOULEVARD ESSAI", "MONTANT DU 15,40 EUR"].join(nl));
           v("fournisseur : alias imprimé sur une autre ligne que l'en-tête lu", commercantPourTicket(ta, fa)?.id, "s");
         }
+        {
+          // Moitié haute du ticket perdue à la lecture : ni « MONTANT » ni total sûr ; le montant en EUR répété l'emporte
+          // sur le numéro de version de la caisse ; « Nombre d'articles vendus= 6 » n'est pas un nom de fournisseur
+          const tm = extraireTicket(["Nombre d'articles vendus= 6", "TOTAL ELIGIBLE TRO 15,40 EUR", "A RENDRE 0,00 EUR", "ESPECES 0,00 EUR",
+            "CODE TVA MT. HI MT. TVA MI. TC", "A 5,50 14,60 = 0.80 15,40", "TEL: 01.87.58.41.95", "40L18,0.0,2-981 - 1112.12 60", "Ver:8.6.8,2-981 - 1112.12"].join(nl));
+          v("lecture : ticket tronqué, montant EUR répété plutôt qu'un numéro de caisse, en-tête de bruit écarté", [tm.montant, tm.confiance.montant, /articles/i.test(tm.enseigne)], [15.4, "à vérifier", false]);
+        }
         v("fournisseur : nom lu à une ou deux lettres près", [quel(["LA MIRANDFLLE", "12 RUE ESSAI", "TOTAL 12,00"].join(nl)), quel(["BOUCHERTE VALMONT", "TOTAL 9,00"].join(nl))], ["a", "b"]);
         const fv = [{id: "p", nom: "Magasin Essai Valdor", alias: ["VALDOR", "MAGASIN ESSAI VALDOR"], categorie: ""}, {id: "q", nom: "Cave Essai Valdor", alias: [], categorie: ""}];
         v("fournisseur : alias réduit à un lieu commun à plusieurs fiches ignoré", [commercantSur({raisonSociale: "VALDOR", enseigne: "VALDOR"}, fv), commercantSur({raisonSociale: "MAGASIN ESSAI VALDOR"}, fv)?.id], [null, "p"]);

@@ -163,7 +163,20 @@ function extraireTicket(texte){
   }
   if (candidat !== null && candidat >= 100000) candidat = null;
   if (candidat !== null){ res.montant = candidat; res.confiance.montant = "sûr"; }
-  else { const tous = L.flatMap(montantsDe).filter(v => v < 100000); if (tous.length){ res.montant = Math.max(...tous); res.confiance.montant = "à vérifier"; } }
+  else {
+    // Sans ligne de total lisible (07/11/2026 : moitié haute du ticket perdue à la lecture, « 1112.12 » de « Ver 1.1.12.1 » retenu) :
+    // le montant en EUR ou € qui revient le plus souvent (le total est imprimé plusieurs fois), sinon le plus grand montant,
+    // hors numéros de téléphone et de version
+    const bruit = i => /\bT[EÉ]L\b|\bVER\b|SIRET|SIREN/.test(N[i]);
+    const eur = L.flatMap((l, i) => bruit(i) ? [] : [...l.matchAll(/(\d{1,5})[,.](\d{2})\s*(?:EUR|€)/gi)].map(m => +(m[1] + "." + m[2]))).filter(v => v > 0 && v < 100000);
+    if (eur.length){
+      const n = new Map(); for (const v of eur) n.set(v, (n.get(v) || 0) + 1);
+      res.montant = [...n].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0]; res.confiance.montant = "à vérifier";
+    } else {
+      const tous = L.flatMap((l, i) => bruit(i) ? [] : montantsDe(l)).filter(v => v < 100000);
+      if (tous.length){ res.montant = Math.max(...tous); res.confiance.montant = "à vérifier"; }
+    }
+  }
 
   /* Numéro de facture : « Facture n° X », « N°D26-011 », ou le n° posé sur la ligne suivante (les dates en sont retirées) */
   res.numero = numeroFacture(lignes);
@@ -201,7 +214,7 @@ function extraireTicket(texte){
     if (s && !res.siret) res.siret = s[1].replace(/\s/g, "");
   }
   /* Raison sociale et enseigne : premières lignes significatives */
-  const ignorer = /BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
+  const ignorer = /ARTICLES?\b|VENDUS|=|BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
   const nomPossible = i => /[A-Za-z]{3}/.test(lignes[i]) && !ignorer.test(N[i]) && !estBanqueTerminal(lignes[i]) && nomPlausible(lignes[i]) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[i]) && !montantsDe(lignes[i]).length && lignes[i].length <= 40;
   const tete = lignes.slice(0, 8).filter((l, i) => nomPossible(i));
   /* Facturette CB : le commerçant suit la ligne « LE jj/mm/aa A hh:mm » ; ce qui précède (banque, AID, broderie
