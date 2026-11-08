@@ -1,6 +1,9 @@
 /* ================= À traiter ================= */
 declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
-  const aClasser = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose").sort((a, b) => a.date < b.date ? 1 : -1);
+  // Seulement à partir du début du contrôle (réglé dans Justificatifs) : avant, les données ont été reconstituées
+  const tousAClasser = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose");
+  const aClasser = tousAClasser.filter(o => o.date >= debutAnomalies()).sort((a, b) => a.date < b.date ? 1 : -1);
+  const anciens = tousAClasser.length - aClasser.length;
   const surs = aClasser.filter(o => o.statut === "propose" && o.categorie !== "À préciser");
   etat.coches = etat.coches || new Set(surs.map(o => o.id));
   c.appendChild(entete("À traiter", "Ce qui attend une décision. Les cas sans ambiguïté qui ne changent rien sont appliqués d'office et restent réversibles (en bas de page) ; ceux qui changeraient fournisseur ou catégorie attendent votre clic.",
@@ -10,7 +13,8 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
     }}, "Valider les propositions cochées") : null));
 
   /* 1. Opérations à classer */
-  const sec = h("section", null, h("h2", null, "Opérations à classer (" + aClasser.length + ")"));
+  const sec = h("section", null, h("h2", null, "Opérations à classer (" + aClasser.length + ")"),
+    anciens ? h("p", {class: "note"}, anciens + " opération(s) antérieure(s) au " + dateFr(debutAnomalies()) + " (données reconstituées) ne sont pas listées ; la date se règle dans l'encadré des anomalies (Justificatifs).") : null);
   sec.appendChild(tableau([{titre: ""}, {titre: "Date", cle: o => o.date}, {titre: "Compte", cle: o => libelleCompte(o.compte)}, {titre: "Libellé bancaire", cle: o => o.libelle},
     {titre: "Montant", num: true, cle: o => o.montant}, {titre: "Classement proposé"}, {titre: "Origine"}, {titre: "Lieu"}, {titre: ""}], aClasser, {
     classe: "serre", vide: "Aucune opération en attente de classement.",
@@ -20,7 +24,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
       const selLieu = selectionLieu(o.lieu);
       const c2 = o.commercant ? obtenir("commercants", o.commercant) : null;
       const sugg = c2 && c2.variable ? repartitionCommercant(c2) : [];
-      return h("tr", {class: o.statut === "a_preciser" ? "choisie" : ""}, h("td", null, cb), h("td", null, dateCourte(o.date)), h("td", null, libelleCompte(o.compte)),
+      return h("tr", {class: o.statut === "a_preciser" ? "choisie" : ""}, h("td", null, cb), h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)),
         h("td", null, o.libelle, c2 ? h("span", {class: "libbanque"}, c2.nom) : null), montantCellule(o.montant),
         h("td", null, selCat, sugg.length ? h("div", {class: "suggestions"}, sugg.map(s2 => h("button", {onclick: () => { selCat.value = s2.categorie + "|" + s2.sousCategorie; }}, s2.categorie + " › " + s2.sousCategorie + " (" + Math.round(s2.part * 100) + " %)"))) : null),
         h("td", null, marqueOrigine(o)), h("td", null, selLieu),
@@ -50,7 +54,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
         h("button", {class: "mini discret", onclick: async () => { if (await confirmer("Supprimer " + (g.length - 1) + " ligne(s) en double ?", "Supprimer", true)){ for (const o of g.slice(1)) supprimer("operations", o.id); enregistrer("operations", Object.assign(g[0], {doublonVu: true})); rafraichirEcran(); } }}, "N'en garder qu'une"))));
   }
   deux.appendChild(secD);
-  const js = vivants("justificatifs").filter(j => j.statut === "a_rapprocher");
+  const js = vivants("justificatifs").filter(pieceOuverte);
   const secJ = h("section", {class: "carte"}, h("h2", null, "Justificatifs à rapprocher (" + js.length + ")"));
   const ul = h("ul", {class: "liste-traiter"});
   for (const j of js.slice(0, 8)) ul.appendChild(h("li", null, h("span", null, dateCourte(j.date) + " · " + (j.commercantNom || j.raisonSociale || "?") + " · " + euros(j.montant) +

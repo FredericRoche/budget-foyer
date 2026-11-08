@@ -1,7 +1,7 @@
 /* ================= Justificatifs : rapprochement et boîte de saisies ================= */
 declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   const tous = vivants("justificatifs").sort((a, b) => a.date < b.date ? 1 : -1);
-  const aRapprocher = tous.filter(j => j.statut === "a_rapprocher");
+  const aRapprocher = tous.filter(pieceOuverte);
   const nbValider = aRapprocher.filter(j => j.aValider).length;
   // File de travail : saisies à valider, sinon justificatifs ayant au moins une opération candidate à trancher
   const attente = nbValider ? aRapprocher.filter(j => j.aValider) : aRapprocher.filter(j => !j.reporte && candidats([j]).length);
@@ -11,19 +11,60 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(entete("Justificatifs", (nbValider ? nbValider + " pièce(s) à valider (téléphone ou dépôt) · " : "") + aRapprocher.length + " à rapprocher · " + tous.length + " au total",
     [h("button", {onclick: async () => { const f = await choisirFichier("image/*,application/pdf", true); if (f?.length){ for (const x of f) await importerJustificatifPc(await lireFichier(x)); rafraichirEcran(); } }}, "Ajouter des tickets ou factures…"),
      h("button", {onclick: async () => { const nj = await creerJustificatif({type: "facture", date: aujourdhui(), montant: 0, origine: "pc", sansPiece: true}); etat.choisi = nj.id; message("Saisie sans pièce : complétez-la, puis « Enregistrer la saisie ». La pièce se joindra à réception."); rafraichirEcran(); }}, "Saisie sans pièce"),
-     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office ; ceux qui changeraient fournisseur ou catégorie sont proposés, à confirmer."); rafraichirEcran(); }}, "Relancer le rapprochement")]));
+     h("button", {class: "discret", onclick: () => { const n = rapprocherTout(); message(n + " rapprochement(s) fait(s) d'office ; ceux qui changeraient fournisseur ou catégorie sont proposés, à confirmer."); rafraichirEcran(); }}, "Relancer le rapprochement"),
+     h("button", {class: "discret", onclick: () => dialogueFiabiliteLecture()}, "Fiabilité de la lecture…")]));
+  const anomalies = anomaliesRapprochement(), raisonDe = new Map(anomalies.filter(a => a.j && a.genre !== "fournisseur non reconnu").map(a => [a.j.id, a.raison]));
+  const depuis = debutAnomalies();
+  const champDepuis = champDate({value: depuis, onchange: e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)){ modifierParametres({anomaliesDepuis: e.target.value}); rafraichirEcran(); } }});
+  // Replié d'office pendant une saisie à valider ou une pièce ouverte : la file de travail passe avant
+  const ouvert = etat.anomaliesOuvertes ?? !(nbValider || j);
+  const parGenre = regrouper(anomalies, a => a.genre);
+  const blocAnomalies = h("section", {class: "encadre", style: {margin: ".6rem 0"}}, h("h3", null, "Anomalies à traiter à la main : " + anomalies.length + " ",
+      anomalies.length ? h("button", {class: "mini discret", onclick: () => { etat.anomaliesOuvertes = !ouvert; rafraichirEcran(); }}, ouvert ? "Replier" : "Déplier") : null),
+    h("p", {class: "note"}, (anomalies.length ? [...parGenre].map(([g, l]) => l.length + " " + g).join(" · ") + ". " : "Aucune. ") + "Contrôle à partir du ", champDepuis,
+      " (avant, les pièces n'étaient pas saisies au fil de l'eau). Les pièces dont le relevé n'est pas encore importé n'y figurent pas."),
+    ouvert && anomalies.length ? tableau([{titre: "Date"}, {titre: "Anomalie"}, {titre: "Fournisseur ou libellé"}, {titre: "Montant", num: true}, {titre: "Piste"}, {titre: ""}], anomalies, {classe: "serre", limite: 60, ligne: a =>
+      h("tr", {class: "cliquable" + (a.j && a.j === j ? " choisie" : ""), onclick: () => { if (a.j){ etat.choisi = a.j.id; rafraichirEcran(); } else aller("operations", {compte: a.op.compte, mois: a.op.date.slice(0, 7), choisie: a.op.id}); }},
+        h("td", null, dateFr(a.date)), h("td", null, a.genre), h("td", null, a.nom), h("td", {class: "num"}, euros(a.montant)), h("td", {class: "petit"}, a.raison),
+        h("td", null, a.piece ? h("button", {class: "mini primaire", title: "Rattacher cette pièce à ce débit malgré l'écart de montant", onclick: async e => { e.stopPropagation();
+            const ecart = Math.abs(a.op.montant) - a.piece.montant;
+            if (await confirmer("Rapprocher la pièce « " + (a.piece.commercantNom || a.piece.raisonSociale || "?") + " » de " + euros(a.piece.montant) + " (" + dateFr(a.piece.date) + ") du débit « " + a.nom + " » de " + euros(-a.op.montant) + " (" + dateFr(a.op.date) + ") ? Écart de " + eurosSigne(ecart) + " : le relevé fait foi pour les comptes, la pièce garde son montant.", "Rapprocher")){ rapprocherAvecEcart(a.piece, a.op); message("Rapproché, écart de " + eurosSigne(ecart) + " noté sur la pièce."); rafraichirEcran(); } }}, "Rapprocher quand même") : null,
+          a.op ? h("button", {class: "mini discret", title: "Ne plus signaler ce débit (péage, abonnement, achat sans ticket…)", onclick: e => { e.stopPropagation(); enregistrer("operations", Object.assign(a.op, {sansPiece: true})); rafraichirEcran(); }}, "Pas de pièce") : null,
+          a.op && a.op.commercant ? h("button", {class: "mini discret", title: "Ne plus signaler les débits de ce fournisseur (péages, abonnements…) ; réversible dans sa fiche", onclick: e => { e.stopPropagation(); const f = obtenir("commercants", a.op.commercant); if (f){ enregistrer("commercants", Object.assign(f, {sansPiece: true})); rafraichirEcran(); } }}, "Jamais pour ce fournisseur") : null))}) : null);
+  const sures = propositionsSures();
+  if (sures.length) c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("span", {class: "discret"}, sures.length + " rapprochement(s) sûr(s) attendent votre accord (ils changeraient fournisseur ou catégorie). "),
+    h("button", {class: "mini primaire", onclick: () => validerPropositionsSures(sures)}, "Les relire et valider…")));
   if (!j && etat.listeSeule && attente.length){
     c.appendChild(h("div", {class: "outils", style: {margin: ".4rem 0"}}, h("span", {class: "discret"}, attente.length + " pièce(s) " + (nbValider ? "à valider" : "avec une opération candidate à trancher") + ". Cliquez sur une ligne pour l'ouvrir, ou "),
       h("button", {class: "mini", onclick: () => { etat.listeSeule = false; etat.ferme = null; rafraichirEcran(); }}, "Reprendre la file")));
   } else if (!j){
     c.appendChild(h("p", {class: "vide"}, aRapprocher.length ? "Rien à valider ni à trancher : " + aRapprocher.length + " justificatif(s) attendent leur opération au relevé. Cliquez sur une ligne pour l'ouvrir." : "Aucun justificatif à rapprocher."));
   } else c.appendChild(ecranRapprochement(j, etat, attente));
+  c.appendChild(blocAnomalies);
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Tous les justificatifs"));
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
-      h("td", null, dateCourte(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : "à rapprocher")))}));
+      h("td", null, dateFr(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
 }});
+
+/* Validation en lot des rapprochements sûrs : chaque ligne montre la pièce, l'opération et ce qui changerait ;
+   on décoche ceux qu'on veut regarder à part. Rien n'est fait sans « Valider ». */
+async function validerPropositionsSures(sures){
+  const cases = sures.map(() => h("input", {type: "checkbox", checked: true}));
+  const nomPiece = j => (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || j.raisonSociale || "—";
+  const corps = h("div", null, h("p", {class: "note"}, "Montant exact et opération unique pour chacun. Décochez ceux à examiner un par un."),
+    h("table", {class: "serre", style: {width: "100%"}}, h("tbody", null, sures.map((s, i) => h("tr", null, h("td", null, cases[i]),
+      h("td", null, dateCourte(s.js[0].date) + " · " + s.js.map(nomPiece).join(" + ")), h("td", null, h("span", {class: "libbanque"}, s.op.libelle)),
+      h("td", {class: "num"}, euros(s.op.montant)), h("td", {class: "petit"}, s.changements.join(" ; ") || "—"))))));
+  const ok = await dialogue({titre: "Rapprochements sûrs à valider (" + sures.length + ")", large: true, corps,
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Valider les cochés", classe: "primaire", valeur: true}]});
+  if (!ok) return;
+  let n = 0;
+  sures.forEach((s, i) => { if (cases[i].checked && obtenir("operations", s.op.id) && s.js.every(j => j.statut === "a_rapprocher")){ lier(s.js, s.op, false); n++; } });
+  message(n + " rapprochement(s) validé(s).");
+  rafraichirEcran();
+}
 
 /* Pièces déjà enregistrées qui pourraient être la même : même montant à 45 jours près, ou même fournisseur
    à 45 jours près, ou même numéro de facture. Sert à la validation d'une pièce lue automatiquement. */
@@ -142,7 +183,7 @@ function ecranRapprochement(j, etat, attente){
     // Questions posées après l'enregistrement (la saisie est déjà sauvée, quelle que soit la réponse)
     (async () => {
       for (const p of aliasAProposer){
-        if (await confirmer("Retenir « " + p.nom + " » comme autre nom de « " + p.fiche.nom + " » ? Les prochaines pièces portant ce nom seront rattachées d'office à cette fiche.", "Retenir")){
+        if (await confirmer("Ajouter « " + p.nom + " » (raison sociale lue sur la pièce) aux alias de la fiche « " + p.fiche.nom + " » ? La fiche garde son nom « " + p.fiche.nom + " » ; les prochaines pièces portant cette raison sociale y seront rattachées sans question.", "Ajouter l'alias")){
           if (ajouterAlias(p.fiche, p.nom)) message("Retenu : « " + p.nom + " » = " + p.fiche.nom + ".");
         } else enregistrer("justificatifs", Object.assign(p.x, {aliasRefuse: true}));
       }
@@ -199,7 +240,7 @@ function ecranRapprochement(j, etat, attente){
 
 /* ---------- Boîte de saisies ---------- */
 declarerEcran("boite", {titre: "Boîte de saisies", rendre(c){
-  c.appendChild(entete("Boîte de saisies", "Dépôts chiffrés du téléphone, lus par ce PC. Reprises, elles arrivent dans Justificatifs « à valider », où tout se corrige ; le dépôt part dans « boite/traitees » : conservé, jamais effacé.",
+  c.appendChild(entete("Boîte de saisies", "Dépôts chiffrés du téléphone, lus par ce PC. Reprises, elles arrivent dans Justificatifs « à valider », où tout se corrige ; le dépôt part dans « boite/traitees », d'où il est retiré 30 jours plus tard (la photo reste dans la pièce jointe).",
     [h("button", {class: "discret", onclick: async () => { await actualiserBoite(); message(BOITE_CACHE.length + " saisie(s) en attente."); rafraichirEcran(); }}, "Relire la boîte"),
      BOITE_CACHE.length ? h("button", {class: "primaire", onclick: async (e) => {
        e.target.disabled = true;
@@ -219,3 +260,53 @@ declarerEcran("boite", {titre: "Boîte de saisies", rendre(c){
     }}));
   c.appendChild(h("p", {class: "note"}, "Une saisie sans opération au relevé après " + LIVRE.parametres.delaiSansOperation + " jours remonte dans « À traiter » (paiement en espèces, relevé manquant)."));
 }});
+
+/* ---------- Fiabilité de la lecture des tickets ----------
+   La lecture (extraireTicket) est rejouée sur le texte lu de chaque pièce et comparée à ce qui a été validé :
+   montant au centime, fournisseur reconnu. Les écarts se téléchargent (texte lu, valeurs validées) pour analyse. */
+function bilanLecture(){
+  const r = [];
+  for (const j of vivants("justificatifs")){
+    if (!j.texteOCR || estNoteFrais(j) || !(j.montant > 0) || j.aValider) continue;
+    const t = extraireTicket(j.texteOCR);
+    const fiche = j.commercant ? obtenir("commercants", j.commercant) : null;
+    const reconnu = commercantPourTicket(t);
+    r.push({j, t, fiche, reconnu, montantOk: t.montant != null && versCentimes(t.montant) === versCentimes(j.montant), fournisseurOk: !fiche || (reconnu && reconnu.id === fiche.id)});
+  }
+  return r.sort((a, b) => (a.j.date || "") < (b.j.date || "") ? 1 : -1);
+}
+async function dialogueFiabiliteLecture(){
+  const r = bilanLecture();
+  if (!r.length) return message("Aucune pièce avec un texte lu à contrôler.");
+  const pct = n => Math.round(n / r.length * 100) + " %";
+  const nm = r.filter(x => x.montantOk).length, nf = r.filter(x => x.fournisseurOk).length;
+  const ecarts = r.filter(x => !x.montantOk || !x.fournisseurOk);
+  const nomF = f => f ? f.nom : "—";
+  await dialogue({titre: "Fiabilité de la lecture des tickets", corps: h("div", null,
+    h("p", null, r.length + " pièce(s) lue(s) : montant juste " + nm + " (" + pct(nm) + "), fournisseur reconnu " + nf + " (" + pct(nf) + ")."),
+    h("p", {class: "note"}, "La lecture est rejouée aujourd'hui sur le texte lu de chaque pièce, avec les fiches et alias actuels, et comparée à ce que vous avez validé."),
+    ecarts.length ? tableau([{titre: "Date"}, {titre: "Validé"}, {titre: "Montant lu", num: true}, {titre: "Fournisseur reconnu"}], ecarts, {classe: "serre", limite: 40, ligne: x => h("tr", null,
+      h("td", null, dateFr(x.j.date)), h("td", null, nomF(x.fiche) + " · " + euros(x.j.montant)),
+      h("td", {class: "num" + (x.montantOk ? "" : " neg")}, x.t.montant == null ? "—" : euros(x.t.montant)), h("td", {class: x.fournisseurOk ? "" : "neg"}, nomF(x.reconnu)))}) : null),
+    actions: [{libelle: "Fermer", classe: "discret", valeur: null},
+      {libelle: "Avec les photos des écarts", classe: "discret", action: () => { exporterAnalyseLecture(r, true); return null; }},
+      {libelle: "Télécharger pour analyse", classe: "primaire", action: () => { exporterAnalyseLecture(r, false); return null; }}]});
+}
+/* Fichier d'analyse : texte lu et valeurs validées ; avec les photos (telles qu'enregistrées, 1 600 px) des pièces
+   du téléphone mal lues, pour éprouver la préparation de l'image. */
+async function exporterAnalyseLecture(r, avecPhotos){
+  const pieces = [];
+  for (const x of r){
+    const p = {id: x.j.id, date: x.j.date, origine: x.j.origine || "", type: x.j.type, texte: x.j.texteOCR,
+      montantValide: x.j.montant, montantLu: x.t.montant, fournisseurValide: x.fiche ? {nom: x.fiche.nom, alias: x.fiche.alias || []} : null, fournisseurReconnu: x.reconnu ? x.reconnu.nom : null,
+      enseigneLue: x.t.enseigne, raisonSocialeLue: x.t.raisonSociale};
+    if (avecPhotos && x.j.origine === "mobile" && (!x.montantOk || !x.fournisseurOk)){
+      const ph = await lirePiece(x.j.id).catch(() => null);
+      if (ph && /^image\//.test(ph.mime)) p.photo = {mime: ph.mime, b64: versB64(ph.octets)};
+    }
+    pieces.push(p);
+  }
+  telecharger(new Blob([JSON.stringify({genre: "analyse_lecture", le: aujourdhui(), pieces}, null, 1)], {type: "application/json"}),
+    "analyse-lecture-" + aujourdhui() + (avecPhotos ? "-photos" : "") + ".json");
+  message("Fichier d'analyse téléchargé" + (avecPhotos ? " (" + pieces.filter(p => p.photo).length + " photo(s))." : "."));
+}

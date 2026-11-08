@@ -216,8 +216,8 @@ function entete(titre, contexte, outils){
     outils ? h("div", {class: "outils"}, outils) : null);
 }
 function compteATraiter(){
-  const ops = vivants("operations").filter(o => o.statut === "a_preciser" || o.statut === "propose").length;
-  const js = vivants("justificatifs").filter(j => j.statut === "a_rapprocher").length;
+  const ops = vivants("operations").filter(o => (o.statut === "a_preciser" || o.statut === "propose") && o.date >= debutAnomalies()).length;
+  const js = vivants("justificatifs").filter(pieceOuverte).length;
   const factures = vivants("factures").filter(f => Math.abs(f.ecart || 0) >= 0.01 && !f.ecartVu).length;
   const echeances = vivants("echeances").filter(e => e.aConfirmer).length;
   return {ops, js, factures, echeances, total: ops + js + factures + echeances};
@@ -231,7 +231,7 @@ function construireNavigation(){
     pastille ? h("span", {class: "pastille" + (alerte ? " alerte" : "")}, pastille) : null);
   n.append(lien("accueil", "Tableau de bord"), lien("traiter", "À traiter", a.total || null),
     h("div", {class: "rubrique"}, "Comptes"), lien("operations", "Opérations"), lien("import", "Importer"),
-    lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(j => j.statut === "a_rapprocher").length || null),
+    lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(pieceOuverte).length || null),
     lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Fournisseurs"),
     h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), LIVRE.parametres.lieux.length > 1 ? lien("sites", "Coût par site") : null, lien("patrimoine", "Bilan et résultat"),
     lien("tresorerie", "Trésorerie", ana?.premierBas ? "!" : null, true),

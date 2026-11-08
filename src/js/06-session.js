@@ -49,9 +49,13 @@ async function ouvrirLivre(motDePasse, souvenir){
   }
   LIVRE = completerLivre(livre);
   try { reparerCategories(); } catch (e) {}
+  try { const ne = reparerEspecesOrphelines(); if (ne) setTimeout(() => message(ne + " opération(s) en espèces supprimée(s) : leur pièce n'y était plus rattachée (payée par carte)."), 3500); } catch (e) {}
+  try { const na = reparerAliasBanques(); if (na) setTimeout(() => message(na + " alias retiré(s) : nom de la banque du terminal (ex. « SUD RHONE ALPES »), pas celui du commerçant."), 2500); } catch (e) {}
   try { const nr = reparerFichesEment(); if (nr) setTimeout(() => message(nr + " fiche(s) fournisseur « Ement… » corrigée(s) (libellés « VIREMENT » mal coupés)."), 1500); } catch (e) {}
   if (motDePasse && souvenir) await memoriserCle(motDePasse);
   SESSION.etat = "ouvert";
+  try { classerParAvisImpot(); } catch (e) {}
+  try { const np = reunirPlacementsEnDouble(); if (np) setTimeout(() => message(np + " valeur(s) d'un placement en double (même numéro, avec ou sans lettre clé) réunie(s) sur le compte actif."), 4500); } catch (e) {}
   estimerDebitsCartes();   // livres repris avant la correction du 17/10/2026 : achats carte datés comme débités le jour même
   if (!distant) await ecrireCache(source, false).catch(() => {});
   if (LIVRE_MODIFIE) planifierSauvegarde();
@@ -185,6 +189,28 @@ async function lirePiece(id){
 }
 
 /* ---------- Boîte de saisies (côté PC) ---------- */
+/* Dépôts du téléphone déjà repris (« boite/traitees ») : doublons chiffrés des pièces jointes, supprimés 30 jours après
+   leur dépôt. Un dépôt n'est retiré que si chaque justificatif qui en est issu a sa pièce sur OneDrive, ou n'en a pas
+   (saisie sans photo) ; une pièce encore en attente d'envoi depuis ce PC garde son dépôt. Renvoie le nombre retiré. */
+async function purgerBoiteTraitees(jours, adaptateur){
+  const ad = adaptateur || SESSION.adaptateur;
+  if ((!adaptateur && typeof DEMO !== "undefined" && DEMO) || !ad?.supprimer || !(await ad.pret(false).catch(() => false))) return 0;
+  const limite = ajouterJours(aujourdhui(), -(jours ?? 30));
+  const fichiers = (await ad.lister("boite/traitees")).filter(f => f.nom.endsWith(".chiffre"));
+  if (!fichiers.length) return 0;
+  const pieces = new Set((await ad.lister("justificatifs")).map(f => f.nom));
+  let n = 0;
+  for (const f of fichiers){
+    const m = f.nom.match(/^(\d{4}-\d{2}-\d{2})T/);
+    if (!m || m[1] > limite) continue;
+    let garder = false;
+    for (const j of vivants("justificatifs").filter(x => x.saisie === f.nom))
+      if (!pieces.has(j.id + ".chiffre") && await idbLire("file", "piece:" + j.id).catch(() => null)) garder = true;
+    if (garder) continue;
+    await ad.supprimer(f.chemin); n++;
+  }
+  return n;
+}
 async function lireBoite(){
   const ad = SESSION.adaptateur;
   if (!ad || !(await ad.pret(false).catch(() => false))) return [];

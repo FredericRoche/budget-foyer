@@ -26,7 +26,7 @@ declarerEcran("accueil", {titre: "Tableau de bord", rendre(c, etat){
   const tb = somme(lignes.filter(l => l.ligne), l => l.budget), tr = somme(lignes, l => l.realise) - depensesProjets(borneB(an + "-" + pad2(mo) + "-01"), finMo, regP);
   // Dépenses du mois saisies (tickets, factures, chèques) dont l'opération n'est pas encore au relevé,
   // retenues selon la même règle que le réalisé (hors « Hors budget » et revenus)
-  const taEnAttente = somme(vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && j.carte !== "ESPECES" && !estNoteFrais(j) && (j.date || "").slice(0, 7) === an + "-" + pad2(mo) && !estDepenseProjet(j, regP, true)
+  const taEnAttente = somme(vivants("justificatifs").filter(j => pieceOuverte(j) && j.carte !== "ESPECES" && !estNoteFrais(j) && (j.date || "").slice(0, 7) === an + "-" + pad2(mo) && !estDepenseProjet(j, regP, true)
     && (n => !NATURES_HORS_RESULTAT.includes(n) && n !== "Revenu")((budget?.lignes || []).find(x => x.categorie === j.categorie && (x.sousCategorie || "") === (j.sousCategorie || ""))?.nature || natureParDefaut(j.categorie))), j => j.montant || 0);
   const cumulB = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.budget) : 0;
   const cumulR = budget ? somme(tableauBudget(budget, an, 1, mo, ""), l => l.realise) - depensesProjets(borneB(an + "-01-01"), finMo, regP) : 0;

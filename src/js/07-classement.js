@@ -55,7 +55,20 @@ function assurerCommercant(libelle, nomPropose){
 }
 /* Banques des terminaux de paiement, imprimées en tête des facturettes : jamais un commerçant. */
 const BANQUES_TERMINAUX = /BANQUE POPULAIRE|CREDIT AGRICOLE|CAISSE D.?EPARGNE|SOCIETE GENERALE|\bBNP\b|PARIBAS|CREDIT MUTUEL|\bCIC\b|\bLCL\b|CREDIT LYONNAIS|BANQUE POSTALE|\bHSBC\b|\bBRED\b|CREDIT DU NORD|BOURSORAMA|BANQUE DE SAVOIE|BANQUE RHONE|LYONNAISE DE BANQUE|\bCAISSE REGIONALE\b/;
-const estBanqueTerminal = s => BANQUES_TERMINAUX.test(norm(s || "").toUpperCase());
+/* Nom de caisse régionale lu seul, sur la ligne qui suit « CREDIT AGRICOLE » ou « CAISSE D'EPARGNE » (ex. « SUD RHONE
+   ALPES »), et mentions des facturettes : jamais un commerçant non plus. */
+const CAISSES_REGIONALES = /^(SUD RHONE ALPES|CENTRE EST|DES SAVOIE|ALPES PROVENCE|PROVENCE COTE D ?AZUR|COTE D ?AZUR|LOIRE HAUTE LOIRE|CENTRE FRANCE|CENTRE LOIRE|PYRENEES GASCOGNE|NORD DE FRANCE|NORD EST|NORD MIDI PYRENEES|BRIE PICARDIE|ANJOU MAINE|SUD MEDITERRANEE|LANGUEDOC|ALSACE VOSGES|ILE DE FRANCE|PARIS ILE DE FRANCE|RHONE ALPES|AUVERGNE RHONE ALPES|LORRAINE CHAMPAGNE ARDENNE|BOURGOGNE FRANCHE COMTE|SANS CONTACT|CARTE BANCAIRE( SANS CONTACT)?)$/;
+const estBanqueTerminal = s => { const t = norm(s || "").toUpperCase(); return BANQUES_TERMINAUX.test(t) || CAISSES_REGIONALES.test(t.replace(/[^A-Z ]/g, " ").replace(/\s+/g, " ").trim()); };
+/* Réparation (05/11/2026) : alias pris par erreur sur la banque du terminal (« SUD RHONE ALPES ») retirés des fiches. */
+function reparerAliasBanques(){
+  let n = 0;
+  for (const c of vivants("commercants")){
+    const garde = (c.alias || []).filter(a => !estBanqueTerminal(a));
+    if (garde.length !== (c.alias || []).length){ n += c.alias.length - garde.length; enregistrer("commercants", Object.assign(c, {alias: garde})); }
+  }
+  if (n) invaliderIndex();
+  return n;
+}
 /* Lecture plausible d'un nom sur une pièce : au moins un mot de 4 lettres, et surtout des lettres. */
 function nomPlausible(s){
   const t = norm(s || "").replace(/\s+/g, "");
@@ -201,6 +214,8 @@ function proposerClassement(op){
 }
 function natureParDefaut(categorie){
   if (categorie === "Revenus") return "Revenu";
+  // Catégorie rattachée à un projet (travaux…) : dépense exceptionnelle, suivie dans Projets, hors marche courante
+  try { if (categorie && reglesProjets().some(r => r.categorie === categorie && !r.sousCategorie)) return "Exceptionnelle"; } catch (e) {}
   if (["Transfert", "Épargne", "Patrimoine"].includes(categorie)) return "Hors budget";
   return "Courante";
 }

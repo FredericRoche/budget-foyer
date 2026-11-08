@@ -22,8 +22,12 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
     gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
       const lu = f.lu; const p = f.prep;
       let genre = {compte: "Compte " + (lu.banque || ""), carte: lu.banque === "Amex" ? "Amex" : "Carte " + (lu.carte || ""), facture_cb: "Facture des cartes LCL", valorisation: "Valorisation · " + (lu.produit || ""),
+<<<<<<< HEAD
         corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
         csv_libre: "CSV d'une autre banque", releve_pdf_libre: "Relevé PDF (lecture générale)",
+=======
+        corrections: "Lot de corrections · " + (lu.actions || []).length + " action(s)" + (lu.titre ? " · " + lu.titre : ""), releve_lcl: "Relevé LCL (PDF, fait foi)", releve_amex: "Relevé Amex (PDF, fait foi)", cartes_lcl: "Cartes LCL (relevé PDF) · " + (lu.titre || "").replace(/^Détail des cartes /, ""), reprise_v7: "Classeur d'inventaire (reprise)", regles: "Règles de classement", plan: "Plan (budget et échéances)", justificatif_pdf: "Justificatif (PDF)", image: "Justificatif (photo)",
+>>>>>>> main
         document: lu.sousGenre === "avis_impot" ? "Avis d'impôt" + (lu.titre ? " · " + lu.titre : "") : lu.sousGenre === "achat_sncf" ? "Justificatif SNCF Connect · " + lu.titre : "Avis d'opéré", inconnu: "Non reconnu"}[lu.genre] || lu.genre;
       const periode = lu.periode ? dateCourte(lu.periode.debut) + " – " + dateFr(lu.periode.fin) : lu.date ? dateFr(lu.date) : lu.arrete ? "arrêté " + dateFr(lu.arrete) : "";
       const nouvelles = p?.nb != null ? p.nb : p?.nouvelles ? p.nouvelles.length + (p.cartesSansTitulaire?.length || 0) : p?.operations ? p.operations.length : "";
@@ -50,17 +54,56 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
       rafraichirEcran();
     }}, "Tout enregistrer (" + prets.length + ")"), h("span", {class: "note", style: {margin: 0}}, "Les opérations douteuses iront dans « À traiter » ; les rapprochements sûrs sans changement de fournisseur ni de catégorie s'appliqueront d'office, les autres seront proposés.")));
     // Aperçu des opérations nouvelles : seulement pour les fichiers qui en proposent un classement (relevés)
-    const detail = FICHIERS_EN_COURS.find(f => f.prep?.nouvelles?.length && f.prep.nouvelles[0]?.proposition && f.statut === "pret");
+    try {
+    const detail = FICHIERS_EN_COURS.find(f => f.statut === "pret" && !["releve_lcl", "releve_amex"].includes(f.lu.genre) && ((f.prep?.nouvelles?.length && f.prep.nouvelles[0]?.proposition) || f.prep?.cartesSansTitulaire?.length));
     if (detail){
       gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Aperçu : " + detail.lu.nom));
       gauche.appendChild(tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Classement proposé"}, {titre: "Lieu"}, {titre: "Origine"}], detail.prep.nouvelles, {classe: "serre", limite: 60, ligne: l =>
         h("tr", null, h("td", null, dateCourte(l.date)), h("td", null, l.libelle), montantCellule(l.montant), h("td", {class: l.proposition.categorie === "À préciser" ? "neg" : ""}, l.proposition.categorie + (l.proposition.sousCategorie && l.proposition.sousCategorie !== l.proposition.categorie ? " › " + l.proposition.sousCategorie : "")),
           h("td", null, etiquetteLieu(l.proposition.lieu)), h("td", null, marqueOrigine(l.proposition)))}));
-      if (detail.prep.deja.length || detail.prep.ecartees.length || detail.prep.doublonsLcl) gauche.appendChild(h("p", {class: "note"},
+      if (detail.prep.deja.length || detail.prep.ecartees.length || detail.prep.doublonsLcl || detail.prep.cartesSansTitulaire?.length) gauche.appendChild(h("p", {class: "note"},
         (detail.prep.deja.length ? detail.prep.deja.length + " ligne(s) déjà présente(s), écartée(s). " : "") +
-        (detail.prep.ecartees.length ? detail.prep.ecartees.length + " ligne(s) carte couverte(s) par les exports par carte, écartée(s). " : "") +
+        (detail.prep.ecartees.length ? detail.prep.ecartees.length + " ligne(s) carte déjà présente(s) sur une carte, écartée(s). " : "") +
+        (detail.prep.cartesSansTitulaire?.length ? detail.prep.cartesSansTitulaire.length + " achat(s) carte absent(s) des cartes, ajouté(s) sur « Cartes LCL (sans titulaire) » : " + detail.prep.cartesSansTitulaire.slice(0, 12).map(l => dateCourte(l.date) + " " + l.libelle + " " + euros(l.montant)).join(" · ") + (detail.prep.cartesSansTitulaire.length > 12 ? " …" : "") + ". " : "") +
         (detail.prep.doublonsLcl ? detail.prep.doublonsLcl + " doublon(s) LCL écarté(s) (règle ⌈n/2⌉). " : "")));
     }
+    // Clôture sur le relevé PDF : écarts à trancher avant d'enregistrer
+    for (const f of FICHIERS_EN_COURS.filter(x => ["releve_lcl", "releve_amex"].includes(x.lu.genre) && x.statut === "pret" && x.prep)){
+      const p = f.prep, enTrop = [...p.enTrop, ...p.enTropCartes];
+      // Ligne en trop expliquée : présente sur un autre relevé déposé (achat de fin de période), ou même montant qu'une
+      // ligne appariée du relevé à 3 jours près (doublon probable, libellé différent : CSV et reprise)
+      const autresReleves = FICHIERS_EN_COURS.filter(x => x !== f && x.lu.genre === f.lu.genre && (x.lu.releveAmex || x.lu.releveCompte));
+      // Autre relevé : l'opération y est appariée (une ligne du relevé pour une opération : deux achats identiques du même
+      // jour ne passent pour présents que si le relevé en porte deux)
+      const surAutre = o => autresReleves.find(x => x.prep?.apparies ? x.prep.apparies.some(a => a.id === o.id)
+        : (x.lu.releveAmex || x.lu.releveCompte).operations.some(l => versCentimes(l.montant) === versCentimes(o.montant) && Math.abs(ecartJours(l.date, o.date)) <= 3));
+      const dbl = new Set(enTrop.filter(o => p.doublonsExacts?.has(o.id) && !surAutre(o)).map(o => o.id));
+      // Une ligne retrouvée sur un autre relevé n'est jamais à supprimer : sa coche éventuelle est retirée
+      for (const o of enTrop) if (p.choixEnTrop.has(o.id) && surAutre(o)) p.choixEnTrop.delete(o.id);
+      const jumeau = o => (p.apparies || []).find(a => a.id !== o.id && a.compte === o.compte && versCentimes(a.montant) === versCentimes(o.montant) && Math.abs(ecartJours(a.date, o.date)) <= 3);
+      const explication = o => { const x = surAutre(o); if (x) return "sur le relevé suivant (" + x.lu.nom + ") : à garder";
+        const j = !dbl.has(o.id) && jumeau(o); return j ? "doublon probable de « " + (j.libelle || "") + " » du " + dateFr(j.date) : null; };
+      gauche.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Clôture sur le relevé : " + f.lu.titre));
+      if (p.anciens?.length) gauche.append(h("p", null, h("label", null, h("input", {type: "checkbox", checked: p.choixAnciens, onchange: e => { p.choixAnciens = e.target.checked; }}),
+        " Marquer comme réglés les " + p.anciens.length + " achat(s) Amex antérieurs au " + dateFr(p.lu.periode.debut) + " restés sans date de débit (" + euros(-somme(p.anciens, o => o.montant)) + ")"),
+        h("div", {class: "note"}, "Le relevé constate le paiement du solde précédent le " + dateFr(p.paiementPrecedent) + " : ces achats ont été réglés par les relevés précédents. Ils reçoivent la date du prélèvement Amex qui les suit (date estimée) et sortent de l'encours. "
+          + "Pour les dater exactement et repérer d'éventuels doublons, importez d'abord les relevés PDF Amex précédents, du plus ancien au plus récent.")));
+      if (!p.manquants.length && !enTrop.length && !p.cartes?.nouvelles?.length){ gauche.appendChild(h("p", {class: "note"}, "Tout est conforme au relevé : « Enregistrer » marque le mois comme clôturé.")); continue; }
+      if (p.manquants.length) gauche.append(h("h3", null, "Écritures du relevé absentes de l'application (" + p.manquants.length + ") : à ajouter"),
+        tableau([{titre: ""}, {titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}], p.manquants.map((l, i) => ({l, i})), {classe: "serre", ligne: ({l, i}) => h("tr", null,
+          h("td", null, h("input", {type: "checkbox", checked: p.choixManquants.has(i), onchange: e => { e.target.checked ? p.choixManquants.add(i) : p.choixManquants.delete(i); }})),
+          h("td", null, dateFr(l.date)), h("td", null, l.libelle, l.detail ? h("div", {class: "libbanque"}, l.detail) : null), montantCellule(l.montant))}));
+      if (p.cartes?.nouvelles?.length) gauche.appendChild(h("p", {class: "note"}, p.cartes.nouvelles.length + " achat(s) carte du relevé absent(s) de l'application, ajouté(s) à l'enregistrement : "
+        + p.cartes.nouvelles.slice(0, 15).map(l => dateCourte(l.date) + " " + l.libelle + " " + euros(l.montant)).join(" · ") + (p.cartes.nouvelles.length > 15 ? " …" : "")));
+      if (enTrop.length) gauche.append(h("h3", null, "Dans l'application mais pas sur le relevé (" + enTrop.length + ") : doublons ou lignes en trop ?"),
+        h("p", {class: "note"}, "Rien n'est supprimé sans votre coche. Un achat du dernier jour peut appartenir au relevé suivant.",
+          dbl.size ? [" ", h("button", {class: "mini", onclick: () => { for (const id of dbl) p.choixEnTrop.add(id); rafraichirEcran(); }}, "Cocher les " + dbl.size + " doublon(s) exact(s)"),
+            " ", h("span", {class: "discret"}, "(même compte, jour, montant et libellé qu'une ligne conservée ; l'original reste)")] : null),
+        tableau([{titre: "Supprimer"}, {titre: "Date"}, {titre: "Compte"}, {titre: "Libellé"}, {titre: "Montant", num: true}], enTrop, {classe: "serre", ligne: o => h("tr", null,
+          h("td", null, h("input", {type: "checkbox", checked: p.choixEnTrop.has(o.id), onchange: e => { e.target.checked ? p.choixEnTrop.add(o.id) : p.choixEnTrop.delete(o.id); }})),
+          h("td", null, dateFr(o.date)), h("td", null, libelleCompte(o.compte)), h("td", null, o.libelle, dbl.has(o.id) ? h("span", {class: "libbanque"}, "doublon exact") : null, explication(o) ? h("span", {class: "libbanque"}, explication(o)) : null, (o.justificatifs || []).length ? h("span", {class: "libbanque"}, "pièce jointe") : null), montantCellule(o.montant))}));
+    }
+    } catch (e){ console.error(e); gauche.appendChild(h("p", {class: "neg"}, "Aperçu impossible à afficher : " + e.message + " (le fichier peut quand même être enregistré ; signalez ce message).")); }
   } else gauche.appendChild(h("p", {class: "vide"}, "Aucun fichier en cours."));
   // Pleine largeur : la routine du mois se replie sous la liste au lieu d'occuper une colonne en permanence
   grille.className = "";
@@ -139,6 +182,20 @@ function preparerFichier(f){
       f.statut = "pret";
     } else if (lu.genre === "reprise_v7"){ f.prep = preparerReprise(lu); f.statut = "pret"; }
     else if (lu.genre === "cartes_lcl"){ f.prep = preparerCartesPdf(lu); f.statut = "pret"; }
+    else if (lu.genre === "releve_lcl" || lu.genre === "releve_amex"){
+      // Recalcul (après l'enregistrement d'un autre fichier) : les choix de l'utilisateur sont gardés
+      const avant = f.prep;
+      const amex = lu.genre === "releve_amex";
+      f.prep = amex ? preparerClotureAmex(lu) : preparerClotureLcl(lu); if (f.prep) f.compte = f.prep.compte; f.statut = f.prep ? "pret" : "erreur"; if (!f.prep) f.erreur = amex ? "compte Amex introuvable : créez d'abord la carte Amex (import d'un CSV Amex)" : "compte LCL introuvable";
+      if (avant && f.prep){
+        const cle = l => l.date + "|" + versCentimes(l.montant) + "|" + l.libelle;
+        const refuses = new Set(avant.manquants.filter((l, i) => !avant.choixManquants.has(i)).map(cle));
+        f.prep.choixManquants = new Set(f.prep.manquants.map((l, i) => i).filter(i => !refuses.has(cle(f.prep.manquants[i]))));
+        const presents = new Set([...f.prep.enTrop, ...f.prep.enTropCartes].map(o => o.id));
+        f.prep.choixEnTrop = new Set([...avant.choixEnTrop].filter(id => presents.has(id)));
+        if (avant.choixAnciens === false) f.prep.choixAnciens = false;
+      }
+    }
     else if (lu.genre === "corrections"){ f.prep = preparerCorrections(lu); f.statut = "pret"; }
     else if (["regles", "plan", "justificatif_pdf", "image", "document"].includes(lu.genre)) f.statut = "pret";
     else f.statut = "erreur";
@@ -167,6 +224,10 @@ async function enregistrerFichier(f, enLot){
     if (lu.genre === "compte" || lu.genre === "carte"){ const imp = appliquerReleve(f.prep); f.resultat = imp.nouvelles + " opération(s)"; }
     else if (lu.genre === "facture_cb") appliquerFacture(f.prep);
     else if (lu.genre === "cartes_lcl"){ const n = appliquerCartesPdf(f.prep); f.resultat = n + " opération(s)"; }
+    else if (lu.genre === "releve_amex"){ const r = appliquerClotureAmex(f.prep); f.resultat = r.ajoutees + " ajoutée(s), " + r.supprimees + " supprimée(s)";
+      message("Mois de la carte Amex clôturé sur le relevé : " + r.ajoutees + " écriture(s) ajoutée(s), " + r.supprimees + " ligne(s) en trop supprimée(s)" + (r.anciens ? ", " + r.anciens + " achat(s) antérieur(s) marqués réglés" : "") + "."); }
+    else if (lu.genre === "releve_lcl"){ const r = appliquerClotureLcl(f.prep); f.resultat = r.ajoutees + r.cartes + " ajoutée(s), " + r.supprimees + " supprimée(s)";
+      message("Mois clôturé sur le relevé : " + r.ajoutees + " écriture(s) et " + r.cartes + " achat(s) carte ajoutés, " + r.supprimees + " ligne(s) en trop supprimée(s)."); }
     else if (lu.genre === "corrections"){
       if (!enLot && !(await confirmer("Appliquer les " + lu.actions.length + " correction(s) du lot « " + lu.nom + " » ?", "Appliquer"))) return;
       const n = appliquerCorrections(lu); f.resultat = n + " correction(s)"; message(n + " correction(s) appliquée(s).");
@@ -177,12 +238,20 @@ async function enregistrerFichier(f, enLot){
       if (!ok) return;
       const r = appliquerReprise(f.prep); message(r.operations + " opérations reprises.");
     }
-    else if (lu.genre === "plan"){ const r = appliquerPlan(lu.contenu); message(r.budgets + " budget(s), " + r.echeances + " échéance(s), " + r.regles + " règle(s)" + (r.comptes ? ", " + r.comptes + " compte(s)" : "") + " importés" + (r.reclassees != null ? " ; " + r.reclassees + " opération(s) reclassée(s)" : "") + ".");
+    else if (lu.genre === "plan"){ const r = appliquerPlan(lu.contenu); message(r.budgets + " budget(s), " + r.echeances + " échéance(s), " + r.regles + " règle(s)" + (r.comptes ? ", " + r.comptes + " compte(s)" : "") + " importés" + (r.reclassees != null ? " ; " + r.reclassees + " opération(s) reclassée(s)" : "") + (r.budgetsSupprimes ? " ; " + r.budgetsSupprimes + " budget(s) supprimé(s)" : "") + (r.budgetsNonSupprimes ? " ; non supprimé : " + r.budgetsNonSupprimes.join(", ") : "") + (r.budgetsIntrouvables ? " ; budget à supprimer introuvable : " + r.budgetsIntrouvables.join(", ") : "") + (r.liensReportes ? " ; " + r.liensReportes + " échéance(s) rattachée(s) à la ligne équivalente du nouveau budget" : "") + (r.liensNonReportes ? " ; lien de budget à revoir (Trésorerie, échéances) : " + r.liensNonReportes.join(", ") : "") + ".", !!(r.liensNonReportes || r.budgetsNonSupprimes || r.budgetsIntrouvables));
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
     else if (lu.genre === "regles"){ const n = appliquerRegles(lu.contenu); message(n + " règle(s) importée(s).");
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
     else if (lu.genre === "justificatif_pdf" || lu.genre === "image") await importerJustificatifPc(lu, !!f.source);
     else if (lu.genre === "document" && lu.sousGenre === "achat_sncf"){ const n = enregistrerAchatsSncf(lu); f.resultat = n + " paiement(s) nouveau(x)"; message(n + " justificatif(s) SNCF Connect enregistré(s) : ils serviront au rapprochement des notes de frais."); }
+    else if (lu.genre === "document" && lu.sousGenre === "avis_impot"){
+      // Un avis réimporté remplace le précédent (même nature, même année, même montant) au lieu de s'ajouter
+      const deja = vivants("documents").find(d => d.genre === "avis_impot" && d.titre === lu.titre && (d.montant || null) === (lu.montant || null))
+        || vivants("documents").find(d => d.genre === "avis_impot" && !d.echeances && d.titre && lu.titre.startsWith(d.titre));
+      enregistrer("documents", Object.assign(deja || {}, {genre: "avis_impot", fichier: lu.nom, date: lu.date, titre: lu.titre, montant: lu.montant, quoi: lu.quoi, echeances: lu.echeances || []}));
+      const n = classerParAvisImpot(); f.resultat = (lu.echeances || []).length + " échéance(s)" + (n ? ", " + n + " prélèvement(s) classé(s)" : "");
+      if (n) message(n + " prélèvement(s) d'impôt classé(s) d'après l'avis.");
+    }
     else if (lu.genre === "document") enregistrer("documents", {genre: lu.sousGenre, fichier: lu.nom, date: lu.date, titre: lu.titre, quantite: lu.quantite, montant: lu.montant, sens: lu.sens, isin: lu.isin});
     f.statut = "fait";
     if (f.source) await rangerFichier(f);
@@ -208,7 +277,7 @@ async function importerJustificatifPc(lu, depuisDepot){
   if (double && !(await confirmer("Une pièce identique est déjà enregistrée : " + (double.commercantNom || double.raisonSociale || "fournisseur ?") + (double.numero ? ", facture n° " + double.numero : "") + ", " + euros(double.montant) + " du " + dateFr(double.date)
     + ". L'ajouter quand même ?", "Ajouter quand même"))) return;
   const j = await creerJustificatif({type: t.type, date: t.date || aujourdhui(), heure: t.heure, montant: t.montant || 0, raisonSociale: t.raisonSociale, commercantNom: c ? c.nom : nomDepuisCle(cleLibelle(t.enseigne || t.raisonSociale || "")),
-    commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
+    commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4) || (/AMERICAN EXPRESS|\bAMEX\b/i.test(t.texte || "") && vivants("comptes").some(c => c.carte === "AMEX") ? "AMEX" : ""), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
     categorie: precedente?.categorie || c?.categorie || "", sousCategorie: precedente ? precedente.sousCategorie || "" : c?.sousCategorie || "", lieu: precedente?.lieu || c?.lieu || "", aVerifier: true,
     fournisseurDevine: devine, natureExacte: ndf ? "Note de frais n° " + ndf.numero + " (" + ndf.periode.toLowerCase() + ")" : "", lignesNdf: ndf ? ndf.lignes : undefined,
     aValider: !!depuisDepot}, t.photo);

@@ -42,7 +42,10 @@ async function dossierImport(quoi, interactif){
 function reglesRangement(){ return LIVRE.parametres.rangement || {}; }
 /* Clé de la règle qui s'applique au fichier : un compte, ou une famille de pièces. */
 function cleRangement(lu, compte){
-  if (lu.genre === "cartes_lcl") return "releves_pdf_lcl";
+  // Relevé d'un autre compte LCL que le compte principal (compte personnel…) : sa propre règle, son propre dossier
+  if (lu.genre === "releve_amex") return compte ? "releves_pdf:" + compte.id : null;
+  if (lu.genre === "releve_lcl" && compte && compte.id !== compteCourantLcl()?.id) return "releves_pdf:" + compte.id;
+  if (lu.genre === "cartes_lcl" || lu.genre === "releve_lcl") return "releves_pdf_lcl";
   if (["compte", "carte", "valorisation"].includes(lu.genre)) return compte ? "compte:" + compte.id : null;
   if (lu.genre === "facture_cb") return "factures_cb";
   if (lu.genre === "document" && lu.sousGenre === "achat_sncf") return "justificatifs";
@@ -52,7 +55,7 @@ function cleRangement(lu, compte){
   return null;
 }
 const LIBELLES_RANGEMENT = {releves_pdf_lcl: "Relevés PDF du compte LCL", factures_cb: "Factures des cartes LCL", avis_opere: "Avis d'opéré", avis_impot: "Avis d'impôt", justificatifs: "Justificatifs", plans: "Plans, règles et classeurs"};
-function libelleRangement(cle){ return cle.startsWith("compte:") ? libelleCompte(cle.slice(7)) : LIBELLES_RANGEMENT[cle] || cle; }
+function libelleRangement(cle){ return cle.startsWith("compte:") ? libelleCompte(cle.slice(7)) : cle.startsWith("releves_pdf:") ? "Relevés PDF · " + libelleCompte(cle.slice(12)) : LIBELLES_RANGEMENT[cle] || cle; }
 
 /* Année du fichier : fin de période, date de valeur, arrêté, sinon aujourd'hui. */
 function anneeFichier(lu){ return String((lu.periode && lu.periode.fin) || lu.date || lu.arrete || lu.dateDebit || aujourdhui()).slice(0, 4); }
@@ -74,7 +77,9 @@ function proposerRangement(lu, compte, index){
   const enfant = (base, re) => base && index.find(c => c.startsWith(base + "/") && c.split("/").length === base.split("/").length + 1 && re.test(c.split("/").pop()));
   const courant = () => { const c = compteCourantLcl(); return c ? parNumero(c.numero) : null; };
   if (lu.genre === "compte"){ const b = parNumero(compte?.numero); return b ? b + "/Historiques CSV" : (compte ? compte.nom : null); }
-  if (lu.genre === "cartes_lcl"){ const b = courant(); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés" : "Relevés PDF LCL"); }
+  if (lu.genre === "releve_lcl" && compte && compte.id !== compteCourantLcl()?.id){ const b = parNumero(compte.numero); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés PDF" : compte.nom + "/Relevés PDF"); }
+  if (lu.genre === "releve_amex"){ const b = parNom(/^amex$/i) || "Amex"; return enfant(b, /relev[ée]s pdf/i) || b + "/Relevés PDF"; }
+  if (lu.genre === "cartes_lcl" || lu.genre === "releve_lcl"){ const b = courant(); const e = enfant(b, /relev[ée]s/i); return e || (b ? b + "/Relevés" : "Relevés PDF LCL"); }
   if (lu.genre === "carte"){
     if (lu.banque === "Amex"){ const b = parNom(/^amex$/i); return (b || "Amex") + "/Relevés"; }
     const debit = compte?.compteDebit ? vivants("comptes").find(c => c.id === compte.compteDebit) : null;
@@ -184,8 +189,66 @@ async function copieIdentique(d, octets, prefixe, niveau){
   return null;
 }
 
+/* ---------- Avis d'impôt : rangés dans le dossier des impôts du foyer (choisi une fois), sous-dossier de l'année ----------
+   Un seul endroit pour tous les avis (revenu, taxes foncières, taxe d'habitation), nommés « AAAA nom d'origine ». */
+const DOSSIER_IMPOTS = {cle: "impots_racine", libelle: "Dossier des impôts"};
+async function choisirDossierImpots(){
+  const d = await window.showDirectoryPicker({id: "bf-impots", mode: "readwrite", startIn: "documents"});
+  const depot = await reglage(DOSSIERS_IMPORT.depot.cle, null);
+  if (depot && await d.isSameEntry(depot)) throw new Error("Ce dossier est le dossier de dépôt : choisissez-en un autre.");
+  await definirReglage(DOSSIER_IMPOTS.cle, d);
+  return d;
+}
+async function dossierImpots(interactif){
+  let d = await reglage(DOSSIER_IMPOTS.cle, null);
+  if (d){
+    let p = await d.queryPermission({mode: "readwrite"});
+    if (p !== "granted" && interactif) p = await d.requestPermission({mode: "readwrite"});
+    return p === "granted" ? d : null;
+  }
+  if (!interactif || !window.showDirectoryPicker) return null;
+  if (!(await confirmer("Où ranger les avis d'impôt sur cet appareil ? Choisissez votre dossier des impôts (celui qui contient un sous-dossier par année).", "Choisir…"))) return null;
+  try { return await choisirDossierImpots(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); return null; }
+}
+async function rangerAvisImpot(f){
+  const racine = await dossierImpots(true);
+  if (!racine){ f.rangement = {reste: "dossier des impôts non désigné"}; return; }
+  try {
+    const octets = new Uint8Array(await (await f.source.poignee.getFile()).arrayBuffer());
+    const deja = await copieIdentique(racine, octets, racine.name, 2);
+    if (deja){ await f.source.dossier.removeEntry(f.source.nom); f.rangement = {chemin: deja, identique: true}; return; }
+    const an = (String(f.lu.titre || "").match(/(20\d{2})/) || [])[1] || anneeFichier(f.lu);
+    const d = await racine.getDirectoryHandle(an, {create: true});
+    const pris = new Set(); for await (const [nom] of d.entries()) pris.add(nom);
+    const nom = f.source.nom.replace(/\s*\(\d+\)(?=\.pdf$)/i, "");
+    const final = nomLibre(/^20\d{2} /.test(nom) ? nom : an + " " + nom, pris);
+    const fh = await d.getFileHandle(final, {create: true});
+    const w = await fh.createWritable(); await w.write(octets); await w.close();
+    if (!memesOctets(new Uint8Array(await (await fh.getFile()).arrayBuffer()), octets)) throw new Error("copie non conforme, le fichier reste au dépôt");
+    await f.source.dossier.removeEntry(f.source.nom);
+    f.rangement = {chemin: racine.name + "/" + an + "/" + final, identique: false};
+  } catch (e){ f.rangement = {erreur: e.message}; console.error(e); }
+}
+
+/* Fichier de même nom (ou « nom (n) ») déjà présent dans « d », PDF au texte identique : son nom, sinon null. */
+async function memePdfDejaRange(d, nom, octets){
+  if (!/\.pdf$/i.test(nom)) return null;
+  const base = nom.replace(/\.pdf$/i, "");
+  let texteNouveau = null;
+  for await (const [n, e] of d.entries()){
+    if (e.kind !== "file" || !(n === nom || (n.startsWith(base + " (") && /\(\d+\)\.pdf$/i.test(n)))) continue;
+    try {
+      texteNouveau = texteNouveau ?? (await textePdf(octets)).replace(/\s+/g, "");
+      const t = (await textePdf(new Uint8Array(await (await e.getFile()).arrayBuffer()))).replace(/\s+/g, "");
+      if (t && t === texteNouveau) return n;
+    } catch (err){ /* PDF illisible : pas de rapprochement par le texte */ }
+  }
+  return null;
+}
+
 async function rangerFichier(f){
   if (f.lu.noteFrais) return rangerNoteFrais(f);   // dossier propre, nom normalisé, sans sous-dossier d'année
+  if (f.lu.genre === "document" && f.lu.sousGenre === "avis_impot") return rangerAvisImpot(f);
   const archives = await dossierImport("archives", true);
   if (!archives){ f.rangement = {reste: "archives non désignées"}; return; }
   const r = dossierRangement(f);
@@ -208,7 +271,17 @@ async function rangerFichier(f){
     for (const p of chemin) d = await d.getDirectoryHandle(p, {create: true});
     const pris = new Set();
     for await (const [nom] of d.entries()) pris.add(nom);
-    const final = nomLibre(f.source.nom, pris);
+    // Même nom déjà rangé : un PDF retéléchargé (quelques octets de différence) dont le texte est identique est le même document
+    // Relevé Amex téléchargé sous la seule date (« 2026-11-06.pdf ») : nommé pour être reconnu dans les archives
+    const nomCible = f.lu.genre === "releve_amex" && f.lu.periode ? "Relevé Amex " + f.lu.periode.fin + ".pdf" : f.source.nom;
+    const memeNom = await memePdfDejaRange(d, nomCible, octets);
+    if (memeNom){
+      await f.source.dossier.removeEntry(f.source.nom);
+      if (r.propose) modifierParametres({rangement: Object.assign({}, reglesRangement(), {[r.cle]: r.dossier})});
+      f.rangement = {chemin: chemin.join("/") + "/" + memeNom, identique: true};
+      return;
+    }
+    const final = nomLibre(nomCible, pris);
     const fh = await d.getFileHandle(final, {create: true});
     const w = await fh.createWritable(); await w.write(octets); await w.close();
     const relu = new Uint8Array(await (await fh.getFile()).arrayBuffer());
@@ -245,6 +318,7 @@ function celluleRangement(f){
   if (f.rangement?.reste) return h("span", {class: "discret"}, "reste au dépôt (" + f.rangement.reste + ")");
   if (f.statut === "erreur" || f.lu.genre === "inconnu") return h("span", {class: "discret"}, "reste au dépôt");
   if (f.lu.noteFrais) return h("span", null, "→ " + DOSSIER_NOTES_FRAIS.libelle.toLowerCase() + " : « " + nomNoteFrais(f.lu.noteFrais) + " »");
+  if (f.lu.genre === "document" && f.lu.sousGenre === "avis_impot") return h("span", null, "→ " + DOSSIER_IMPOTS.libelle.toLowerCase() + ", sous-dossier de l'année");
   const r = dossierRangement(f);
   if (!r) return h("span", {class: "discret"}, "reste au dépôt");
   if (!r.dossier) return h("button", {class: "mini discret", onclick: () => modifierRangement(r.cle, "")}, "Définir le rangement…");
@@ -267,7 +341,13 @@ function sectionDossiersImport(){
     return h("li", null, h("span", null, DOSSIER_NOTES_FRAIS.libelle + " : ", zone),
       h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierNotesFrais(); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
   })();
-  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives"), ligneNdf));
+  const ligneImpots = (() => {
+    const zone = h("span", {class: "discret"}, "…");
+    reglage(DOSSIER_IMPOTS.cle, null).then(d => { zone.textContent = d ? "« " + d.name + " »" : "non désigné (demandé au premier rangement)"; zone.className = d ? "" : "discret"; });
+    return h("li", null, h("span", null, DOSSIER_IMPOTS.libelle + " : ", zone),
+      h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierImpots(); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
+  })();
+  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives"), ligneNdf, ligneImpots));
   const regles = Object.entries(reglesRangement()).sort((a, b) => libelleRangement(a[0]).localeCompare(libelleRangement(b[0])));
   if (regles.length) corps.appendChild(tableau([{titre: "Pièces"}, {titre: "Rangées dans (+ année)"}, {titre: ""}], regles, {classe: "serre", ligne: ([cle, d]) =>
     h("tr", null, h("td", null, libelleRangement(cle)), h("td", {class: "petit"}, d), h("td", null, h("button", {class: "mini discret", onclick: () => modifierRangement(cle, d)}, "Modifier")))}));

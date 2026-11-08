@@ -9,7 +9,16 @@
    - fusionnerFiches {garder, absorber: [noms], nom?} : opérations, justificatifs et alias rejoignent « garder »
    - deplacerSousCategorie {de: [cat, sous], vers: [cat, sous]} : liste des réglages et tous les enregistrements
    - reclasser {fournisseur, de: [cat, sous], vers: [cat, sous], ficheParDefaut?} : opérations de ce fournisseur
-   - categorieFiche {fiche, categorie, sousCategorie} : classement par défaut fixé, sans toucher au passé */
+   - categorieFiche {fiche, categorie, sousCategorie} : classement par défaut fixé, sans toucher au passé
+   - natureCategorie {categorie, sousCategorie?, nature} : nature (Courante, Exceptionnelle, Hors budget…) de toutes
+     les opérations, et parts ventilées, de cette catégorie */
+const partsNatureAChanger = a => vivants("operations").flatMap(o => {
+  const r = [];
+  const vise = (cat, sous) => cat === a.categorie && (!a.sousCategorie || (sous || "") === a.sousCategorie);
+  if (o.ventilation && o.ventilation.length) o.ventilation.forEach((v, i) => { if (vise(v.categorie || o.categorie, v.sousCategorie || o.sousCategorie) && (v.nature || o.nature) !== a.nature) r.push({o, i}); });
+  else if (vise(o.categorie, o.sousCategorie) && o.nature !== a.nature) r.push({o, i: -1});
+  return r;
+});
 
 // Nom exact d'abord ; sinon sans tenir compte de la casse, des accents, des espaces ni de la ponctuation
 const cleNomFiche = s => norm(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -70,6 +79,10 @@ function preparerCorrections(lu){
         return f ? {ok: true, n: 0, texte: "« " + a.fiche + " » : classement par défaut " + a.categorie + " › " + (a.sousCategorie || "") + " (opérations passées inchangées)"}
           : {ok: false, texte: "Fiche « " + a.fiche + " » introuvable : ignorée"};
       }
+      if (a.type === "natureCategorie"){
+        const n = partsNatureAChanger(a).length;
+        return {ok: true, n, texte: [a.categorie, a.sousCategorie].filter(Boolean).join(" › ") + " : nature « " + a.nature + " » pour " + n + " opération(s) ou part(s)"};
+      }
       return {ok: false, texte: "Action inconnue « " + a.type + " » : ignorée"};
     } catch (e){ return {ok: false, texte: "Action « " + a.type + " » illisible : " + e.message}; }
   });
@@ -107,6 +120,12 @@ function appliquerCorrections(lu){
       for (const o of opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]))
         enregistrer("operations", Object.assign(o, {categorie: a.vers[0], sousCategorie: a.vers[1], nature: natureParDefaut(a.vers[0]), statut: "classe", verrou: true}));
       if (a.ficheParDefaut){ Object.assign(f, {categorie: a.vers[0], sousCategorie: a.vers[1], fixe: true}); enregistrer("commercants", f); }
+      faites++;
+    } else if (a.type === "natureCategorie"){
+      for (const {o, i} of partsNatureAChanger(a)){
+        if (i >= 0) o.ventilation[i].nature = a.nature; else o.nature = a.nature;
+        enregistrer("operations", o);
+      }
       faites++;
     } else if (a.type === "categorieFiche"){
       const f = ficheNommee(a.fiche); if (!f) continue;

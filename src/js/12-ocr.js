@@ -42,28 +42,67 @@ function cadrerPapier(src){
   const x0 = Math.max(0, (best.x0 - mx) * f), y0 = Math.max(0, (best.y0 - my) * f);
   return {x: x0, y: y0, l: Math.min(src.width, (best.x1 + 1 + mx) * f) - x0, h: Math.min(src.height, (best.y1 + 1 + my) * f) - y0};
 }
-/* Réduit la photo (1 600 px au plus) pour la garder ; pour la lire, cadre sur le ticket, agrandit si besoin
-   et passe en niveaux de gris contrastés. */
+/* Copie gardée de la photo : 1 200 px au plus, niveaux de gris, JPEG 0,6 (environ 0,1 Mo au lieu de 0,5 Mo en couleur
+   à 1 600 px, le 07/11/2026 ; le ticket reste lisible à l'écran). La lecture, elle, part de la photo d'origine :
+   cadrée sur le ticket, agrandie si besoin, en niveaux de gris contrastés. */
 async function preparerImage(blob, cote){
   const img = await createImageBitmap(blob);
-  const k = Math.min(1, (cote || 1600) / Math.max(img.width, img.height));
+  const k = Math.min(1, (cote || 1200) / Math.max(img.width, img.height));
   const photo = document.createElement("canvas"); photo.width = Math.round(img.width * k); photo.height = Math.round(img.height * k);
-  photo.getContext("2d").drawImage(img, 0, 0, photo.width, photo.height);
-  const couleur = await new Promise(r => photo.toBlob(r, "image/jpeg", 0.8));
+  const px = photo.getContext("2d"); px.drawImage(img, 0, 0, photo.width, photo.height);
+  const dp = px.getImageData(0, 0, photo.width, photo.height), q = dp.data;
+  for (let i = 0; i < q.length; i += 4){ const g = 0.299 * q[i] + 0.587 * q[i + 1] + 0.114 * q[i + 2]; q[i] = q[i + 1] = q[i + 2] = g; }
+  px.putImageData(dp, 0, 0);
+  const couleur = await new Promise(r => photo.toBlob(r, "image/jpeg", 0.6));
   const z = cadrerPapier(img) || {x: 0, y: 0, l: img.width, h: img.height};
   const kz = Math.min(3, Math.max(1, 1200 / z.l), 2000 / Math.max(z.l, z.h));
   const c = document.createElement("canvas"); c.width = Math.round(z.l * kz); c.height = Math.round(z.h * kz);
   const ctx = c.getContext("2d"); ctx.imageSmoothingQuality = "high"; ctx.drawImage(img, z.x, z.y, z.l, z.h, 0, 0, c.width, c.height);
   const d = ctx.getImageData(0, 0, c.width, c.height); const p = d.data;
-  for (let i = 0; i < p.length; i += 4){ const g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; const v = g > 160 ? 255 : g < 90 ? 0 : g; p[i] = p[i + 1] = p[i + 2] = v; }
-  ctx.putImageData(d, 0, 0);
-  return {jpeg: new Uint8Array(await couleur.arrayBuffer()), lecture: c};
+  const gris = new Float32Array(c.width * c.height);
+  for (let i = 0, k = 0; i < p.length; i += 4, k++) gris[k] = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+  const canevas = v => { const x = document.createElement("canvas"); x.width = c.width; x.height = c.height; const cx = x.getContext("2d"); const e = cx.createImageData(c.width, c.height);
+    for (let k = 0, i = 0; k < v.length; k++, i += 4){ e.data[i] = e.data[i + 1] = e.data[i + 2] = v[k]; e.data[i + 3] = 255; } cx.putImageData(e, 0, 0); return x; };
+  const seuil = new Float32Array(gris.length); for (let k = 0; k < gris.length; k++){ const g = gris[k]; seuil[k] = g > 160 ? 255 : g < 90 ? 0 : g; }
+  // Préparations de secours (banc d'essai du 07/11/2026 sur 26 photos mal lues : 7 montants justes → 14) :
+  // niveaux de gris étirés sans seuil, puis seuil adaptatif (moyenne locale) qui résiste aux ombres et au papier courbé
+  return {jpeg: new Uint8Array(await couleur.arrayBuffer()), lecture: canevas(seuil),
+    secours: [() => canevas(etirerGris(gris)), () => canevas(seuilAdaptatif(gris, c.width, c.height))]};
 }
+function etirerGris(g){
+  const t = Array.from(g).sort((a, b) => a - b), lo = t[Math.floor(t.length * 0.02)], hi = t[Math.floor(t.length * 0.98)];
+  const r = new Float32Array(g.length); for (let k = 0; k < g.length; k++) r[k] = Math.max(0, Math.min(255, (g[k] - lo) * 255 / Math.max(1, hi - lo)));
+  return r;
+}
+// Seuil de Bradley : un point est noir s'il est 15 % plus sombre que la moyenne de son voisinage (1/16 de la largeur)
+function seuilAdaptatif(g, w, h){
+  const s = Math.max(15, Math.round(w / 16)) | 1, m = s >> 1, I = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++){ let ligne = 0; for (let x = 0; x < w; x++){ ligne += g[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + ligne; } }
+  const r = new Float32Array(g.length);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){
+    const x0 = Math.max(0, x - m), x1 = Math.min(w - 1, x + m), y0 = Math.max(0, y - m), y1 = Math.min(h - 1, y + m);
+    const n = (x1 - x0 + 1) * (y1 - y0 + 1), somme = I[(y1 + 1) * (w + 1) + x1 + 1] - I[y0 * (w + 1) + x1 + 1] - I[(y1 + 1) * (w + 1) + x0] + I[y0 * (w + 1) + x0];
+    r[y * w + x] = g[y * w + x] * n < somme * 0.85 ? 0 : 255;
+  }
+  return r;
+}
+/* Lecture en trois passes au plus : la préparation habituelle ; si le montant n'est pas sûr, les niveaux de gris ; puis le
+   seuil adaptatif lu comme un seul bloc de texte. La première lecture au montant sûr l'emporte ; sinon, la première. */
 async function lireTicket(blob, progression){
-  const {jpeg, lecture} = await preparerImage(blob);
+  const {jpeg, lecture, secours} = await preparerImage(blob);
   const moteur = await chargerOcr(progression);
-  const r = await moteur.recognize(lecture);
-  return Object.assign(extraireTicket(r.data.text || ""), {photo: {mime: "image/jpeg", octets: jpeg}});
+  const passes = [[() => lecture, "3"], [secours[0], "3"], [secours[1], "6"]];
+  let premier = null;
+  try {
+    for (const [i, [image, mode]] of passes.entries()){
+      if (i) await moteur.setParameters({tessedit_pageseg_mode: mode});
+      const r = await moteur.recognize(image());
+      const t = Object.assign(extraireTicket(r.data.text || ""), {passe: i + 1});
+      if (!premier) premier = t;
+      if (t.confiance.montant === "sûr") return Object.assign(t, {photo: {mime: "image/jpeg", octets: jpeg}});
+    }
+  } finally { await moteur.setParameters({tessedit_pageseg_mode: "3"}).catch(() => {}); }
+  return Object.assign(premier, {photo: {mime: "image/jpeg", octets: jpeg}});
 }
 
 /* ---------- Extraction (pure, testable) ---------- */
@@ -74,6 +113,13 @@ function montantsDe(ligne){
   const r = []; for (const m of ligne.matchAll(RE_MONTANT)) r.push(parseFloat(m[1].replace(/[ .\u00a0\u202f]/g, "") + "." + m[2]));
   if (!r.length) for (const m of ligne.matchAll(RE_MONTANT_ENTIER)) r.push(parseFloat(m[1].replace(/[ .\u00a0\u202f]/g, "")));
   return r;
+}
+/* Montant lu avec des lettres pour des chiffres (« Z0.40 », « 1O,5O ») : dans un groupe « x,yy » qui porte au moins
+   un chiffre, O/Q → 0, Z → 2, S → 5, I/l/| → 1, B → 8. Le reste de la ligne n'est pas touché. */
+function reparerMontantsOcr(l){
+  const carte = {O: "0", o: "0", Q: "0", Z: "2", z: "2", S: "5", s: "5", I: "1", l: "1", "|": "1", B: "8"};
+  return String(l).replace(/(^|[\s:=\-])([0-9OoQZzSsIl|B]{1,6})([,.])([0-9OoQZzSsIl|B]{2})(?!\d)/g,
+    (t, avant, e, sep, c) => /\d/.test(e + c) && /\d/.test(e.slice(-1) + c) ? avant + e.replace(/[^\d]/g, x => carte[x] || x) + sep + c.replace(/[^\d]/g, x => carte[x] || x) : t);
 }
 function extraireTicket(texte){
   const lignes = texte.split(/\r?\n/).map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean);
@@ -87,23 +133,62 @@ function extraireTicket(texte){
   const noteFrais = N.some(l => /NOTE DE FRAIS|NOTES DE FRAIS|NOTE DE DEPENSES|EXPENSE REPORT|EXPENSE CLAIM|^NDF ?# ?\d/.test(l));
   res.type = noteFrais ? "notefrais" : facture ? "facture" : facturette ? "facturette" : "ticket";
 
-  /* Montant : ligne « TOTAL / À PAYER / NET / MONTANT », sinon le plus grand montant */
+  /* Montant. Mesuré le 07/11/2026 sur 67 pièces réelles : les erreurs venaient de « 20,60 EUR » délaissé pour
+     un montant d'article, de « Total: 104 44 » (virgule non lue), de « Total Avantages » ou « Total TTC (tva incl.) »
+     mal triés, de « Z0.40 » (2 lu Z). Ordre : facturette (montant suivi de « EUR ») ; ligne de total ; total HT + TVA
+     s'il contredit le total lu ; sinon le plus grand montant (à vérifier). */
+  const L = lignes.map(reparerMontantsOcr);
   const motsTotal = /(TOTAL TTC|NET A PAYER|A PAYER|TOTAL|MONTANT( TTC)?|SOMME|TTC|PAYE|CB )/;
+  const horsTotal = l => /SOUS.?TOTAL|RENDU|REMISE|ECONOMIE|AVANTAGE|FIDELITE|POINTS|ELIGIBLE/.test(l)
+    || (/TVA|\bHT\b/.test(l) && !/TVA INCL/.test(l));
+  // Montant d'une ligne de total : avec centimes, ou « 104 44 » (virgule perdue) en fin de ligne
+  const montantsTotal = s => { const m = montantsDe(s); if (m.length) return m; const x = s.match(/(\d{1,5}) (\d{2})\s*[€E]?\s*$/); return x ? [+(x[1] + "." + x[2])] : []; };
   let candidat = null;
-  N.forEach((l, i) => {
-    if (!motsTotal.test(l) || /SOUS.?TOTAL|TVA|HT\b|RENDU|REMISE|ECONOMIE/.test(l)) return;
-    const m = montantsDe(lignes[i]).concat(i + 1 < lignes.length && !montantsDe(lignes[i]).length ? montantsDe(lignes[i + 1]) : []);
-    if (m.length){ const v = Math.max(...m); if (!candidat || /TOTAL TTC|NET A PAYER|A PAYER/.test(l) || v > candidat) candidat = v; }
+  // Facturette : le montant payé suit « MONTANT » (même ligne ou les deux suivantes), imprimé « 12,10 EUR ». Seulement
+  // là : un ticket de caisse imprime aussi « 1,48 EUR » sur chaque article (pris pour le total le 07/11/2026).
+  const iMontant = N.findIndex(l => /M?ONTANT/.test(l) && !/ELIGIBLE/.test(l));
+  if (iMontant >= 0) for (const [k, l] of L.slice(iMontant, iMontant + 3).entries()){
+    if (/TVA|\bHT\b/.test(N[iMontant + k])) continue;
+    const m = l.match(/(\d{1,5})[,.](\d{2})\s*EUR\b/i); if (m){ candidat = +(m[1] + "." + m[2]); break; }
+  }
+  if (candidat === null) N.forEach((l, i) => {
+    if (!motsTotal.test(l) || horsTotal(l)) return;
+    const m = montantsTotal(L[i]).concat(i + 1 < L.length && !montantsTotal(L[i]).length ? montantsDe(L[i + 1]) : []);
+    if (m.length){ const v = Math.max(...m); if (candidat === null || /TOTAL TTC|NET A PAYER|A PAYER/.test(l) || v > candidat) candidat = v; }
   });
+  // Total HT + TVA : si la somme figure ailleurs sur la pièce et contredit le total lu, elle l'emporte (36,60 lu pour 36,00)
+  const ht = N.findIndex(l => /TOTAL HT|MONTANT HT/.test(l)), tva = N.findIndex(l => /TOTAL TVA|MONTANT TVA/.test(l));
+  if (ht >= 0 && tva >= 0){
+    const [a] = montantsDe(L[ht]), [b] = montantsDe(L[tva]);
+    if (a > 0 && b >= 0){
+      const s = Math.round((a + b) * 100) / 100;
+      if (candidat !== null && versCentimes(s) !== versCentimes(candidat) && L.some(l => montantsDe(l).some(v => versCentimes(v) === versCentimes(s)))) candidat = s;
+    }
+  }
+  if (candidat !== null && candidat >= 100000) candidat = null;
   if (candidat !== null){ res.montant = candidat; res.confiance.montant = "sûr"; }
-  else { const tous = lignes.flatMap(montantsDe).filter(v => v < 100000); if (tous.length){ res.montant = Math.max(...tous); res.confiance.montant = "à vérifier"; } }
+  else {
+    // Sans ligne de total lisible (07/11/2026 : moitié haute du ticket perdue à la lecture, « 1112.12 » de « Ver 1.1.12.1 » retenu) :
+    // le montant en EUR ou € qui revient le plus souvent (le total est imprimé plusieurs fois), sinon le plus grand montant,
+    // hors numéros de téléphone et de version
+    const bruit = i => /\bT[EÉ]L\b|\bVER\b|SIRET|SIREN/.test(N[i]);
+    const eur = L.flatMap((l, i) => bruit(i) ? [] : [...l.matchAll(/(\d{1,5})[,.](\d{2})\s*(?:EUR|€)/gi)].map(m => +(m[1] + "." + m[2]))).filter(v => v > 0 && v < 100000);
+    if (eur.length){
+      const n = new Map(); for (const v of eur) n.set(v, (n.get(v) || 0) + 1);
+      res.montant = [...n].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0]; res.confiance.montant = "à vérifier";
+    } else {
+      const tous = L.flatMap((l, i) => bruit(i) ? [] : montantsDe(l)).filter(v => v < 100000);
+      if (tous.length){ res.montant = Math.max(...tous); res.confiance.montant = "à vérifier"; }
+    }
+  }
 
   /* Numéro de facture : « Facture n° X », « N°D26-011 », ou le n° posé sur la ligne suivante (les dates en sont retirées) */
   res.numero = numeroFacture(lignes);
 
   /* Date et heure */
-  const dates = [];
+  const dates = [], datesHeure = [];
   for (const l of lignes){
+    const n0 = dates.length;
     // (les PDF découpent parfois la date : « 12 / 10 /202 6 »)
     for (const m of l.matchAll(/\b(\d{1,2}) ?[\/.\-] ?(\d{1,2}) ?[\/.\-] ?(\d ?\d ?\d ?\d|\d{2})(?!\d)/g)){ const d = lireDate(m[0].replace(/ /g, "")); if (d) dates.push(d); }
     for (const m of norm(l).matchAll(/\b(\d{1,2}) (janv|fevr|mars|avr|mai|juin|juil|aout|sept|oct|nov|dec)[a-z]*\.? (\d{4})\b/g)){
@@ -111,6 +196,8 @@ function extraireTicket(texte){
       dates.push(`${m[3]}-${pad2(mois)}-${pad2(m[1])}`);
     }
     const h = l.match(/\b([01]?\d|2[0-3])[:hH]([0-5]\d)(?:[:]([0-5]\d))?\b/); if (h && !res.heure) res.heure = pad2(h[1]) + ":" + h[2];
+    // Date imprimée avec l'heure (« 18:00:16 7/11/2026 ») : c'est celle de l'achat ; elle passe avant toute autre suite de chiffres
+    if (h && dates.length > n0){ datesHeure.push(...dates.slice(n0)); res.heure = pad2(h[1]) + ":" + h[2]; }
   }
   const auj = aujourdhui();
   if (!dates.length) for (const l of lignes){
@@ -120,7 +207,7 @@ function extraireTicket(texte){
     if (d > ajouterJours(auj, 1)) d = (+auj.slice(0, 4) - 1) + "-" + pad2(+m[2]) + "-" + pad2(+m[1]);
     if (lireDate(d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4))){ dates.push(d); break; }
   }
-  const plausibles = dates.filter(d => d <= ajouterJours(auj, 1) && d >= ajouterJours(auj, -400));
+  const plausibles = [...datesHeure, ...dates].filter(d => d <= ajouterJours(auj, 1) && d >= ajouterJours(auj, -400));
   if (plausibles.length){ res.date = plausibles[0]; res.confiance.date = "sûr"; }
 
   /* Carte (4 derniers chiffres), SIRET, TVA */
@@ -131,7 +218,7 @@ function extraireTicket(texte){
     if (s && !res.siret) res.siret = s[1].replace(/\s/g, "");
   }
   /* Raison sociale et enseigne : premières lignes significatives */
-  const ignorer = /BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
+  const ignorer = /ARTICLES?\b|VENDUS|=|BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
   const nomPossible = i => /[A-Za-z]{3}/.test(lignes[i]) && !ignorer.test(N[i]) && !estBanqueTerminal(lignes[i]) && nomPlausible(lignes[i]) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[i]) && !montantsDe(lignes[i]).length && lignes[i].length <= 40;
   const tete = lignes.slice(0, 8).filter((l, i) => nomPossible(i));
   /* Facturette CB : le commerçant suit la ligne « LE jj/mm/aa A hh:mm » ; ce qui précède (banque, AID, broderie
@@ -173,24 +260,76 @@ const motsNom = s => [...new Set(norm(s || "").toLowerCase().split(/[^a-z0-9]+/)
    ils ne prouvent rien (le 04/11, un alias fait de lieux avait fait prendre des factures d'hébergeur pour la charcuterie). */
 const MOTS_LIEUX = new Set(["paris", "lyon", "valence", "saint", "sainte", "germain", "boulevard", "avenue", "place", "route",
   "chemin", "quai", "allee", "impasse", "centre", "ville", "gare", "marche"]);
-function commercantDansTexte(texte, fiches){
-  const mots = new Set(motsNom(texte)); let meilleur = null, score = 0;
-  for (const f of fiches){
-    if (["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne"].includes(f.categorie)) continue;
-    for (const nom of [f.nom, ...(f.alias || [])]){
-      const m = motsNom(nom);
-      if (m.length >= 2 && m.some(w => !MOTS_LIEUX.has(w)) && m.every(w => mots.has(w)) && m.length > score){ meilleur = f; score = m.length; }
-    }
+/* Lecture tolérante (mesurée le 07/11/2026 : « LA SAVOURFINE », « BOUCHERITE JLM », « SOUCHERTE PARISIENNE ») :
+   un mot de 5 lettres et plus est retrouvé à une lettre près (deux à partir de 8 lettres) ; les mots courts
+   (« JLM », « BHV ») doivent être exacts. */
+const MOTS_OUTILS_NOM = new Set(["les", "des", "une", "sur", "par", "aux", "rue", "pour", "avec", "the", "and", "ste", "cie", "dit"]);
+const motsFiche = s => [...new Set(norm(s || "").toLowerCase().replace(/['’]/g, " ").split(/[^a-z0-9]+/)
+  .filter(w => w.length >= 3 && !/^\d+$/.test(w) && !MOTS_OUTILS_NOM.has(w) && !MOTS_GENERIQUES.has(w)))];
+// Noms de métier : jamais distinctifs seuls, même portés par une seule fiche (« BOUCHERIE » ne désigne pas une boucherie précise)
+const METIERS = new Set(["boucherie", "boulangerie", "patisserie", "pharmacie", "fromagerie", "poissonnerie", "epicerie", "primeurs",
+  "librairie", "pressing", "garage", "station", "restaurant", "brasserie", "traiteur", "charcuterie", "caviste", "superette",
+  "supermarche", "magasin", "bijouterie", "fleuriste", "opticien", "tabac", "presse", "parfumerie", "quincaillerie", "droguerie",
+  "pizzeria", "boutique", "marche", "cordonnerie", "coiffure", "coiffeur", "cafe", "hotel", "bazar"]);
+function distanceAuPlus(a, b, max){
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prec = Array.from({length: b.length + 1}, (_, j) => j);
+  for (let i = 1; i <= a.length; i++){
+    const cur = [i]; let mini = i;
+    for (let j = 1; j <= b.length; j++){ cur[j] = Math.min(prec[j] + 1, cur[j - 1] + 1, prec[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); if (cur[j] < mini) mini = cur[j]; }
+    if (mini > max) return false;
+    prec = cur;
   }
-  return meilleur;
+  return prec[b.length] <= max;
+}
+function commercantDansTexte(texte, fiches){
+  const brut = norm(texte || "").toLowerCase().replace(/['’]/g, " ").split(/[^a-z0-9]+/).filter(w => w.length >= 3);
+  const exacts = new Set(brut), longs = [...exacts].filter(w => w.length >= 4);
+  const memo = new Map();
+  const present = w => {
+    if (memo.has(w)) return memo.get(w);
+    const r = exacts.has(w) || (w.length >= 5 && longs.some(t => distanceAuPlus(w, t, w.length >= 8 ? 2 : 1)));
+    memo.set(w, r); return r;
+  };
+  const presentUn = w => exacts.has(w) || longs.some(t => distanceAuPlus(w, t, 1));
+  // Ni famille, ni virements, ni crédit, banque ou impôts : ces fiches ne délivrent pas de ticket (« Echeance Pret… » proposé le 07/11/2026)
+  const retenues = fiches.filter(f => !["Famille", "Transfert", "Revenus", "Patrimoine", "Épargne", "Crédit", "Crédits", "Emprunts", "Banque", "Impôts"].includes(f.categorie));
+  // Mot distinctif : propre à une seule fiche, 6 lettres et plus, pas un lieu ; il suffit seul à désigner la fiche
+  const freq = new Map();
+  for (const f of retenues) for (const w of new Set([f.nom, ...(f.alias || [])].flatMap(motsFiche))) freq.set(w, (freq.get(w) || 0) + 1);
+  let meilleur = null, score = 0, egalite = false;
+  for (const f of retenues){
+    let s = 0;
+    for (const nom of [f.nom, ...(f.alias || [])]){
+      const m = motsFiche(nom), utiles = m.filter(w => !MOTS_LIEUX.has(w));
+      if (m.length >= 2 && utiles.length && m.every(present)) s = Math.max(s, somme(utiles, w => w.length) + 1);
+      // Seul, un mot n'est admis à une lettre près qu'à partir de 7 lettres (« TENANT » lu ne désigne pas « Tenart »)
+      // (et jamais à deux lettres près : « ECHANGE » lu avait désigné « Echeance »)
+      for (const w of utiles) if (w.length >= 6 && freq.get(w) === 1 && !METIERS.has(w) && (w.length >= 7 ? presentUn(w) : exacts.has(w))) s = Math.max(s, w.length);
+    }
+    if (!s) continue;
+    if (s > score){ meilleur = f; score = s; egalite = false; } else if (s === score && meilleur !== f) egalite = true;
+  }
+  return egalite ? null : meilleur;
+}
+/* Alias et nom lu : égaux, ou l'un commence l'autre, les deux d'au moins 6 caractères (un nom de ville lu seul
+   faisait prendre le bureau de poste pour l'alias « VILLE… » d'un autre commerce). */
+const aliasCorrespond = (a, k) => a === k || (a.length >= 6 && k.length >= 6 && (k.startsWith(a) || a.startsWith(k)));
+/* Alias faible : un seul mot court qui figure dans le nom de plusieurs fiches (le nom de la ville, appris comme alias
+   d'un supermarché, désignait toute pièce où il était lu seul) ou un nom de lieu. Il ne sert pas à reconnaître. */
+function aliasFaibles(fiches){
+  const n = new Map();
+  for (const f of fiches) for (const w of motsFiche(f.nom)) n.set(w, (n.get(w) || 0) + 1);
+  return a => { const w = norm(a).toLowerCase(); return !/\s/.test(w) && w.length < 8 && ((n.get(w) || 0) >= 2 || MOTS_LIEUX.has(w)); };
 }
 /* Reconnaissance sûre : alias (raison sociale, enseigne) ou SIRET. Le reste n'est qu'une supposition, à faire confirmer. */
 function commercantSur(t, liste){
   const fiches = liste || vivants("commercants");
   const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
+  const faible = aliasFaibles(fiches);
   for (const f of fiches){
     if (t.siret && f.siret === t.siret) return f;
-    for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
+    for (const a of f.alias || []) if (!faible(a)) for (const k of cles) if (aliasCorrespond(a, k)) return f;
   }
   return null;
 }
@@ -198,18 +337,27 @@ function commercantSur(t, liste){
 function commercantPourTicket(t, liste){
   const fiches = liste || vivants("commercants");
   const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
+  const faible = aliasFaibles(fiches);
   for (const f of fiches){
     if (t.siret && f.siret === t.siret) return f;
-    for (const a of f.alias || []) for (const k of cles) if (a === k || (a.length >= 6 && (k.startsWith(a) || a.startsWith(k)))) return f;
+    for (const a of f.alias || []) if (!faible(a)) for (const k of cles) if (aliasCorrespond(a, k)) return f;
   }
   if (!t.texte) return null;
+  // Alias imprimé sur une ligne quelconque de la pièce (raison sociale « SAS … » sous un logo illisible, alors que
+  // l'en-tête lu est une autre ligne) : la ligne commence par l'alias, d'au moins 6 caractères
+  const lignesCles = t.texte.split(/\n/).map(cleLibelle).filter(k => k && k.length >= 6);
+  for (const f of fiches) for (const a of f.alias || [])
+    if (a.length >= 6 && !faible(a) && lignesCles.some(k => k === a || k.startsWith(a + " "))) return f;
   const parTexte = commercantDansTexte(t.texte, fiches);
   // Émetteur lisible sur la pièce et inconnu des fiches : une fiche trouvée ailleurs dans le texte n'est retenue que si
   // l'un de ses mots figure dans ce nom (sinon, nouveau fournisseur à ce nom plutôt qu'un rapprochement de hasard)
+  // Seulement pour une facture ou un devis (l'adresse du client y figure) ; sur un ticket, l'émetteur lu est trop souvent
+  // une ligne mal lue (« CARTE BANCaIkE ») pour écarter une fiche nommée dans le texte. Comparaison tolérante.
   const emetteur = [t.raisonSociale, t.enseigne].filter(s => s && nomPlausible(s)).join(" ");
-  if (parTexte && emetteur){
-    const motsEmetteur = new Set(motsNom(emetteur));
-    if (![parTexte.nom, ...(parTexte.alias || [])].some(n => motsNom(n).some(w => !MOTS_LIEUX.has(w) && motsEmetteur.has(w)))) return null;
+  if (parTexte && emetteur && !["ticket", "facturette"].includes(t.type)){
+    const motsEmetteur = norm(emetteur).toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3);
+    const dans = w => motsEmetteur.some(e => e === w || (w.length >= 5 && distanceAuPlus(w, e, w.length >= 8 ? 2 : 1)));
+    if (![parTexte.nom, ...(parTexte.alias || [])].some(n => motsFiche(n).some(w => !MOTS_LIEUX.has(w) && dans(w)))) return null;
   }
   return parTexte;
 }

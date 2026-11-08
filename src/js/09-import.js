@@ -48,11 +48,35 @@ function compteAProposer(lu){
   if (lu.genre === "valorisation") return {nom: lu.produit + (lu.numero ? " …" + String(lu.numero).slice(-4) : ""), type: lu.typeCompte, banque: lu.etablissement, numero: lu.numero || ""};
   return null;
 }
+const numeroCourt = n => { const t = String(n || "").replace(/[\s.-]/g, "").toUpperCase().replace(/[A-Z]$/, "").replace(/^0+/, ""); return t.length >= 5 ? t : ""; };
+/* Réparation (05/11/2026) : un même placement créé deux fois (numéro avec et sans lettre clé, ex. PEA « 089331 » et
+   « 089331B ») : les valeurs du compte en double rejoignent le compte actif, le double est désactivé. */
+function reunirPlacementsEnDouble(){
+  let n = 0;
+  const placements = vivants("comptes").filter(c => !["courant", "carte", "especes"].includes(c.type) && numeroCourt(c.numero));
+  for (const c of placements.filter(x => x.actif !== false)){
+    for (const d of placements.filter(x => x.id !== c.id && x.type === c.type && numeroCourt(x.numero) === numeroCourt(c.numero) && x.actif === false)){
+      for (const v of vivants("valorisations").filter(v => v.compte === d.id)){
+        const deja = vivants("valorisations").find(w => w.compte === c.id && w.date === v.date);
+        if (deja && deja.source && !v.source) continue;   // une valeur de relevé n'est pas remplacée par une saisie
+        if (deja) supprimer("valorisations", deja.id);
+        enregistrer("valorisations", Object.assign(v, {compte: c.id})); n++;
+      }
+    }
+  }
+  return n;
+}
 function compteDuFichier(lu){
   if (lu.genre === "compte") return trouverCompte({numero: lu.numero, type: "courant"});
   if (lu.genre === "carte") return trouverCompte({carte: lu.carte, banque: lu.banque});
   if (lu.genre === "valorisation"){
-    return vivants("comptes").find(c => lu.numero && c.numero && String(c.numero).replace(/\s/g, "") === String(lu.numero).replace(/\s/g, ""))
+    // Numéro exact, sinon au même numéro court (sans zéros de tête ni lettre clé finale : « 089331 » = « 089331B »),
+    // de préférence un compte actif du même type
+    const exact = vivants("comptes").find(c => lu.numero && c.numero && String(c.numero).replace(/\s/g, "") === String(lu.numero).replace(/\s/g, ""));
+    const court = numeroCourt(lu.numero);
+    const proches = court ? vivants("comptes").filter(c => numeroCourt(c.numero) === court) : [];
+    return (exact && exact.actif !== false ? exact : null)
+      || proches.find(c => c.actif !== false && c.type === lu.typeCompte) || proches.find(c => c.actif !== false) || exact || proches[0]
       || vivants("comptes").find(c => !lu.numero && c.type === lu.typeCompte && norm(c.produit || c.nom).includes(norm(lu.produit))) || null;
   }
   if (lu.genre === "facture_cb") return compteCourantLcl(lu.numero) || compteCourantLcl();
@@ -67,13 +91,28 @@ function preparerReleve(lu, compte){
   if (lu.genre === "compte" && lu.banque === "LCL"){
     const cartes = lignes.filter(l => l.type === "Carte");
     lignes = lignes.filter(l => l.type !== "Carte");
-    // Lignes carte : écartées si les exports par carte couvrent leur date, sinon gardées (dédoublonnées) sur le compte « sans titulaire ».
-    const couvertes = periodesCartes();
-    const aGarder = [];
-    for (const l of cartes) (couvertes.some(p => l.date >= p.debut && l.date <= p.fin) ? res.ecartees : aGarder).push(l);
-    const d = dedoublonnerCartesLcl(aGarder);
+    // Lignes carte (dédoublonnées) : écartées seulement si le même achat (date, montant ; à un jour près) est déjà
+    // sur une carte LCL ; sinon gardées sur le compte « sans titulaire ». Avant le 05/11/2026, elles étaient écartées dès
+    // qu'un export par carte couvrait leur date : un export d'encours tiré avant que les paiements récents (téléphone)
+    // n'y figurent faisait perdre ces achats.
+    const d = dedoublonnerCartesLcl(cartes);
     res.doublonsLcl = d.ecartees;
-    res.cartesSansTitulaire = d.gardees;
+    const lcl = new Set(vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL").map(c => c.id));
+    const reserve = new Map();
+    for (const o of vivants("operations").filter(o => lcl.has(o.compte))){ const k = o.date + "|" + versCentimes(o.montant); if (!reserve.has(k)) reserve.set(k, []); reserve.get(k).push(o); }
+    const prendre = k => { const l = reserve.get(k); return l && l.length ? l.shift() : null; };
+    // Les lignes carte de l'export du compte sont celles débitées en fin de mois (débit différé) : date de débit connue
+    const dDebit = dernierJourOuvre(lu.periode.fin) <= aujourdhui() ? dernierJourOuvre(lu.periode.fin) : null;
+    res.debitsCartes = [];
+    const restent = [];
+    for (const l of d.gardees){ const o = prendre(l.date + "|" + versCentimes(l.montant)); if (o){ res.ecartees.push(l); res.debitsCartes.push(o); } else restent.push(l); }
+    res.cartesSansTitulaire = restent.filter(l => {
+      const c = versCentimes(l.montant);
+      const o = prendre(ajouterJours(l.date, -1) + "|" + c) || prendre(ajouterJours(l.date, 1) + "|" + c);
+      if (o){ res.ecartees.push(l); res.debitsCartes.push(o); return false; }
+      return true;
+    }).map(l => Object.assign({}, l, {dateDebit: dDebit}));
+    res.dateDebitCartes = dDebit;
     // Contrôle du solde : solde initial + opérations hors carte + factures de cartes débitées = solde final
     const factures = vivants("factures").filter(f => f.compteDebit === compte?.id && f.dateDebit > lu.periode.debut && f.dateDebit <= lu.periode.fin);
     const calc = versCentimes(lu.soldeDebut) + somme(lignes, l => versCentimes(l.montant)) - somme(factures, f => versCentimes(f.montant));
@@ -91,7 +130,7 @@ function preparerReleve(lu, compte){
   const nv = lu.genre === "carte" && lu.banque === "LCL" ? vivants("comptes").find(c => c.carte === "LCL-NV") : null;
   const empNv = nv ? empreintes(nv.id, lignes) : [];
   lignes.forEach((l, i) => {
-    if (idx.has(emp[i])) res.deja.push(l);
+    if (idx.has(emp[i])){ res.deja.push(l); if (l.cheque){ const o = idx.get(emp[i]); if (o && !o.cheque) (res.cheques = res.cheques || []).push({op: o, cheque: l.cheque}); } }
     else if (nv && idx.has(empNv[i])) res.reattribuees.push({ligne: l, op: idx.get(empNv[i]), empreinte: emp[i]});
     else res.nouvelles.push(Object.assign({}, l, {empreinte: emp[i]}));
   });
@@ -138,13 +177,174 @@ function appliquerCartesPdf(prep){
   }
   return n;
 }
+/* ---------- Clôture du mois sur le relevé PDF LCL (la pièce qui fait foi) ----------
+   Compare les écritures du relevé à celles de l'application sur la même période : chaque écriture du relevé
+   cherche une opération de même montant à 4 jours près. Restent : les manquantes (à ajouter, cochées d'office)
+   et celles de l'application absentes du relevé (doublons, lignes en trop : à décider, jamais supprimées d'office).
+   Même contrôle pour les cartes sur les dates du détail des cartes. Solde final comparé au centime. */
+function compteDuReleveLcl(numero){
+  const n = String(numero || "").replace(/\s/g, "").replace(/^0+/, "");
+  return vivants("comptes").find(c => c.type === "courant" && c.banque === "LCL" && n && String(c.numero || "").replace(/\s/g, "").replace(/^0+/, "").endsWith(n))
+    || compteCourantLcl();
+}
+function apparier(pdf, app, tolerance){
+  const libres = new Set(app), paires = [];
+  const cands = [];
+  pdf.forEach((l, i) => { for (const o of app) if (versCentimes(o.montant) === versCentimes(l.montant)){ const d = Math.abs(ecartJours(l.date, o.date)); if (d <= tolerance) cands.push({i, o, d}); } });
+  cands.sort((a, b) => a.d - b.d);
+  const prisPdf = new Set();
+  for (const c of cands) if (!prisPdf.has(c.i) && libres.has(c.o)){ prisPdf.add(c.i); libres.delete(c.o); paires.push(c); }
+  return {manquants: pdf.filter((l, i) => !prisPdf.has(i)), enTrop: [...libres], conformes: paires.length};
+}
+function preparerClotureLcl(lu){
+  const r = lu.releveCompte, compte = compteDuReleveLcl(lu.numero);
+  if (!compte) return null;
+  const {debut, fin} = r.periode;
+  const opsCompte = vivants("operations").filter(o => o.compte === compte.id && o.date >= debut && o.date <= fin);
+  const cpt = apparier(r.operations, opsCompte, 4);
+  const emp = empreintes(compte.id, cpt.manquants);
+  const manquants = cpt.manquants.map((l, i) => Object.assign({}, l, {empreinte: "pdf|" + emp[i], proposition: proposerClassement({libelle: l.libelle, montant: l.montant, date: l.date, compte: compte.id})}));
+  // Cartes : lignes du relevé contre les achats des cartes LCL (et « sans titulaire ») sur les mêmes dates
+  const lignesCartes = (lu.cartes || []).flatMap(c => c.lignes);
+  let enTropCartes = [], conformesCartes = 0;
+  if (lignesCartes.length){
+    const d0 = lignesCartes.map(l => l.date).sort()[0], d1 = lignesCartes.map(l => l.date).sort().pop();
+    const lcl = new Set(vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL").map(c => c.id));
+    const app = vivants("operations").filter(o => lcl.has(o.compte) && o.date >= d0 && o.date <= d1);
+    const a = apparier(lignesCartes, app, 1);
+    enTropCartes = a.enTrop; conformesCartes = a.conformes;
+  }
+  const cartes = (lu.cartes || []).length ? preparerCartesPdf(lu) : null;
+  const soldeApp = soldeCompte(compte, fin);
+  const ecartSolde = r.soldeFin === null || soldeApp === null ? null : Math.round((r.soldeFin - (soldeApp + somme(manquants, l => l.montant))) * 100) / 100;
+  const controles = [r.controle,
+    {ok: !manquants.length && !cpt.enTrop.length, texte: "compte : " + cpt.conformes + " écriture(s) conforme(s)" + (manquants.length ? ", " + manquants.length + " manquante(s)" : "") + (cpt.enTrop.length ? ", " + cpt.enTrop.length + " en trop dans l'application" : "")},
+    lignesCartes.length ? {ok: !(cartes?.nouvelles?.length) && !enTropCartes.length, texte: "cartes : " + conformesCartes + " achat(s) conforme(s)" + (cartes?.nouvelles?.length ? ", " + cartes.nouvelles.length + " manquant(s)" : "") + (enTropCartes.length ? ", " + enTropCartes.length + " en trop dans l'application" : "")} : null,
+    ecartSolde === null ? null : {ok: Math.abs(ecartSolde) < 0.01, texte: Math.abs(ecartSolde) < 0.01 ? "solde au " + dateFr(fin) + " : " + euros(r.soldeFin) + ", identique" : "solde au " + dateFr(fin) + " : relevé " + euros(r.soldeFin) + ", application " + euros(r.soldeFin - ecartSolde) + " (après ajouts)"}
+  ].filter(Boolean);
+  // Doublons exacts parmi les lignes en trop : même compte, jour, montant et libellé qu'une autre opération gardée
+  const cleDbl = o => [o.compte, o.date, versCentimes(o.montant), (o.libelle || "").trim().toUpperCase()].join("|");
+  const enTropIds = new Set([...cpt.enTrop, ...enTropCartes].map(o => o.id));
+  const groupes = regrouper(vivants("operations"), cleDbl);
+  const doublonsExacts = new Set();
+  for (const o of [...cpt.enTrop, ...enTropCartes]){
+    const g = groupes.get(cleDbl(o)) || [];
+    if (g.length < 2) continue;
+    const garde = g.find(x => !enTropIds.has(x.id)) || g[0];
+    if (garde.id !== o.id) doublonsExacts.add(o.id);
+  }
+  return {lu, compte, manquants, enTrop: cpt.enTrop, enTropCartes, doublonsExacts, conformes: cpt.conformes, cartes, controles, nb: manquants.length + (cartes?.nouvelles?.length || 0),
+    choixManquants: new Set(manquants.map((l, i) => i)), choixEnTrop: new Set()};
+}
+function appliquerClotureLcl(prep){
+  const r = prep.lu.releveCompte, compte = prep.compte;
+  const imp = enregistrer("imports", {genre: "releve_lcl", banque: "LCL", fichier: prep.lu.nom, compte: compte.id, periode: r.periode, date: new Date().toISOString(),
+    nouvelles: prep.choixManquants.size, deja: prep.conformes});
+  let ajoutees = 0, supprimees = 0;
+  prep.manquants.forEach((l, i) => { if (!prep.choixManquants.has(i)) return;
+    const op = creerOperation(compte, l, imp.id); ajoutees++;
+    // Débit mensuel des cartes à débit différé : virement interne vers les comptes cartes, hors budget
+    if (/^RELEVE CB AU/.test(l.libelle)) enregistrer("operations", Object.assign(op, {categorie: "Transfert", sousCategorie: "Facture cartes", nature: natureParDefaut("Transfert"), statut: "classe"}));
+  });
+  for (const o of [...prep.enTrop, ...prep.enTropCartes]) if (prep.choixEnTrop.has(o.id) && obtenir("operations", o.id)){
+    for (const id of o.justificatifs || []){ const j = obtenir("justificatifs", id); if (j) delier(j); }
+    supprimer("operations", o.id); supprimees++;
+  }
+  const cartes = prep.cartes ? appliquerCartesPdf(prep.cartes) : 0;
+  // Les soldes du relevé deviennent la référence du compte
+  enregistrer("soldes", {compte: compte.id, date: r.periode.debut, solde: r.soldeDebut, source: prep.lu.nom, debut: true});
+  if (r.soldeFin !== null) enregistrer("soldes", {compte: compte.id, date: r.periode.fin, solde: r.soldeFin, source: prep.lu.nom});
+  const clotures = Object.assign({}, LIVRE.parametres.clotures || {});
+  clotures[compte.id + "|" + r.periode.fin] = {debut: r.periode.debut, fin: r.periode.fin, le: new Date().toISOString(), fichier: prep.lu.nom, ajoutees, supprimees, cartes,
+    conforme: prep.controles.every(c => c.ok) || (ajoutees === prep.manquants.length && supprimees === prep.enTrop.length + prep.enTropCartes.length)};
+  modifierParametres({clotures});
+  return {ajoutees, supprimees, cartes};
+}
+/* ---------- Clôture du mois de la carte Amex sur son relevé PDF ----------
+   Chaque écriture du relevé cherche sur le compte Amex une opération de même montant à 3 jours près (une opération
+   déjà rattachée à un autre relevé Amex est hors jeu). Manquantes : à ajouter (cochées d'office). En trop : opérations
+   de la période absentes du relevé, à décider. À l'enregistrement, les achats du relevé reçoivent la date du
+   prélèvement annoncé (fin de l'encours estimé) et la marque du relevé. Contrôle : l'encours de la carte à la fin
+   de la période, après clôture, égal au nouveau solde du relevé. */
+function compteAmex(){ return vivants("comptes").find(c => c.carte === "AMEX") || null; }
+function preparerClotureAmex(lu){
+  const r = lu.releveAmex, compte = compteAmex();
+  if (!compte) return null;
+  const {debut, fin} = r.periode;
+  const d0 = r.operations.map(o => o.date).sort()[0] < debut ? r.operations.map(o => o.date).sort()[0] : debut;
+  const libre = o => !o.releveAmex || o.releveAmex === fin;
+  const ops = vivants("operations").filter(o => o.compte === compte.id && libre(o) && o.date >= ajouterJours(d0, -3) && o.date <= ajouterJours(fin, 3));
+  const a = apparier(r.operations, ops, 3);
+  // Paires retrouvées (pour poser la date de débit) : les opérations appariées sont celles qui ne restent pas en trop
+  const enTropTous = new Set(a.enTrop.map(o => o.id));
+  const apparies = ops.filter(o => !enTropTous.has(o.id));
+  const enTrop = a.enTrop.filter(o => o.date >= debut && o.date <= fin);
+  const emp = empreintes(compte.id, a.manquants);
+  const manquants = a.manquants.map((l, i) => Object.assign({}, l, {empreinte: "pdf|" + emp[i], proposition: proposerClassement({libelle: l.libelle, montant: l.montant, date: l.date, compte: compte.id})}));
+  // Encours après clôture : achats et remboursements jusqu'à la fin, non débités à cette date, hors paiements reçus
+  const paiement = o => o.montant > 0 && (o.lien || /PRELEVEMENT AUTOMATIQUE|PAIEMENT RE[CÇ]U/i.test(o.libelle || ""));
+  const appIds = new Set(apparies.map(o => o.id));
+  const autres = vivants("operations").filter(o => o.compte === compte.id && !appIds.has(o.id) && o.date <= fin && !paiement(o) && (!o.dateDebit || o.dateDebit > fin));
+  // Achats antérieurs au relevé restés sans date de débit : si le relevé constate le paiement du solde précédent,
+  // ils ont été réglés par les relevés précédents (proposé, coché d'office, appliqué à l'enregistrement).
+  const paie = r.operations.find(o => o.montant > 0 && /PRELEVEMENT AUTOMATIQUE|PAIEMENT RE[CÇ]U/i.test(o.libelle || ""));
+  const soldePaye = !!paie && versCentimes(paie.montant) === versCentimes(r.soldeDebut);
+  const anteriors = autres.filter(o => o.date < debut);
+  const anciens = soldePaye ? anteriors : [];
+  const encours = somme(r.operations.filter(o => !paiement(o)), o => o.montant) + somme(autres, o => o.montant) - somme(anciens, o => o.montant);
+  const ecart = Math.round((-r.soldeFin - encours) * 100) / 100;
+  const horsReleve = autres.length - anciens.length;
+  const controles = [r.controle,
+    {ok: !manquants.length && !enTrop.length, texte: "carte : " + a.conformes + " écriture(s) conforme(s)" + (manquants.length ? ", " + manquants.length + " manquante(s)" : "") + (enTrop.length ? ", " + enTrop.length + " en trop dans l'application" : "")},
+    {ok: Math.abs(ecart) < 0.01, texte: Math.abs(ecart) < 0.01 ? "encours au " + dateFr(fin) + " : " + euros(r.soldeFin) + ", identique au nouveau solde" + (anciens.length ? " (après ajouts et " + anciens.length + " achat(s) antérieur(s) réglés par les relevés précédents)" : "")
+      : "encours au " + dateFr(fin) + " : relevé " + euros(r.soldeFin) + ", application " + euros(-encours) + " (après ajouts" + (anciens.length ? " et " + anciens.length + " achat(s) antérieur(s) réglés" : "") + (horsReleve ? " ; " + horsReleve + " achat(s) non débité(s) hors relevé" : "") + ")"},
+    anteriors.length && !soldePaye ? {ok: false, texte: anteriors.length + " achat(s) antérieur(s) au " + dateFr(debut) + " sans date de débit : le relevé ne montre pas le paiement du solde précédent, ils restent en encours"} : null,
+    r.prelevement ? {ok: true, texte: "prélèvement de " + euros(r.soldeFin) + " à partir du " + dateFr(r.prelevement)} : null].filter(Boolean);
+  const cleDbl = o => [o.compte, o.date, versCentimes(o.montant), (o.libelle || "").trim().toUpperCase()].join("|");
+  const ids = new Set(enTrop.map(o => o.id)), groupes = regrouper(vivants("operations"), cleDbl), doublonsExacts = new Set();
+  for (const o of enTrop){ const g = groupes.get(cleDbl(o)) || []; if (g.length < 2) continue; const garde = g.find(x => !ids.has(x.id)) || g[0]; if (garde.id !== o.id) doublonsExacts.add(o.id); }
+  return {lu, compte, manquants, enTrop, enTropCartes: [], doublonsExacts, conformes: a.conformes, cartes: null, apparies, controles, nb: manquants.length,
+    anciens, paiementPrecedent: paie ? paie.date : null, choixAnciens: true,
+    choixManquants: new Set(manquants.map((l, i) => i)), choixEnTrop: new Set()};
+}
+function appliquerClotureAmex(prep){
+  const r = prep.lu.releveAmex, compte = prep.compte;
+  const imp = enregistrer("imports", {genre: "releve_amex", banque: "Amex", fichier: prep.lu.nom, compte: compte.id, periode: r.periode, date: new Date().toISOString(),
+    nouvelles: prep.choixManquants.size, deja: prep.conformes});
+  const marquer = o => { if (!(o.montant > 0 && o.lien)) Object.assign(o, {dateDebit: r.prelevement || o.dateDebit || null, debitEstime: false}); o.releveAmex = r.periode.fin; enregistrer("operations", o); };
+  let ajoutees = 0, supprimees = 0;
+  prep.manquants.forEach((l, i) => { if (!prep.choixManquants.has(i)) return; const op = creerOperation(compte, l, imp.id); marquer(op); ajoutees++; });
+  for (const o of prep.apparies) if (obtenir("operations", o.id)) marquer(o);
+  // Achats antérieurs réglés par les relevés précédents : débités au prélèvement Amex du compte de débit qui les suit,
+  // au plus tard au paiement du solde précédent constaté par ce relevé (date estimée)
+  let anciens = 0;
+  if (prep.choixAnciens && prep.paiementPrecedent){
+    const prlvs = vivants("operations").filter(o => o.compte === compte.compteDebit && o.montant < 0 && /AMERICAN EXPRESS/i.test(o.libelle || "")).map(o => o.date).sort();
+    for (const o of prep.anciens || []){
+      const x = obtenir("operations", o.id); if (!x || (x.dateDebit && x.dateDebit <= r.periode.fin)) continue;
+      const d = prlvs.find(p => p >= x.date && p <= prep.paiementPrecedent) || prep.paiementPrecedent;
+      enregistrer("operations", Object.assign(x, {dateDebit: d, debitEstime: true})); anciens++;
+    }
+  }
+  for (const o of prep.enTrop) if (prep.choixEnTrop.has(o.id) && obtenir("operations", o.id)){
+    for (const id of o.justificatifs || []){ const j = obtenir("justificatifs", id); if (j) delier(j); }
+    supprimer("operations", o.id); supprimees++;
+  }
+  const clotures = Object.assign({}, LIVRE.parametres.clotures || {});
+  clotures[compte.id + "|" + r.periode.fin] = {debut: r.periode.debut, fin: r.periode.fin, le: new Date().toISOString(), fichier: prep.lu.nom, ajoutees, supprimees, cartes: 0,
+    conforme: prep.controles.every(c => c.ok) || (ajoutees === prep.manquants.length && supprimees === prep.enTrop.length)};
+  modifierParametres({clotures});
+  apresImport();
+  return {ajoutees, supprimees, cartes: 0, anciens};
+}
 function periodesCartes(){
   return vivants("imports").filter(i => i.genre === "carte" && i.banque === "LCL").map(i => i.periode);
 }
 function creerOperation(compte, l, importId){
-  const op = {compte: compte.id, date: l.date, montant: Math.round(l.montant * 100) / 100, libelle: l.libelle, detail: l.detail || "", type: l.type || "",
+  // Chèque : le numéro (colonne à part dans l'export LCL) est gardé ; il sert au rapprochement avec la pièce
+  const op = {compte: compte.id, date: l.date, montant: Math.round(l.montant * 100) / 100, libelle: l.libelle || (l.cheque ? "CHQ. " + l.cheque : ""), detail: l.detail || "", type: l.type || "", cheque: l.cheque || undefined,
     mcc: l.mcc || "", categorieBanque: l.categorieBanque || "", ville: l.ville || "", empreinte: l.empreinte, import: importId, justificatifs: []};
-  if (compte.type === "carte") op.dateDebit = null; else op.dateDebit = l.date;
+  if (compte.type === "carte") op.dateDebit = l.dateDebit || null; else op.dateDebit = l.date;
   classerAutomatiquement(op);
   return enregistrer("operations", op);
 }
@@ -153,6 +353,10 @@ function appliquerReleve(prep){
     date: new Date().toISOString(), nouvelles: prep.nouvelles.length, deja: prep.deja.length});
   for (const l of prep.nouvelles) creerOperation(prep.compte, l, imp.id);
   for (const r of prep.reattribuees) enregistrer("operations", Object.assign(r.op, {compte: prep.compte.id, empreinte: r.empreinte}));
+  // Chèques déjà importés sans leur numéro (avant le 05/11/2026) : numéro et libellé complétés
+  for (const c of prep.cheques || []) enregistrer("operations", Object.assign(c.op, {cheque: c.cheque, libelle: c.op.libelle || "CHQ. " + c.cheque}));
+  // Achats carte retrouvés dans l'export du compte : débités en fin de mois (sans écraser une date de débit établie)
+  if (prep.dateDebitCartes) for (const o of prep.debitsCartes || []) if (!o.dateDebit || o.debitEstime) enregistrer("operations", Object.assign(o, {dateDebit: prep.dateDebitCartes, debitEstime: false}));
   if (prep.cartesSansTitulaire?.length){
     const nv = compteCartesNonVentilees(prep.compte.id);
     // Empreintes recalculées avec l'identifiant réel du compte (il peut naître ici).
@@ -177,7 +381,7 @@ function preparerFacture(lu, compte){
   const fin = finPeriodeCarte(lu.arrete);
   const debut = ajouterJours(precedente ? (precedente.finPeriode || finPeriodeCarte(precedente.arrete)) : finPeriodeCarte(dernierJourOuvre(ajouterMois(debutDeMois(lu.arrete), -1))), 1);
   const cartes = vivants("comptes").filter(c => c.type === "carte" && c.banque === "LCL" && (c.compteDebit === compte?.id || !c.compteDebit));
-  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= fin && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && (!o.dateDebit || o.debitEstime))));
+  const ops = vivants("operations").filter(o => cartes.some(c => c.id === o.compte) && o.date >= debut && o.date <= fin && (deja ? (!o.facture || o.facture === deja.id) : (!o.facture && (!o.dateDebit || o.debitEstime || o.dateDebit === lu.dateDebit))));   // déjà datés au même débit par l'export du compte
   const total = -somme(ops, o => versCentimes(o.montant)) / 100;
   const parCarte = cartes.map(c => ({compte: c, total: -somme(ops.filter(o => o.compte === c.id), o => versCentimes(o.montant)) / 100})).filter(x => x.total);
   return {lu, compte, deja, debut, fin, ops, total, parCarte, ecart: Math.round((lu.montant - total) * 100) / 100};
@@ -201,6 +405,11 @@ function appliquerValorisation(lu, compte){
   const deja = vivants("valorisations").find(v => v.compte === compte.id && v.date === lu.date);
   enregistrer("valorisations", Object.assign(deja || {}, {compte: compte.id, date: lu.date, valeur: lu.valeur, source: lu.nom,
     details: lu.lignes || null, partiel: !!lu.partiel, complements: {versements: lu.versements, renteMinimale: lu.renteMinimale, capitalDeces: lu.capitalDeces, cotisation: lu.cotisation}}));
+  // Soldes de fin d'année lus dans le même relevé (livrets) : une valeur au 31/12, sans écraser une autre source de ce jour
+  for (const v of lu.intermediaires || []){
+    const d2 = vivants("valorisations").find(x => x.compte === compte.id && x.date === v.date);
+    if (!d2 || d2.source === lu.nom) enregistrer("valorisations", Object.assign(d2 || {}, {compte: compte.id, date: v.date, valeur: v.valeur, source: lu.nom}));
+  }
 }
 
 /* ---------- Après chaque import : transferts, débits différés, rapprochements ---------- */
@@ -209,6 +418,7 @@ function apresImport(){
   affecterDebitsAmex();
   estimerDebitsCartes();
   rapprocherTout();
+  classerParAvisImpot();
 }
 /* Prélèvement Amex sur le compte courant ↔ paiement reçu sur le compte Amex ; virements entre comptes du foyer. */
 function apparierTransferts(){
@@ -274,7 +484,10 @@ function suiteSoldee(cand, cible){
 function estimerDebitsCartes(){
   const ops = vivants("operations");
   const fin = ops.reduce((m, o) => o.date > m ? o.date : m, "");
-  const visee = o => o.origine === "reprise" && !o.facture && !o.paiementAmex && !(o.lien && o.montant > 0)
+  // Achats carte lus dans un relevé de compte PDF avant le 05/11/2026 : créés sans date de débit, ils
+  // passaient pour un encours à débiter (double compte en trésorerie). Ils sont datés comme les autres.
+  const pdf = new Set(vivants("imports").filter(i => i.genre === "carte" && /\.pdf$/i.test(i.fichier || "")).map(i => i.id));
+  const visee = o => (o.origine === "reprise" || pdf.has(o.import)) && !o.facture && !o.paiementAmex && !(o.lien && o.montant > 0)
     && (!o.dateDebit || o.debitEstime || o.dateDebit === o.date);
   const parDate = (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
   const voulu = new Map();
@@ -315,11 +528,41 @@ function estimerDebitsCartes(){
   return n;
 }
 
+/* ---------- Liens « remplace sa ligne de budget » des échéances ----------
+   Quand le budget actif d'une année change (plan qui le remplace, copie pour l'année suivante),
+   ses lignes ont de nouveaux id : une échéance qui pointait vers l'ancienne ligne ne la retire plus
+   de la trésorerie et la dépense compte deux fois. On reporte le lien vers la ligne du budget actif
+   de même catégorie et sous-catégorie, si elle est unique ; sinon le lien est laissé et signalé.
+   « avant » : instantané des lignes de budget connues (id → {annee, categorie, sousCategorie}).
+   Concernées : les échéances qui commencent dans l'année, ou dont l'ancienne ligne était de l'année. */
+function instantaneLignesBudget(){
+  const m = new Map();
+  for (const b of vivants("budgets")) for (const l of b.lignes || []) if (l.id) m.set(l.id, {annee: b.annee, categorie: l.categorie, sousCategorie: l.sousCategorie});
+  return m;
+}
+function reporterLiensBudget(annee, avant){
+  const r = {reportes: 0, nonReportes: []};
+  const budget = budgetActif(annee);
+  if (!budget) return r;
+  const ids = new Set((budget.lignes || []).map(l => l.id));
+  for (const e of vivants("echeances")){
+    if (!e.ligneBudget || ids.has(e.ligneBudget)) continue;
+    const ancienne = avant.get(e.ligneBudget);
+    if (!(ancienne?.annee === annee || +(e.debut || "").slice(0, 4) === annee)) continue;
+    const k = cleLigne(ancienne ? ancienne.categorie : e.categorie, ancienne ? ancienne.sousCategorie : e.sousCategorie);
+    const cibles = (budget.lignes || []).filter(l => cleLigne(l.categorie, l.sousCategorie) === k);
+    if (cibles.length === 1){ enregistrer("echeances", Object.assign(e, {ligneBudget: cibles[0].id})); r.reportes++; }
+    else r.nonReportes.push(e.libelle + (cibles.length ? " (plusieurs lignes possibles)" : " (aucune ligne de même catégorie)"));
+  }
+  return r;
+}
+
 /* ---------- Plan importé d'un fichier JSON : budgets, échéances et règles ----------
    Un budget de même nom et de même année est remplacé ; une échéance de même libellé et de
    même date de début aussi. Rien d'autre n'est modifié. */
 function appliquerPlan(contenu){
   const r = {budgets: 0, echeances: 0, regles: 0};
+  const lignesAvant = instantaneLignesBudget();
   for (const b of contenu.budgets || []){
     for (const l of b.lignes || []){ if (!l.id) l.id = "lb-" + idAleatoire(8); ajouterCategorieSilencieuse(l.categorie, l.sousCategorie); }
     for (const lx of Object.keys(b.lignes?.[0]?.repartition || {})) ajouterLieu(lx);
@@ -335,6 +578,20 @@ function appliquerPlan(contenu){
     const existant = vivants("echeances").find(x => x.libelle === cle.libelle && x.debut === cle.debut);
     if (e.categorie) ajouterCategorieSilencieuse(e.categorie, e.sousCategorie);
     enregistrer("echeances", Object.assign(existant || {}, {compte: courant?.id || ""}, e)); r.echeances++;
+  }
+  // Budgets remplacés ou créés : les échéances liées à une ligne disparue suivent la ligne équivalente.
+  for (const an of new Set((contenu.budgets || []).map(b => b.annee))){
+    const x = reporterLiensBudget(an, lignesAvant);
+    if (x.reportes) r.liensReportes = (r.liensReportes || 0) + x.reportes;
+    if (x.nonReportes.length) r.liensNonReportes = [...(r.liensNonReportes || []), ...x.nonReportes];
+  }
+  // Budgets à supprimer, désignés par nom et année ; le budget actif de l'année n'est jamais supprimé.
+  // Les opérations ne sont pas touchées.
+  for (const x of contenu.supprimerBudgets || []){
+    const b = vivants("budgets").find(y => y.nom === x.nom && y.annee === x.annee);
+    if (!b) (r.budgetsIntrouvables = r.budgetsIntrouvables || []).push(x.nom + " (" + x.annee + ")");
+    else if (b.actif || budgetActif(b.annee)?.id === b.id) (r.budgetsNonSupprimes = r.budgetsNonSupprimes || []).push(b.nom + " (" + b.annee + ", budget actif)");
+    else { supprimer("budgets", b.id); r.budgetsSupprimes = (r.budgetsSupprimes || 0) + 1; }
   }
   // Comptes (ex. compte-titres) et leurs valorisations datées ; un compte de même nom et de même type est repris.
   for (const cp of contenu.comptes || []){

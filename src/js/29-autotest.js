@@ -177,6 +177,20 @@ async function autotest(){
     await sim.ecrire("budget.chiffre", new Uint8Array([2]), e0);
     let conflit = false; try { await sim.ecrire("budget.chiffre", new Uint8Array([3]), e0); } catch (e){ conflit = !!e.conflit; }
     vrai("écriture refusée si le fichier a changé (étiquette)", conflit);
+    {
+      // Dépôts repris du téléphone : retirés après 30 jours si la pièce est sur le stockage (ou s'il n'y en a pas)
+      const sb = adaptateurSimule(), vieux = ajouterJours(aujourdhui(), -40), recent = ajouterJours(aujourdhui(), -5);
+      const nA = vieux + "T10-00-00-000Z-essai-a.chiffre", nB = vieux + "T11-00-00-000Z-essai-b.chiffre", nC = recent + "T10-00-00-000Z-essai-c.chiffre";
+      for (const n of [nA, nB, nC]) await sb.ecrire("boite/traitees/" + n, new Uint8Array([1]));
+      const ja = enregistrer("justificatifs", {type: "ticket", date: vieux, montant: 1, saisie: nA, statut: "a_rapprocher", operations: []});
+      const jb = enregistrer("justificatifs", {type: "ticket", date: vieux, montant: 2, saisie: nB, statut: "a_rapprocher", operations: []});
+      await sb.ecrire("justificatifs/" + ja.id + ".chiffre", new Uint8Array([1]));
+      await idbEcrire("file", "piece:" + jb.id, true);   // pièce de B pas encore envoyée : son dépôt est gardé
+      const nb = await purgerBoiteTraitees(30, sb);
+      const reste = (await sb.lister("boite/traitees")).map(f => f.nom).sort();
+      v("boîte : dépôts repris de plus de 30 jours retirés, sauf pièce non encore envoyée ou dépôt récent", [nb, reste], [1, [nB, nC].sort()]);
+      await idbSuppr("file", "piece:" + jb.id); supprimer("justificatifs", ja.id); supprimer("justificatifs", jb.id);
+    }
 
     /* --- Lecture de tickets --- */
     {
@@ -193,6 +207,54 @@ async function autotest(){
         v("fournisseur : reconnaissance sûre (alias) distinguée de la supposition (texte)", [commercantSur({raisonSociale: "RPG ST VALENCE PARIS"}, [fc])?.id === fc.id, commercantSur({raisonSociale: "Autre nom"}, [fc])], [true, null]);
         v("facture : l'adresse du client ne désigne pas un commerçant", [commercantDansTexte(fh.texte, [fc]), commercantPourTicket(fh2, [fc])], [null, null]);
         supprimer("commercants", fc.id);
+      }
+      {
+        // Lecture des tickets (cas mesurés le 07/11/2026 sur des pièces réelles, reproduits avec des noms fictifs)
+        const nl = String.fromCharCode(10), lire = (...l) => extraireTicket(l.join(nl)).montant;
+        v("lecture : facturette, montant « EUR » plutôt qu'un article en € ou un reçu mal lu",
+          lire("CARTE BANCAIRE", "SANS CONTACT", "LE 07/11/26 A 10:37:34", "EPICERIE ESSAI", "2,95 € ART", "MONTANT", "20,60 EUR", "TOTAL RECU:260,60", "TICKET CLIENT"), 20.6);
+        v("lecture : « Total: 104 44 » (virgule perdue)", lire("POISSONNERIE ESSAI", "SAUMON 0,330 kg 29,63 €", "Articles: 5 Total: 104 44"), 104.44);
+        v("lecture : « Total Avantages » écarté", lire("LIBRAIRIE ESSAI", "REMISE ADHERENT 1,05€", "Total Avantages 4,64€", "TOTAL 154.13€", "8 Article(s)"), 154.13);
+        v("lecture : « Total TTC (tva incl.) » retenu, en-tête de TVA écarté", [lire("PRESSING ESSAI", "1,00 NETTOYAGE MANTEAU 18,00", "Total TTC (tva incl.) 18.00", "Mont total HT : 15.00"),
+          lire("CAVE ESSAI", "Total TTC : 142.00€", "Total TVA : 23.67€", "Tx TVA HT TTC TVA", "(1) 20.008 118.33 142.00 23.67")], [18, 142]);
+        v("lecture : total HT + TVA l'emporte sur un total mal lu présent ailleurs", lire("CAVE ESSAI", "Total TTC - 36.60€", "Total HT : 30.00€", "Total TVA : 6.00€", "CB 36.00€"), 36);
+        {
+          // Préparations de secours : un trait sombre sur un fond qui s'assombrit (ombre) reste noir, le fond blanc
+          const w = 64, hh = 16, g = new Float32Array(w * hh);
+          for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) g[y * w + x] = (x >= 30 && x < 34) ? 40 + x : 220 - x * 2;
+          const sa = seuilAdaptatif(g, w, hh), eg = etirerGris(g);
+          v("lecture : seuil adaptatif (ombre) et gris étiré", [sa[8 * w + 31], sa[8 * w + 5], sa[8 * w + 60], Math.round(Math.min(...eg)), Math.round(Math.max(...eg))], [0, 255, 255, 0, 255]);
+        }
+        v("lecture : lettres prises pour des chiffres (« Z0.40 »)", [lire("SUPERETTE ESSAI", "- A PAYER - Z0.40EU1"), reparerMontantsOcr("TOTAL 1O,5O")], [20.4, "TOTAL 10,50"]);
+        const fx = [{id: "a", nom: "La Mirandelle Essai", alias: ["LA MIRANDELLE ESSAI"], categorie: ""}, {id: "b", nom: "Boucherie Valmont Essai", alias: ["BOUCHERIE VALMONT"], categorie: ""},
+          {id: "c", nom: "Magasin Essai Villeessai", alias: ["VILLEESSAI"], categorie: ""}, {id: "d", nom: "Cave Essai Villeessai", alias: [], categorie: ""}, {id: "e", nom: "Tenard", alias: [], categorie: ""}];
+        const quel = (t, type) => commercantPourTicket(Object.assign(extraireTicket(t), type ? {type} : {}), fx)?.id || null;
+        {
+          // Ticket de supermarché net (07/11/2026) : articles en « EUR », « MONTANT DU », « pour échange », date avec l'heure en bas
+          const auj = aujourdhui(), fr = d => d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4), avant = ajouterJours(auj, -6);
+          const tk = extraireTicket(["SUPERMARCHE ESSAI", "SAS ESSAI 5", "TEL: " + fr(avant).replace(/\//g, "."), "BISCUITS 1,48 EUR A", "THE 2,11 EUR A", "MONTANT DU 15,40 EUR",
+            "AMERICAN EXPRESS 15,40 EUR", "TOTAL ELIGIBLE TRD 15,40 EUR", "A RENDRE 0,00 EUR", "18:00:16 " + fr(auj).replace(/^0/, ""), "TICKET A CONSERVER POUR ECHANGE"].join(nl));
+          const fe = [{id: "x", nom: "Echeance Mensuelle Essai", alias: [], categorie: ""}, {id: "y", nom: "Echeance Pret Essai", alias: [], categorie: "Crédit"}];
+          v("lecture : ticket net, montant dû (pas le premier article), date imprimée avec l'heure, « échange » ne désigne pas « échéance »",
+            [tk.montant, tk.date, tk.heure, commercantPourTicket(tk, fe)], [15.4, auj, "18:00", null]);
+        }
+        {
+          // Logo illisible : l'en-tête lu est du bruit, la raison sociale (alias) figure plus bas sur une ligne à part
+          const fa = [{id: "s", nom: "Supermarche Essai Centre", alias: ["SAS ESSAIRIVE 5"], categorie: ""}];
+          const ta = extraireTicket(["MURS U AL LILIEGS VENOUS", "SAS ESSAIRIVE 5", "9 BOULEVARD ESSAI", "MONTANT DU 15,40 EUR"].join(nl));
+          v("fournisseur : alias imprimé sur une autre ligne que l'en-tête lu", commercantPourTicket(ta, fa)?.id, "s");
+        }
+        {
+          // Moitié haute du ticket perdue à la lecture : ni « MONTANT » ni total sûr ; le montant en EUR répété l'emporte
+          // sur le numéro de version de la caisse ; « Nombre d'articles vendus= 6 » n'est pas un nom de fournisseur
+          const tm = extraireTicket(["Nombre d'articles vendus= 6", "TOTAL ELIGIBLE TRO 15,40 EUR", "A RENDRE 0,00 EUR", "ESPECES 0,00 EUR",
+            "CODE TVA MT. HI MT. TVA MI. TC", "A 5,50 14,60 = 0.80 15,40", "TEL: 01.87.58.41.95", "40L18,0.0,2-981 - 1112.12 60", "Ver:8.6.8,2-981 - 1112.12"].join(nl));
+          v("lecture : ticket tronqué, montant EUR répété plutôt qu'un numéro de caisse, en-tête de bruit écarté", [tm.montant, tm.confiance.montant, /articles/i.test(tm.enseigne)], [15.4, "à vérifier", false]);
+        }
+        v("fournisseur : nom lu à une ou deux lettres près", [quel(["LA MIRANDFLLE", "12 RUE ESSAI", "TOTAL 12,00"].join(nl)), quel(["BOUCHERTE VALMONT", "TOTAL 9,00"].join(nl))], ["a", "b"]);
+        const fv = [{id: "p", nom: "Magasin Essai Valdor", alias: ["VALDOR", "MAGASIN ESSAI VALDOR"], categorie: ""}, {id: "q", nom: "Cave Essai Valdor", alias: [], categorie: ""}];
+        v("fournisseur : alias réduit à un lieu commun à plusieurs fiches ignoré", [commercantSur({raisonSociale: "VALDOR", enseigne: "VALDOR"}, fv), commercantSur({raisonSociale: "MAGASIN ESSAI VALDOR"}, fv)?.id], [null, "p"]);
+        v("fournisseur : un mot courant de 6 lettres ne désigne pas une fiche à une lettre près", quel(["BOUCHERIE ESSAI", "7 ALLEE TENANT", "TOTAL 23,00"].join(nl)), null);
       }
       {
         const nb0 = vivants("commercants").length;
@@ -313,6 +375,7 @@ async function autotest(){
             v("relevé PDF LCL : cartes, dates, devise ignorée, remboursement reconnu", [lc.cartes.length, lc.cartes[0].carte, lc.cartes[0].lignes.map(l => l.date + " " + l.montant).join(" | "), lc.cartes[0].controle.ok, lc.cartes[1].carte],
               [2, "X456", "2026-12-30 -1581 | 2027-01-03 -20 | 2027-01-03 -20 | 2027-01-05 12.5", true, "X678"]);
             const p1 = preparerCartesPdf(lc); appliquerCartesPdf(p1);
+            v("relevé PDF LCL : achats déjà débités (fin du mois de la section), pas d'encours", vivants("operations").filter(o => o.compte === ck.id).map(o => o.dateDebit), ["2027-01-29", "2027-01-29", "2027-01-29", "2027-01-29"]);
             const p2 = preparerCartesPdf(extraireCartesReleveLcl(rel));
             v("relevé PDF LCL : deux achats identiques gardés, réimport sans doublon, carte inconnue sans titulaire", [p1.nouvelles.length, p2.nouvelles.length, vivants("operations").filter(o => o.compte === ck.id && o.date === "2027-01-03").length, p1.cartes[1].sansTitulaire], [5, 0, 2, true]);
             for (const o of vivants("operations").filter(o => /ESSAI/.test(o.libelle) && o.date >= "2026-12-30" && o.date <= "2027-01-05")) supprimer("operations", o.id);
@@ -526,7 +589,177 @@ async function autotest(){
       rapprocherTout();
       const px = obtenir("justificatifs", jx.id);
       v("rapprochement qui changerait la catégorie : proposé, pas appliqué", [px.statut, (px.propositions || [])[0]?.op, obtenir("operations", opX.id).categorie], ["a_rapprocher", opX.id, "Culture et loisirs"]);
+      const sx = propositionsSures().find(s => s.op.id === opX.id);
+      vrai("proposition sûre listée pour validation en lot, avec ce qui change", !!sx && /catégorie : Culture/.test(sx.changements.join(" ")));
       supprimer("justificatifs", jx.id); supprimer("operations", opX.id);
+      // Compléter n'est pas modifier : catégorie seulement devinée, fiche née de l'import sans rien appris
+      const fProv = enregistrer("commercants", {nom: "Libelle Brut Essai", alias: ["LIBELLE BRUT ESSAI"], stats: {}, natures: {}});
+      const fVrai = enregistrer("commercants", {nom: "Quincaillerie Essai", alias: [], stats: {"Maison|Bricolage et jardin": 3}, natures: {}});
+      const opY = enregistrer("operations", {compte: carte.id, date: "2027-03-22", montant: -31.7, libelle: "LIBELLE BRUT ESSAI", commercant: fProv.id, categorie: "Culture et loisirs", sousCategorie: "Livres, presse, sorties, jeux", statut: "propose"});
+      const jy = enregistrer("justificatifs", {type: "ticket", date: "2027-03-22", montant: 31.7, carte: "X333", commercant: fVrai.id, commercantNom: fVrai.nom, categorie: "Maison", sousCategorie: "Bricolage et jardin", statut: "a_rapprocher", operations: []});
+      rapprocherTout();
+      const oy = obtenir("operations", opY.id);
+      v("catégorie devinée et fiche provisoire : rapproché d'office, complété par la pièce", [obtenir("justificatifs", jy.id).statut, oy.categorie, oy.commercant], ["rapproche", "Maison", fVrai.id]);
+      supprimer("justificatifs", jy.id); supprimer("operations", opY.id); supprimer("commercants", fVrai.id); if (obtenir("commercants", fProv.id)) supprimer("commercants", fProv.id);
+    }
+    {
+      // Anomalies : période couverte par le relevé de la carte, pas de rapprochement ; piste donnée
+      const oc = enregistrer("operations", {compte: carte.id, date: "2027-03-28", montant: -1, libelle: "COUVERTURE ESSAI"});
+      const oa = enregistrer("operations", {compte: cj.id, date: "2027-03-08", montant: -45.5, libelle: "AUTRE COMPTE ESSAI", dateDebit: "2027-03-08"});
+      const ja = enregistrer("justificatifs", {type: "ticket", date: "2027-03-08", montant: 45.5, carte: "X333", statut: "a_rapprocher", operations: []});
+      const jb = enregistrer("justificatifs", {type: "ticket", date: "2027-03-08", montant: 77.7, carte: "X333", statut: "a_rapprocher", operations: []});
+      const jc = enregistrer("justificatifs", {type: "ticket", date: "2027-03-27", montant: 66.6, carte: "X333", statut: "a_rapprocher", operations: []});
+      const an = anomaliesRapprochement(), rs = id => an.find(a => a.j && a.j.id === id && a.genre !== "fournisseur non reconnu")?.raison || "";
+      v("anomalies : autre compte signalé, aucun débit signalé, relevé pas encore arrivé exclu", [/même montant/.test(rs(ja.id)), /aucun débit/.test(rs(jb.id)), rs(jc.id)], [true, true, ""]);
+      v("anomalies : fournisseur non reconnu, débit carte sans pièce (puis écarté)", [an.some(a => a.j === jc || a.j?.id === jc.id && a.genre === "fournisseur non reconnu"), an.some(a => a.op?.id === oc.id)], [true, true]);
+      enregistrer("operations", Object.assign(oc, {sansPiece: true}));
+      vrai("anomalies : débit marqué « pas de pièce » retiré", !anomaliesRapprochement().some(a => a.op?.id === oc.id));
+      const jv = enregistrer("justificatifs", {type: "ticket", date: "2026-09-15", montant: 12, carte: "X333", statut: "a_rapprocher", operations: []});
+      const jn = enregistrer("justificatifs", {type: "notefrais", date: "2026-09-15", montant: 12, statut: "a_rapprocher", operations: []});
+      v("pièce antérieure au contrôle : close, hors en-cours ; note de frais et saisie à valider restent ouvertes",
+        [pieceClose(jv), encoursSaisis().lignes.some(l => (l.justificatifs || []).includes?.(jv.id)) || JSON.stringify(encoursSaisis()).includes(jv.id), pieceOuverte(jn), pieceClose(Object.assign({}, jv, {aValider: true}))], [true, false, true, false]);
+      supprimer("justificatifs", jv.id); supprimer("justificatifs", jn.id);
+      {
+        // Export du compte : une ligne carte n'est écartée que si l'achat est déjà sur une carte LCL (à un jour près)
+        const ox = enregistrer("operations", {compte: carte.id, date: "2027-02-05", montant: -10, libelle: "DEJA SUR CARTE"});
+        const lu = {genre: "compte", banque: "LCL", numero: "000099Z", periode: {debut: "2027-02-01", fin: "2027-02-28"}, soldeDebut: 0, soldeFin: 0,
+          lignes: [{date: "2027-02-06", montant: -10, libelle: "DEJA SUR CARTE", type: "Carte"}, {date: "2027-02-06", montant: -42.94, libelle: "MANQUANT CARTE", type: "Carte"}]};
+        const pr = preparerReleve(lu, cj);
+        v("export du compte : achat déjà sur une carte écarté, achat absent gardé (sans titulaire)", [pr.ecartees.length, (pr.cartesSansTitulaire || []).map(l => l.libelle)], [1, ["MANQUANT CARTE"]]);
+        supprimer("operations", ox.id);
+      }
+      {
+        // Relevé PDF LCL du compte (sens par la colonne, marque [C]) : lecture, contrôle des soldes, clôture
+        const rel = ["RELEVE DE COMPTE", " du 08.04.2027 au 07.05.2027 - N° 12", "Indicatif : 8208 Compte : 99 Z", "ECRITURES DE LA PERIODE", "DATE LIBELLE VALEUR DEBIT CREDIT",
+          "07.04 ANCIEN SOLDE 1 000,00 [C]", "10.04 PRLV SEPA ESSAI EAU 10.04.27 68,00", "REF.CLIENT:X", "12.04 VIREMENT ESSAI PENSION 12.04.27 1 454,82 [C]",
+          "30.04 RELEVE CB AU 30/04/27 30.04.27 120,00", "07.05 SOLDE EN EUROS 2 266,82 [C]"].join(String.fromCharCode(10));
+        const rc = extraireReleveCompteLcl(rel);
+        v("relevé PDF du compte : écritures, sens, années, soldes cohérents", [rc.operations.map(o => o.date + " " + o.montant).join(" | "), rc.soldeDebut, rc.soldeFin, rc.controle.ok, rc.numero],
+          ["2027-04-10 -68 | 2027-04-12 1454.82 | 2027-04-30 -120", 1000, 2266.82, true, "99Z"]);
+        const oDeja = enregistrer("operations", {compte: cj.id, date: "2027-04-11", montant: -68, libelle: "PRLV EAU", dateDebit: "2027-04-11"});
+        const oTrop = enregistrer("operations", {compte: cj.id, date: "2027-04-20", montant: -15, libelle: "DOUBLON ESSAI", dateDebit: "2027-04-20"});
+        const lu = Object.assign({nom: "essai.pdf", cartes: []}, {genre: "releve_lcl", releveCompte: rc, numero: rc.numero, periode: rc.periode});
+        const pc = preparerClotureLcl(lu);
+        const oDup = enregistrer("operations", {compte: cj.id, date: "2027-04-11", montant: -68, libelle: "PRLV EAU", dateDebit: "2027-04-11"});
+        const pcd = preparerClotureLcl(lu);
+        v("clôture : doublon exact repéré (l'original apparié reste)", [(pcd.doublonsExacts.has(oDup.id) ? 1 : 0) + (pcd.doublonsExacts.has(oDeja.id) ? 1 : 0), pcd.doublonsExacts.has(oTrop.id)], [1, false]);
+        supprimer("operations", oDup.id);
+        v("clôture : conforme à 4 jours près, manquants proposés, ligne en trop signalée (non cochée)", [pc.conformes, pc.manquants.map(l => l.montant), pc.enTrop.map(o => o.id), pc.choixEnTrop.size], [1, [1454.82, -120], [oTrop.id], 0]);
+        const rr = appliquerClotureLcl(pc);
+        const cb = vivants("operations").find(o => o.compte === cj.id && /^RELEVE CB AU/.test(o.libelle) && o.date === "2027-04-30");
+        v("clôture appliquée : ajouts, rien supprimé sans coche, débit des cartes en Transfert, clôture notée", [rr.ajoutees, rr.supprimees, !!obtenir("operations", oTrop.id), cb?.sousCategorie, !!(LIVRE.parametres.clotures || {})[cj.id + "|2027-05-07"]], [2, 0, true, "Facture cartes", true]);
+        for (const o of vivants("operations").filter(o => o.compte === cj.id && o.date >= "2027-04-08" && o.date <= "2027-05-07")) supprimer("operations", o.id);
+        for (const s of vivants("soldes").filter(s => s.source === "essai.pdf")) supprimer("soldes", s.id);
+        for (const i of vivants("imports").filter(i => i.fichier === "essai.pdf")) supprimer("imports", i.id);
+        const cl = Object.assign({}, LIVRE.parametres.clotures); delete cl[cj.id + "|2027-05-07"]; modifierParametres({clotures: cl});
+      }
+      {
+        // Relevé PDF Amex : en-tête des soldes, période, prélèvement, libellé sur la ligne suivante, « CR » de crédit
+        const rel = ["American Express Relevé de compte", "Nom Numéro de Compte Date de relevé Prochain relevé", "TITULAIRE ESSAI xxxx-xxxxxx-99001 06/01/28 06/02/28",
+          "Solde Précédent Nouveau Crédit Nouveau Débit Nouveau Solde Montant Dû en Euros", "100,00 - 105,00 + 1 230,50 = 1 225,50 1 225,50",
+          "Le relevé du 7 décembre au 6 janvier 2028 comprend tous les frais et paiements reçus au 6 janvier 2028.",
+          "Le règlement de votre relevé est prévu par prélèvement automatique sur votre compte bancaire à partir du 10/01/2028.",
+          "12 déc 12 déc PRELEVEMENT AUTOMATIQUE ENREGISTRE-MERCI 100,00", "CR", "Opérations pour TITULAIRE ESSAI", "Carte xxxx-xxxxxx-99001",
+          "6 déc 6 déc EPICERIE ESSAI VILLEESSAI 30,50", "20 déc 21 déc 1 200,00", "MAGASIN ESSAI VILLEESSAI", "2 janv 2 janv 5,00", "LIBRAIRIE ESSAI", "CR",
+          "Total des dépenses pour TITULAIRE ESSAI 1 225,50"].join(String.fromCharCode(10));
+        const ra = extraireReleveAmex(rel);
+        v("relevé Amex : écritures, sens, années, libellé suivant, soldes cohérents", [ra.operations.map(o => o.date + " " + o.montant + " " + o.libelle).join(" | "), ra.periode.debut, ra.periode.fin, ra.prelevement, ra.soldeFin, ra.controle.ok, ra.numero],
+          ["2027-12-12 100 PRELEVEMENT AUTOMATIQUE ENREGISTRE-MERCI | 2027-12-06 -30.5 EPICERIE ESSAI VILLEESSAI | 2027-12-20 -1200 MAGASIN ESSAI VILLEESSAI | 2028-01-02 5 LIBRAIRIE ESSAI", "2027-12-07", "2028-01-06", "2028-01-10", 1225.5, true, "99001"]);
+        const amexAvant = compteAmex();
+        const ax = amexAvant || enregistrer("comptes", {nom: "Amex essai", type: "carte", banque: "Amex", carte: "AMEX", compteDebit: cj.id, actif: true});
+        const a1 = enregistrer("operations", {compte: ax.id, date: "2027-12-07", montant: -30.5, libelle: "EPICERIE ESSAI"});
+        const a2 = enregistrer("operations", {compte: ax.id, date: "2027-12-22", montant: -9.99, libelle: "EN TROP ESSAI"});
+        const a0 = enregistrer("operations", {compte: ax.id, date: "2027-11-20", montant: -50, libelle: "ANCIEN ESSAI"});
+        const pa = preparerClotureAmex({nom: "amex-essai.pdf", genre: "releve_amex", releveAmex: ra, periode: ra.periode});
+        v("clôture Amex : conforme à 3 jours, manquants proposés, en trop signalé, encours comparé", [pa.conformes, pa.manquants.map(l => l.montant).join(","), pa.enTrop.map(o => o.id), pa.controles.map(c => c.ok).join(",")],
+          [1, "100,-1200,5", [a2.id], "true,false,false,true"]);
+        const rx = appliquerClotureAmex(pa);
+        const mag = vivants("operations").find(o => o.compte === ax.id && o.libelle === "MAGASIN ESSAI VILLEESSAI");
+        v("clôture Amex appliquée : ajouts datés du prélèvement, apparié marqué, en trop gardé, clôture notée",
+          [rx.ajoutees, rx.supprimees, mag?.dateDebit, obtenir("operations", a1.id).dateDebit, obtenir("operations", a1.id).releveAmex, !!obtenir("operations", a2.id), !!(LIVRE.parametres.clotures || {})[ax.id + "|2028-01-06"]],
+          [3, 0, "2028-01-10", "2028-01-10", "2028-01-06", true, true]);
+        v("clôture Amex : achat antérieur sans débit réputé réglé au paiement du solde précédent", [pa.anciens.map(o => o.id), rx.anciens, obtenir("operations", a0.id).dateDebit, obtenir("operations", a0.id).debitEstime],
+          [[a0.id], 1, "2027-12-12", true]);
+        const pa2 = preparerClotureAmex({nom: "amex-essai.pdf", genre: "releve_amex", releveAmex: ra, periode: ra.periode});
+        v("clôture Amex refaite : tout conforme sauf la ligne en trop", [pa2.conformes, pa2.manquants.length, pa2.enTrop.length], [4, 0, 1]);
+        for (const o of vivants("operations").filter(o => o.compte === ax.id && o.date >= "2027-11-01" && o.date <= "2028-01-10")) supprimer("operations", o.id);
+        for (const i of vivants("imports").filter(i => i.fichier === "amex-essai.pdf")) supprimer("imports", i.id);
+        const cl = Object.assign({}, LIVRE.parametres.clotures); delete cl[ax.id + "|2028-01-06"]; modifierParametres({clotures: cl});
+        if (!amexAvant) supprimer("comptes", ax.id);
+      }
+      {
+        // Chèque importé sans son numéro (colonne à part de l'export LCL) : rapproché au montant ; avec numéro, il doit correspondre
+        const oc1 = enregistrer("operations", {compte: cj.id, date: "2027-03-20", montant: -524.03, libelle: "", type: "Chèque", dateDebit: "2027-03-20"});
+        const jc1 = enregistrer("justificatifs", {type: "facture", date: "2027-03-13", montant: 524.03, carte: "CPT:" + cj.id, cheque: "5367918", statut: "a_rapprocher", operations: []});
+        const avant = candidats([jc1]).some(x => x.op.id === oc1.id);
+        enregistrer("operations", Object.assign(oc1, {cheque: "5367000", libelle: "CHQ. 5367000"}));
+        v("chèque : sans numéro connu, rapproché au montant ; numéro différent, écarté", [avant, candidats([jc1]).some(x => x.op.id === oc1.id)], [true, false]);
+        supprimer("operations", oc1.id); supprimer("justificatifs", jc1.id);
+        const lc = creerOperation(cj, {date: "2027-03-21", montant: -10, libelle: "", type: "Chèque", cheque: "1234567", empreinte: "essai-chq"}, null);
+        v("import : le numéro du chèque est gardé (libellé « CHQ. n° »)", [lc.cheque, lc.libelle], ["1234567", "CHQ. 1234567"]);
+        supprimer("operations", lc.id);
+      }
+      const je = enregistrer("justificatifs", {type: "ticket", date: "2027-03-14", montant: 9.5, carte: "ESPECES", statut: "a_rapprocher", operations: []});
+      creerOperationEspeces(je); const oe = obtenir("justificatifs", je.id).operations[0];
+      delier(obtenir("justificatifs", je.id));
+      v("espèces défait : l'opération en espèces disparaît avec le rapprochement", [!!obtenir("operations", oe), obtenir("justificatifs", je.id).statut], [false, "a_rapprocher"]);
+      supprimer("justificatifs", je.id);
+      {
+        // Placement en double (numéro avec et sans lettre clé) : valeurs réunies sur le compte actif
+        const pA = enregistrer("comptes", {nom: "PEA essai", type: "pea", numero: "012345", actif: true});
+        const pB = enregistrer("comptes", {nom: "PEA essai B", type: "pea", numero: "012345Z", actif: false});
+        enregistrer("valorisations", {compte: pB.id, date: "2026-12-31", valeur: 1000, source: "releve.pdf"});
+        const nR = reunirPlacementsEnDouble();
+        v("placement en double : valeurs réunies, import rattaché au compte actif", [nR, vivants("valorisations").filter(x => x.compte === pA.id).length, compteDuFichier({genre: "valorisation", numero: "012345Z", typeCompte: "pea"})?.id === pA.id], [1, 1, true]);
+        for (const x of vivants("valorisations").filter(x => x.compte === pA.id)) supprimer("valorisations", x.id);
+        supprimer("comptes", pA.id); supprimer("comptes", pB.id);
+      }
+      {
+        // Relevé annuel de livret : solde au 31/12 tiré des écritures
+        const NL2 = String.fromCharCode(10);
+        const tl = ["RELEVE DE COMPTE", " du 01.02.2026 au 31.01.2027 - N° 3", "ECRITURES DE LA PERIODE", "DATE LIBELLE VALEUR DEBIT CREDIT", "31.01 ANCIEN SOLDE 12 119,39 [C]",
+          "31.12 INTERETS AU : 31 12 26 31.12.26 . 363,57 [C]", "15.01 VIREMENT ESSAI 15.01.27 100,00", "31.01 SOLDE EN EUROS 12 382,96 [C]"].join(NL2);
+        v("livret : solde au 31/12 lu dans le relevé annuel", soldesFinAnnee(tl), [{date: "2026-12-31", valeur: 12482.96}]);
+        v("livret : jamais pris pour un relevé du compte courant", reconnaitrePdf("LIVRETA_09999099999_20270206.pdf", "LIVRET A" + NL2 + tl, null).genre, "valorisation");
+      }
+      {
+        // Lot : nature d'une catégorie (projet) sur les opérations et les parts ventilées
+        const on1 = enregistrer("operations", {compte: cj.id, date: "2027-02-10", montant: -100, libelle: "ESSAI NAT 1", categorie: "Catégorie essai", sousCategorie: "Études", nature: "Courante"});
+        const on2 = enregistrer("operations", {compte: cj.id, date: "2027-02-11", montant: -50, libelle: "ESSAI NAT 2", categorie: "Catégorie essai", sousCategorie: "Honoraires", nature: "Hors budget"});
+        const lotN = {actions: [{type: "natureCategorie", categorie: "Catégorie essai", nature: "Exceptionnelle"}]};
+        const apN = preparerCorrections(lotN); appliquerCorrections(lotN);
+        v("lot : nature d'une catégorie (aperçu, puis appliquée)", [apN.nb, obtenir("operations", on1.id).nature, obtenir("operations", on2.id).nature], [2, "Exceptionnelle", "Exceptionnelle"]);
+        supprimer("operations", on1.id); supprimer("operations", on2.id);
+      }
+      {
+        // Avis d'impôt : échéances lues, prélèvements DGFiP classés (une échéance par prélèvement)
+        const NL = String.fromCharCode(10);
+        const ir = echeancesAvisImpot(["Somme qu'il vous reste à payer", "6 623,00 €", "25 septembre 2026 : 1 655,00 €", "26 octobre 2026 : 1 655,00 €", "28 décembre 2026 : 1 658,00 €"].join(NL), "Impôt sur le revenu");
+        const tf = echeancesAvisImpot(["Somme à payer", " 1 412,00 €", "Date limite de paiement : 15/10/2026"].join(NL), "Taxe foncière");
+        const th = echeancesAvisImpot(["Montant de votre taxe d'habitation 1 787,00 €", "la somme à payer sera prélevée automatiquement le 28/12/2026."].join(NL), "Taxe d'habitation");
+        v("avis d'impôt : échéancier, date limite + 10 jours, prélèvement daté", [ir.map(e => e.date + " " + e.montant).join(" | "), tf, th],
+          ["2026-09-25 1655 | 2026-10-26 1655 | 2026-12-28 1658", [{date: "2026-10-25", montant: 1412}], [{date: "2026-12-28", montant: 1787}]]);
+        const dA = enregistrer("documents", {genre: "avis_impot", titre: "Taxe foncière 2027", quoi: "Taxe foncière", echeances: [{date: "2027-10-25", montant: 1412}]});
+        const oT = enregistrer("operations", {compte: cj.id, date: "2027-10-26", montant: -1412, libelle: "PRLV SEPA DIRECTION GENERALE DE", categorie: "À préciser", statut: "a_preciser", dateDebit: "2027-10-26"});
+        const oT2 = enregistrer("operations", {compte: cj.id, date: "2027-10-27", montant: -1412, libelle: "PRLV SEPA DIRECTION GENERALE DE", categorie: "À préciser", statut: "a_preciser", dateDebit: "2027-10-27"});
+        const nA = classerParAvisImpot();
+        v("avis d'impôt : prélèvement classé Impôts › Taxe foncière, une seule fois", [nA, obtenir("operations", oT.id).sousCategorie, obtenir("operations", oT2.id).categorie], [1, "Taxe foncière", "À préciser"]);
+        supprimer("operations", oT.id); supprimer("operations", oT2.id); supprimer("documents", dA.id);
+      }
+      v("banque du terminal : caisse régionale lue seule, jamais un fournisseur ; vrai commerçant accepté",
+        [estBanqueTerminal("SUD RHONE ALPES"), estBanqueTerminal("Crédit Agricole Sud Rhône Alpes"), estBanqueTerminal("Pharmacie Sud Rhône Alpes"), estBanqueTerminal("La Savoureine")], [true, true, false, false]);
+      // Débit sans pièce et pièce du même fournisseur à un écart près : appariés, rapprochés seulement sur décision
+      const fq = enregistrer("commercants", {nom: "Hebergeur Essai", alias: [], stats: {}, natures: {}});
+      const oq = enregistrer("operations", {compte: carte.id, date: "2027-03-12", montant: -15.74, libelle: "HEBERGEUR ESSAI COM", commercant: fq.id});
+      const jq = enregistrer("justificatifs", {type: "facture", date: "2027-03-12", montant: 13.68, carte: "X333", commercant: fq.id, commercantNom: fq.nom, statut: "a_rapprocher", operations: []});
+      const oq2 = enregistrer("operations", {compte: carte.id, date: "2027-03-13", montant: -16.5, libelle: "HEBERGEUR ESSAI COM", commercant: fq.id});
+      const anq = anomaliesRapprochement(), aq = anq.find(a => a.op?.id === oq.id);
+      v("écart de montant : pièce voisine proposée à un seul débit (le plus proche), pas rapprochée d'office", [aq?.genre, aq?.piece?.id, anq.find(a => a.op?.id === oq2.id)?.piece || null, obtenir("justificatifs", jq.id).statut], ["montant différent", jq.id, null, "a_rapprocher"]);
+      supprimer("operations", oq2.id);
+      rapprocherAvecEcart(obtenir("justificatifs", jq.id), obtenir("operations", oq.id));
+      v("rapprocher quand même : lié, écart noté, plus d'anomalie", [obtenir("justificatifs", jq.id).statut, obtenir("justificatifs", jq.id).ecartMontant, anomaliesRapprochement().some(a => a.op?.id === oq.id)], ["rapproche", 2.06, false]);
+      supprimer("justificatifs", jq.id); supprimer("operations", oq.id); supprimer("commercants", fq.id);
+      for (const x of [ja, jb, jc]) supprimer("justificatifs", x.id); supprimer("operations", oc.id); supprimer("operations", oa.id);
     }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});
     rapprocherTout();
@@ -542,6 +775,9 @@ async function autotest(){
     /* --- Valorisations lues dans des PDF (textes types) --- */
     const av = reconnaitrePdf("RELEVE.pdf", "Votre relevé trimestriel au 30 juin 2027\nLa valeur de votre adhésion s'élève à 612 400,00 euros.\nN° Adhésion : 123 456789012C", null);
     v("assurance-vie : valeur et date", [av.genre, av.valeur, av.date], ["valorisation", 612400, "2027-06-30"]);
+    const ava = reconnaitrePdf("RELEVEANNUELASSURANCEVIE_20280205.pdf", "Assureur : Assureur Essai\nN° Adhésion : 701 123456789C CONTRAT EXEMPLE VIE\nRelevé annuel de votre assurance vie établi au 31 décembre 2027\nLa valeur de votre adhésion au 31 décembre 2027 est de : 203 664,22 €", null);
+    const avi = reconnaitrePdf("INFORMATIONTRIMESTRIELLEASSURANCEVIE_20271125.pdf", "Assureur : Assureur Essai\nN° Adhésion : 701 123456789C\nLa valeur de votre adhésion au 30 septembre 2027 s'élève à 201 520,28 €.", null);
+    v("assurance-vie : relevé annuel et information trimestrielle", [ava.valeur, ava.date, ava.numero, ava.produit, avi.valeur, avi.date], [203664.22, "2027-12-31", "701123456789C", "CONTRAT EXEMPLE VIE", 201520.28, "2027-09-30"]);
     const pea = reconnaitrePdf("PLANDEPARGNEENACTIONS_08208012345_20270331.pdf", "Précisions sur votre PEA au 31/03/2027:\nEvaluation globale de votre PEA : 356.973,29 euros", null);
     v("PEA : évaluation globale", [pea.valeur, pea.date], [356973.29, "2027-03-31"]);
 
@@ -553,6 +789,16 @@ async function autotest(){
     /* --- Trésorerie : découvert provoqué --- */
     enregistrer("budgets", {annee: 2027, nom: "B", fige: false, actif: true, lignes: [{id: "l1", nature: "Courante", categorie: "Alimentation", sousCategorie: "Courses", annuel: 12000, paiement: {compte: 1}}]});
     enregistrer("echeances", {libelle: "Grosse dépense", montant: -30000, recurrence: "unique", debut: "2027-05-15", compte: cj.id});
+    {
+      // Achat carte ancien sans date de débit : pas un débit à venir ; flux passés cohérents
+      const cv = enregistrer("comptes", {nom: "Carte ancienne essai", type: "carte", banque: "LCL", carte: "X909", compteDebit: cj.id, actif: true});
+      const ov = enregistrer("operations", {compte: cv.id, date: "2027-01-05", montant: -5000, libelle: "ACHAT ANCIEN ESSAI", dateDebit: null});
+      const sv = simulerTresorerie({depart: "2027-03-31", jours: 60});
+      v("encours : achat de plus de 62 jours sans débit ignoré et signalé", [sv.evenements.some(e => /Carte ancienne/.test(e.libelle)), encoursCarte(cv, "2027-03-31").anciens.length], [false, 1]);
+      supprimer("operations", ov.id); supprimer("comptes", cv.id);
+      const fp = fluxPasses(cj, 3, "2027-03-31");
+      v("flux passés : mois sans relevé ni opération omis ; fin = début + entrées − sorties + virements", [fp.length > 0, fp.every(m => m.debut === null || Math.abs(m.debut + m.entrees - m.sorties + m.transferts - m.fin) < 0.01)], [true, true]);
+    }
     const s1 = simulerTresorerie({depart: "2027-03-31", jours: 120});
     const a1 = analyseTresorerie(s1);
     v("trésorerie : solde de départ (relevé + facture)", Math.round(s1.soldeDepart * 100) / 100, Math.round((11950 - 45.4) * 100) / 100);
@@ -578,6 +824,37 @@ async function autotest(){
     appliquerPlan({commercants: [{nom: "Pisciniste essai", alias: ["PISCINE ESSAI VILLE"], categorie: "Extérieurs", sousCategorie: "Piscine (entretien)", lieu: "Campagne", verifie: true}]});
     const fp = trouverCommercant(cleLibelle("PISCINE ESSAI VILLE"), true);
     v("plan : fiche fournisseur fixée et vérifiée", [fp?.nom, fp?.sousCategorie, fp?.verifie], ["Pisciniste essai", "Piscine (entretien)", true]);
+    {
+      // Plan qui remplace le budget actif d'une année : les échéances liées suivent la ligne équivalente
+      enregistrer("budgets", {annee: 2032, nom: "Plan essai v4", fige: false, actif: true, lignes: [
+        {id: "lb-v4-loyer", nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 24000},
+        {id: "lb-v4-abo", nature: "Courante", categorie: "Loisirs essai", sousCategorie: "Abonnement", annuel: 120}]});
+      enregistrer("budgets", {annee: 2031, nom: "Plan essai 2031", fige: false, actif: true, lignes: [{id: "lb-31-loyer", nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 23000}]});
+      const eL = enregistrer("echeances", {libelle: "Loyer essai", montant: -2000, recurrence: "mensuelle", debut: "2032-01-01", compte: cj.id, ligneBudget: "lb-v4-loyer"});
+      const eA = enregistrer("echeances", {libelle: "Abonnement essai", montant: -10, recurrence: "mensuelle", debut: "2032-01-05", compte: cj.id, ligneBudget: "lb-v4-abo"});
+      const e31 = enregistrer("echeances", {libelle: "Loyer essai 2031", montant: -1900, recurrence: "mensuelle", debut: "2031-01-01", compte: cj.id, ligneBudget: "lb-31-loyer"});
+      const rl = appliquerPlan({budgets: [{annee: 2032, nom: "Plan essai v5", fige: false, actif: true, lignes: [
+        {nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 24600}, {nature: "Courante", categorie: "Alimentation", sousCategorie: "Courses", annuel: 9000}]}]});
+      const b5 = budgetActif(2032), l5 = b5.lignes.find(l => l.sousCategorie === "Loyer");
+      v("plan : lien d'échéance reporté vers la ligne équivalente du nouveau budget", [b5.nom, rl.liensReportes, rl.liensNonReportes, obtenir("echeances", eL.id).ligneBudget === l5.id, obtenir("echeances", e31.id).ligneBudget],
+        ["Plan essai v5", 1, ["Abonnement essai (aucune ligne de même catégorie)"], true, "lb-31-loyer"]);
+      // Même nom, même année : budget remplacé en place, nouvelles lignes
+      const rl2 = appliquerPlan({budgets: [{annee: 2032, nom: "Plan essai v5", fige: false, actif: true, lignes: [{nature: "Courante", categorie: "Logement", sousCategorie: "Loyer", annuel: 25000}]}]});
+      v("plan : budget remplacé en place, lien suivi", [rl2.liensReportes, obtenir("echeances", eL.id).ligneBudget === budgetActif(2032).lignes[0].id], [1, true]);
+      // Copie pour l'année suivante : échéance de 2033 liée à une ligne de 2032
+      const eN = enregistrer("echeances", {libelle: "Loyer essai 2033", montant: -2100, recurrence: "mensuelle", debut: "2033-01-01", compte: cj.id, ligneBudget: budgetActif(2032).lignes[0].id});
+      const av = instantaneLignesBudget();
+      const b6 = enregistrer("budgets", {annee: 2033, nom: "Copie essai", fige: false, actif: true, lignes: JSON.parse(JSON.stringify(budgetActif(2032).lignes)).map(l => Object.assign(l, {id: "lb-" + idAleatoire(8)}))});
+      const rc6 = reporterLiensBudget(2033, av);
+      v("copie de budget : échéance de l'année suivante rattachée à la ligne copiée", [rc6.reportes, obtenir("echeances", eN.id).ligneBudget === b6.lignes[0].id, obtenir("echeances", eL.id).ligneBudget === budgetActif(2032).lignes[0].id], [1, true, true]);
+      // Suppression de budgets par plan : l'inactif part, l'actif reste, les opérations ne bougent pas
+      const nbOps = vivants("operations").length;
+      const rs = appliquerPlan({supprimerBudgets: [{nom: "Plan essai v4", annee: 2032}, {nom: "Plan essai v5", annee: 2032}, {nom: "Plan essai absent", annee: 2032}]});
+      v("plan : budget inactif supprimé, budget actif refusé", [rs.budgetsSupprimes, rs.budgetsNonSupprimes, rs.budgetsIntrouvables, vivants("budgets").filter(x => x.annee === 2032).map(x => x.nom), vivants("operations").length === nbOps],
+        [1, ["Plan essai v5 (2032, budget actif)"], ["Plan essai absent (2032)"], ["Plan essai v5"], true]);
+      for (const e of [eL, eA, e31, eN]) supprimer("echeances", e.id);
+      for (const b of vivants("budgets").filter(x => /^(Plan|Copie) essai/.test(x.nom))) supprimer("budgets", b.id);
+    }
     {
       const epx = {depart: "2027-01-10", soldeDepart: 300, comptes: [], jours: [{date: "2027-01-11", flux: 50, solde: 350}], evenements: [
         {date: "2027-01-11", montant: 100, genre: "capital"}, {date: "2027-02-01", montant: -80, genre: "projet", echeance: {projet: "Toit"}},
@@ -667,6 +944,8 @@ async function autotest(){
         {id: "i", nom: "Superette Alpha", alias: ["ALPHA SAS 12"]}, {id: "j", nom: "Alpha Distribution", alias: ["ALPHA SAS 12"]}];
       v("doublons probables : inclusion, ordre des mots, alias ; ni générique ni deux lieux", doublonsProbables(fs).map(g => g.map(x => x.id).sort().join("")).sort(), ["ab", "cd", "ij"]);
       v("doublons probables : groupe écarté", doublonsProbables(fs, ["a|b"]).length, 2);
+      const fv = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf"].map((n, i) => ({id: "v" + i, nom: n + " Villeessai"})).concat([{id: "w", nom: "Villeessai"}, {id: "x1", nom: "Hotel Kilo Villeessai"}, {id: "x2", nom: "Kilo"}]);
+      v("doublons probables : un mot répandu (ville) ne relie rien ; paires seulement", doublonsProbables(fv).map(g => g.map(x => x.id).sort().join("")), ["x1x2"]);
       v("devis : fenêtre de date d'une facture", fenetre({type: "devis"}), fenetre({type: "facture"}));
       const jOk = enregistrer("justificatifs", {type: "autre", date: "2027-05-20", montant: 1318.8, commercantNom: "Bureau d'études essai", statut: "a_rapprocher", operations: []});
       const jDep = enregistrer("justificatifs", {type: "facturette", date: "2027-05-20", montant: 1318.8, commercantNom: "Lu de travers", origine: "depot", aValider: true, statut: "a_rapprocher", operations: []});

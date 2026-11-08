@@ -20,13 +20,23 @@ async function textePdf(octets, motDePasse){
   for (let p = 1; p <= doc.numPages; p++){
     const contenu = await (await doc.getPage(p)).getTextContent();
     const lignes = new Map();
+    let xDebit = null, xCredit = null;
     for (const it of contenu.items){
       if (!it.str) continue;
       const y = Math.round(it.transform[5] / 2);
       if (!lignes.has(y)) lignes.set(y, []);
-      lignes.get(y).push({x: it.transform[4], t: it.str});
+      const fin = it.transform[4] + (it.width || 0);
+      if (it.str.trim() === "DEBIT") xDebit = fin;
+      if (it.str.trim() === "CREDIT") xCredit = fin;
+      lignes.get(y).push({x: it.transform[4], fin, t: it.str});
     }
-    pages.push([...lignes.entries()].sort((a, b) => b[0] - a[0]).map(([, l]) => l.sort((a, b) => a.x - b.x).map(x => x.t).join(" ")).join("\n"));
+    // Relevé à colonnes DEBIT / CREDIT : sur une ligne d'écriture (« jj.mm … »), un montant aligné sous CREDIT
+    // reçoit la marque « [C] » (le texte seul ne dit pas le sens). Lu par extraireReleveCompteLcl.
+    const marquer = l => {
+      if (xDebit === null || xCredit === null || !/^\d{2}\.\d{2}\b/.test((l[0]?.t || "").trim())) return l;
+      return l.map(x => /\d,\d{2}\s*$/.test(x.t) && Math.abs(x.fin - xCredit) < Math.abs(x.fin - xDebit) ? Object.assign({}, x, {t: x.t.replace(/\s*$/, "") + " [C]"}) : x);
+    };
+    pages.push([...lignes.entries()].sort((a, b) => b[0] - a[0]).map(([, l]) => marquer(l.sort((a, b) => a.x - b.x)).map(x => x.t).join(" ")).join("\n"));
   }
   await doc.destroy();
   return pages.join("\n\f\n").replace(/[   ]/g, " ").replace(/[ \t]+/g, " ");
@@ -130,7 +140,8 @@ function extraireCartesReleveLcl(texte){
     if (!a) continue;
     // Année : celle du mois de la carte, sauf un achat de fin d'année réglé en janvier
     const mm = +a[3], an = mm > moisCarte + 1 ? anCarte - 1 : anCarte;
-    carte.lignes.push({date: an + "-" + a[3] + "-" + a[2], montant: -lireMontant(a[4]), libelle: propre(a[1]), type: "Carte"});
+    // Débit différé : le total de la section est prélevé sur le compte le dernier jour ouvré de son mois
+    carte.lignes.push({date: an + "-" + a[3] + "-" + a[2], montant: -lireMontant(a[4]), libelle: propre(a[1]), type: "Carte", dateDebit: dernierJourOuvre(carte.mois + "-01")});
   }
   const pleines = cartes.filter(c => c.lignes.length);
   if (!pleines.length) return null;
@@ -148,6 +159,98 @@ function extraireCartesReleveLcl(texte){
   const dates = pleines.flatMap(c => c.lignes.map(l => l.date)).sort();
   return {genre: "cartes_lcl", banque: "LCL", numero, cartes: pleines, periode: {debut: dates[0], fin: dates[dates.length - 1]},
     titre: "Détail des cartes " + pleines.map(c => c.carte).join(", ") + " · " + pleines[0].mois};
+}
+
+/* ---------- Relevé de compte LCL (PDF mensuel, la pièce qui fait foi) : écritures du compte et soldes ----------
+   « jj.mm LIBELLE [valeur jj.mm.aa] montant [C] » : le sens vient de la colonne (marque [C] posée par textePdf).
+   Contrôle : ancien solde + crédits − débits = solde final, au centime. */
+function extraireReleveCompteLcl(texte){
+  const T = String(texte || "").replace(/[   ]/g, " ");
+  if (!/ECRITURES DE LA PERIODE/.test(T) || !/ANCIEN SOLDE/.test(T)) return null;
+  const per = T.match(/du (\d{2})\.(\d{2})\.(\d{4}) au (\d{2})\.(\d{2})\.(\d{4})/);
+  if (!per) return null;
+  const debut = per[3] + "-" + per[2] + "-" + per[1], fin = per[6] + "-" + per[5] + "-" + per[4];
+  const dateDe = (j, m) => { for (const an of [+per[6], +per[3], +per[6] + 1, +per[3] - 1]){ const d = an + "-" + m + "-" + j; if (d >= ajouterJours(debut, -10) && d <= ajouterJours(fin, 10)) return d; } return per[6] + "-" + m + "-" + j; };
+  const numero = ((T.match(/Compte\s*:\s*([0-9 ]+[A-Z])\b/) || [])[1] || "").replace(/\s/g, "");
+  const operations = []; let ancien = null, final = null, derniere = null;
+  for (const brut of T.split(/\n/)){
+    const l = brut.trim();
+    if (/^PAIEMENTS PAR CARTE/i.test(l)) break;
+    const m = l.match(/^(\d{2})\.(\d{2}) (.+?) (\d{1,3}(?: \d{3})*,\d{2})( \[C\])?(?: \.)?$/);
+    if (!m){ if (derniere && /^(LIBELLE:|REF\.CLIENT)/.test(l) && !derniere.detail) derniere.detail = l.replace(/^LIBELLE:/, "").trim(); continue; }
+    const montant = lireMontant(m[4]) * (m[5] ? 1 : -1);
+    if (/^ANCIEN SOLDE/.test(m[3])){ ancien = montant; continue; }
+    if (/^SOLDE EN EUROS/.test(m[3])){ final = montant; continue; }
+    const libelle = m[3].replace(/ \d{2}\.\d{2}\.\d{2}$/, "").trim();
+    derniere = {date: dateDe(m[1], m[2]), montant: Math.round(montant * 100) / 100, libelle, type: /^CHQ/.test(libelle) ? "Chèque" : ""};
+    operations.push(derniere);
+  }
+  if (ancien === null || !operations.length) return null;
+  const calc = versCentimes(ancien) + somme(operations, o => versCentimes(o.montant));
+  const ok = final !== null && calc === versCentimes(final);
+  return {numero, periode: {debut, fin}, soldeDebut: ancien, soldeFin: final, operations,
+    controle: {ok, texte: "relevé du compte : " + operations.length + " écriture(s)" + (final === null ? ", solde final illisible" : ok ? ", soldes cohérents au centime" : ", écart de " + euros((versCentimes(final) - calc) / 100) + " entre les écritures et le solde final")}};
+}
+
+/* ---------- Relevé mensuel Amex (PDF, la pièce qui fait foi) ----------
+   En-tête « Solde Précédent − Nouveau Crédit + Nouveau Débit = Nouveau Solde » ; période « Le relevé du 7 octobre
+   au 6 novembre 2026 » ; prélèvement « à partir du jj/mm/aaaa ». Écritures « 6 oct 7 oct LIBELLE 11,15 » : date de
+   la transaction, date d'enregistrement, libellé (parfois sur la ligne suivante), montant ; un « CR » qui suit
+   marque un crédit (paiement reçu, remboursement). Contrôle : somme des débits et des crédits égale à l'en-tête. */
+const MOIS_AMEX = {jan: 1, fev: 2, mar: 3, avr: 4, mai: 5, juin: 6, juil: 7, jui: 7, aou: 8, sep: 9, oct: 10, nov: 11, dec: 12};
+const moisAmex = t => { const n = norm(t).replace(/\./g, ""); return MOIS_AMEX[n.slice(0, 4)] || MOIS_AMEX[n.slice(0, 3)] || null; };
+function extraireReleveAmex(texte){
+  const T = String(texte || "").replace(/[   ]/g, " ");
+  if (!/American Express/i.test(T) || !/Solde Pr[ée]c[ée]dent/i.test(T) || !/Nouveau Solde/i.test(T)) return null;
+  const mt = "(\\d{1,3}(?: \\d{3})*,\\d{2})";
+  const tete = T.match(new RegExp(mt + " - " + mt + " \\+ " + mt + " = " + mt));
+  const per = norm(T).match(/le releve du (\d{1,2}) ([a-z]+) au (\d{1,2}) ([a-z]+) (\d{4})/);
+  if (!tete || !per || !MOIS_TEXTE[per[2]] || !MOIS_TEXTE[per[4]]) return null;
+  const anFin = +per[5], moisFin = MOIS_TEXTE[per[4]];
+  const fin = anFin + "-" + pad2(moisFin) + "-" + pad2(per[3]);
+  const debut = (MOIS_TEXTE[per[2]] > moisFin ? anFin - 1 : anFin) + "-" + pad2(MOIS_TEXTE[per[2]]) + "-" + pad2(per[1]);
+  const dateDe = (j, m) => (m > moisFin + 1 ? anFin - 1 : anFin) + "-" + pad2(m) + "-" + pad2(j);
+  const prelevement = lireDate(premier(T, /pr[ée]l[èe]vement automatique sur votre compte bancaire [àa] partir du (\d{2}\/\d{2}\/\d{4})/i)) || null;
+  const numero = premier(T, /x{4}-x{6}-(\d{4,6})/i);
+  const operations = []; let derniere = null, attendLibelle = false, titulaire = "";
+  const reLigne = /^(\d{1,2}) ([a-zéûô]+)\.? (\d{1,2}) ([a-zéûô]+)\.?(?: (.*))?$/i;
+  for (const brut of T.split(/\n/)){
+    const l = brut.trim();
+    const pour = l.match(/^Op[ée]rations pour (.+)$/i); if (pour){ titulaire = pour[1].trim(); attendLibelle = false; continue; }
+    if (/^Autres transactions/i.test(l)){ titulaire = ""; attendLibelle = false; continue; }
+    if (l === "CR"){ if (derniere && derniere.montant < 0) derniere.montant = -derniere.montant; continue; }
+    const m = l.match(reLigne);
+    const reste = m ? (m[5] || "").trim() : "", cr = / ?\bCR$/.test(reste), sansCr = reste.replace(/ ?\bCR$/, "");
+    const mm = m ? sansCr.match(/(?:^| )(\d{1,3}(?: \d{3})*,\d{2})$/) : null;
+    if (m && moisAmex(m[2]) && moisAmex(m[4]) && mm){
+      derniere = {date: dateDe(+m[1], moisAmex(m[2])), dateEnregistrement: dateDe(+m[3], moisAmex(m[4])), libelle: sansCr.slice(0, mm.index).trim(), montant: -lireMontant(mm[1]), detail: titulaire};
+      if (cr) derniere.montant = -derniere.montant;
+      operations.push(derniere); attendLibelle = !derniere.libelle; continue;
+    }
+    if (attendLibelle && derniere && l && !/^(Total|Carte |Num[ée]ro|Nom |Date de)/i.test(l)){ derniere.libelle = l; attendLibelle = false; }
+  }
+  if (!operations.length) return null;
+  const [soldeDebut, credits, debits, soldeFin] = tete.slice(1, 5).map(lireMontant);
+  const sd = somme(operations.filter(o => o.montant < 0), o => -versCentimes(o.montant)), sc = somme(operations.filter(o => o.montant > 0), o => versCentimes(o.montant));
+  const ok = sd === versCentimes(debits) && sc === versCentimes(credits) && versCentimes(soldeDebut) - versCentimes(credits) + versCentimes(debits) === versCentimes(soldeFin);
+  for (const o of operations) o.montant = Math.round(o.montant * 100) / 100;
+  return {numero, periode: {debut, fin}, prelevement, soldeDebut, soldeFin, credits, debits, operations,
+    controle: {ok, texte: "relevé Amex : " + operations.length + " écriture(s)" + (ok ? ", débits, crédits et soldes cohérents au centime"
+      : ", écart : débits " + euros(sd / 100) + " pour " + euros(debits) + ", crédits " + euros(sc / 100) + " pour " + euros(credits))}};
+}
+
+/* Relevé annuel d'un livret (période de février à janvier) : solde au 31/12 compris dans la période, tiré des
+   écritures (ancien solde + écritures jusqu'au 31/12). Sert de valeur de fin d'année pour la comparaison du patrimoine. */
+function soldesFinAnnee(texte){
+  const rc = extraireReleveCompteLcl(texte);
+  if (!rc || !rc.controle.ok) return [];
+  const r = [];
+  for (let an = +rc.periode.debut.slice(0, 4); an <= +rc.periode.fin.slice(0, 4); an++){
+    const d = an + "-12-31";
+    if (d < rc.periode.debut || d >= rc.periode.fin) continue;
+    r.push({date: d, valeur: Math.round((rc.soldeDebut + somme(rc.operations.filter(o => o.date <= d), o => o.montant)) * 100) / 100});
+  }
+  return r;
 }
 
 /* ---------- Justificatifs d'achat SNCF Connect ----------
@@ -246,12 +349,37 @@ function dateTexte(t){
   return lireDate(t);
 }
 function premier(texte, re){ const m = texte.match(re); return m ? m[1].trim() : ""; }
+/* Échéances prélevées d'un avis d'impôt (DGFiP) : échéancier « 26 octobre 2026 : 1 655,00 € » (impôt sur le revenu),
+   sinon « Somme à payer » avec la date de prélèvement (« prélevée … le jj/mm/aaaa ») ou la date limite + 10 jours. */
+function echeancesAvisImpot(texte, quoi){
+  const T = String(texte || "").replace(/[  ]/g, " ");
+  const r = [];
+  for (const m of T.matchAll(/(\d{1,2}(?:er)? [a-zéû]+ \d{4})\s*:\s*(\d{1,3}(?: \d{3})*,\d{2})\s*€/gi)){ const d = dateTexte(m[1]); if (d) r.push({date: d, montant: lireMontant(m[2])}); }
+  if (r.length) return r;
+  const montant = lireMontant(premier(T, /(?:Somme (?:à|qu.il vous reste à) payer|Montant de votre taxe d.habitation)[\s\S]{0,120}?(\d{1,3}(?: \d{3})*,\d{2})\s*€/i));
+  if (!(montant > 0)) return r;
+  const prelev = lireDate(premier(T, /pr[ée]lev[ée]e? automatiquement le (\d{2}\/\d{2}\/\d{4})/i));
+  const limite = lireDate(premier(T, /Date limite de paiement\s*:\s*(\d{2}\/\d{2}\/\d{4})/i));
+  const date = prelev || (limite ? ajouterJours(limite, 10) : null);
+  if (date) r.push({date, montant});
+  return r;
+}
 
 function reconnaitrePdf(nom, texte, octets){
   const T = texte; const N = norm(texte);
   const base = {nom, texte: T, octets};
+  // Relevé mensuel Amex : clôture du mois de la carte, il fait foi (le CSV ne sert qu'au suivi du mois en cours)
+  const amex = extraireReleveAmex(T);
+  if (amex) return Object.assign(base, {genre: "releve_amex", banque: "Amex", releveAmex: amex, numero: amex.numero, periode: amex.periode,
+    titre: "Relevé Amex du " + dateFr(amex.periode.debut) + " au " + dateFr(amex.periode.fin)});
   // Relevé de compte LCL : on n'en garde que le détail des cartes (le compte vient des exports CSV)
   const cartesPdf = extraireCartesReleveLcl(T);
+  // Relevé mensuel complet (écritures du compte + détail des cartes) : clôture du mois, il fait foi
+  // Seulement un relevé de compte courant : un livret ou un PEA ont le même format d'écritures mais sont lus plus bas
+  const epargne = /^(LIVRET|PEA|PLAN|COMPTEEPARGNE|CEL|PEL)/i.test(nom) || /\bLIVRET\b|PLAN D.?[EÉ]PARGNE|[EÉ]PARGNE LOGEMENT/i.test(T);
+  const releve = epargne && !/^COMPTEDEDEPOTS/i.test(nom) ? null : extraireReleveCompteLcl(T);
+  if (releve) return Object.assign(base, cartesPdf || {cartes: []}, {nom, genre: "releve_lcl", banque: "LCL", releveCompte: releve, numero: releve.numero, periode: releve.periode,
+    titre: "Relevé LCL du " + dateFr(releve.periode.debut) + " au " + dateFr(releve.periode.fin)});
   if (cartesPdf) return Object.assign(base, cartesPdf, {nom});
   // Facture des cartes LCL (« RELEVE CB AU jj/mm/aa »)
   if (/RELEVE CB AU/.test(T) && /DIFFERE|Montant/i.test(T)){
@@ -268,7 +396,7 @@ function reconnaitrePdf(nom, texte, octets){
     return Object.assign(base, {genre: "valorisation", etablissement: "LCL", typeCompte: "livret",
       produit: /DEVDURABLE/.test(fn[1]) ? "Livret de développement durable et solidaire" : (fn[1] === "LIVRETA" ? "Livret A" : fn[1]),
       numero: fn[2].slice(5), date: `${fn[3].slice(0, 4)}-${fn[3].slice(4, 6)}-${fn[3].slice(6, 8)}`,
-      valeur: lireMontant(premier(T, new RegExp("SOLDE EN EUROS\\s*" + reMontant)))});
+      valeur: lireMontant(premier(T, new RegExp("SOLDE EN EUROS\\s*" + reMontant))), intermediaires: soldesFinAnnee(T)});
   }
   // PEA LCL : relevé du compte espèces avec l'évaluation globale
   if (/Evaluation globale de votre PEA/i.test(T)){
@@ -287,13 +415,15 @@ function reconnaitrePdf(nom, texte, octets){
       numero: premier(T, /\d{5}-(\d{6}[A-Z])/), date: lireDate(premier(T, /[ée]tabli au (\d{2}\/\d{2}\/\d{4})/)),
       valeur: lireMontant(premier(T, new RegExp("EVALUATION TOTALE\\s*" + reMontant))), lignes, partiel: surPea});
   }
-  // Assurance-vie, relevé trimestriel (« valeur de votre adhésion »)
-  if (/valeur de votre adh[ée]sion s.[ée]l[èe]ve/i.test(T)){
+  // Assurance-vie : relevé trimestriel (« la valeur de votre adhésion s'élève à … euros »), information
+  // trimestrielle (« la valeur de votre adhésion au 30 septembre 2025 s'élève à … € ») et relevé annuel (« … au 31 décembre 2025 est de : … € »)
+  if (/valeur de votre adh[ée]sion (?:au \d{1,2}(?:er)? \S+ \d{4} )?(?:s.[ée]l[èe]ve|est de)/i.test(T)){
+    const m = T.match(/valeur de votre adh[ée]sion (?:au (\d{1,2}(?:er)? \S+ \d{4}) )?(?:s.[ée]l[èe]ve [àa]|est de\s*:?)\s*(\d{1,3}(?:[  .]\d{3})*,\d{2})\s*(?:€|euros)/i);
+    const dateLue = (m && m[1]) || premier(T, /relev[ée] (?:trimestriel|annuel)[^\n]*? (?:au|établi au) (\d{1,2}(?:er)? \S+ \d{4})/i);
     return Object.assign(base, {genre: "valorisation", etablissement: premier(T, /Assureur\s*:\s*([A-Za-zÀ-ÿ ]+?)\s*(?:N°|\n)/) || "Assurance-vie", typeCompte: "assurance_vie",
-      produit: premier(T, /adh[ée]sion au contrat (.+?) formule/i) || "Assurance-vie",
+      produit: premier(T, /adh[ée]sion au contrat (.+?) formule/i) || premier(T, /N° Adh[ée]sion\s*:\s*[\d ]+[A-Z][ \t]+([A-Z][A-Z ]{3,40})/) || "Assurance-vie",
       numero: premier(T, /N° Adh[ée]sion\s*:\s*([\d ]+[A-Z])/).replace(/\s/g, ""),
-      date: dateTexte(premier(T, /relev[ée] trimestriel au (\d{1,2}(?:er)? \S+ \d{4})/i)),
-      valeur: lireMontant(premier(T, /valeur de votre adh[ée]sion s.[ée]l[èe]ve [àa]\s*([\d .,]+)\s*euros/i))});
+      date: dateTexte(dateLue), valeur: m ? lireMontant(m[2]) : NaN});
   }
   // Contrat de retraite (« valeur de transfert »)
   if (/Valeur de transfert/i.test(T)){
@@ -330,7 +460,9 @@ function reconnaitrePdf(nom, texte, octets){
   if (/\bAVIS_(TF|TH|IR|PS|THRS)_/.test(T) || (/FINANCES PUBLIQUES/.test(T) && /avis d.imp[oô]t|taxes? fonci[eè]res?|taxe d.habitation/i.test(T))){
     const an = premier(N, /(?:avis d.impot|taxes? foncieres?|taxe d.habitation)\s*(\d{4})/) || premier(nom, /(20\d{2})/);
     const quoi = /\bAVIS_TF_|taxes? fonci/i.test(T + nom) ? "Taxe foncière" : /\bAVIS_TH|taxe d.habitation/i.test(T + nom) ? "Taxe d'habitation" : "Impôt sur le revenu";
-    return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : ""), date: an ? an + "-12-31" : null});
+    const echeances = echeancesAvisImpot(T, quoi);
+    return Object.assign(base, {genre: "document", sousGenre: "avis_impot", titre: quoi + (an ? " " + an : "") + (echeances.length === 1 ? " · " + euros(echeances[0].montant) : ""),
+      date: an ? an + "-12-31" : null, quoi, echeances, montant: somme(echeances, e => e.montant) || null});
   }
   if (/^COMPTEDEDEPOTS_/.test(nom)) return Object.assign(base, {genre: "inconnu", raison: "relevé de compte PDF : importez plutôt l'export CSV du compte (plus complet)"});
   // Justificatif d'achat SNCF Connect : paiement et trajets (sert au rapprochement des notes de frais)

@@ -120,7 +120,8 @@ function soldeCompte(compte, date){
       return null;
     }
     // Après le dernier relevé : opérations du compte (hors lignes carte, comptées sur les comptes carte) jusqu'à la date
-    const apres = vivants("operations").filter(o => o.compte === compte.id && o.date > ref.date && o.date <= date);
+    // Un solde de début de période (« debut ») précède les opérations de son jour : elles s'y ajoutent
+    const apres = vivants("operations").filter(o => o.compte === compte.id && (o.date > ref.date || (ref.debut && o.date === ref.date)) && o.date <= date);
     return ref.solde + somme(apres, o => o.montant);
   }
   const v = derniereValorisation(compte.id, date);

@@ -41,7 +41,7 @@ declarerEcran("operations", {titre: "Opérations", rendre(c, etat){
       const cm = o.commercant ? obtenir("commercants", o.commercant) : null;
       const compte = obtenir("comptes", o.compte);
       return h("tr", {class: "cliquable" + (choisie === o ? " choisie" : ""), onclick: () => { etat.choisie = o.id; rafraichirEcran(); }},
-        h("td", null, dateCourte(o.date)), h("td", {class: !o.dateDebit ? "discret" : ""}, o.dateDebit ? dateCourte(o.dateDebit) : (compte?.type === "carte" ? h("em", null, "à venir") : "")),
+        h("td", null, dateFr(o.date)), h("td", {class: !o.dateDebit ? "discret" : ""}, o.dateDebit ? dateFr(o.dateDebit) : (compte?.type === "carte" ? h("em", null, "à venir") : "")),
         h("td", null, compte ? (compte.carte && compte.carte !== "LCL-NV" ? compte.carte : compte.nom) : "—"),
         h("td", null, cm ? cm.nom : o.libelle, cm ? h("span", {class: "libbanque", title: o.libelle}, o.libelle) : null),
         h("td", {class: o.natureExacte ? "" : "discret"}, o.natureExacte || "—", o.ventilation ? h("span", {class: "libbanque"}, "ventilée en " + o.ventilation.length) : null),

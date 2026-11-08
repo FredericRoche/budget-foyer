@@ -63,7 +63,9 @@ function candidats(js){
     const dj = ecartJours(j.date, op.date);
     if (dj < -avant || dj > apres) continue;
     const compte = obtenir("comptes", op.compte); if (!compte || !compteCompatible(j, compte)) continue;
-    if (j.cheque && !String(op.libelle + " " + (op.detail || "")).replace(/\D/g, " ").split(" ").some(n => n && (n === j.cheque || n.endsWith(j.cheque)))) continue;
+    // Numéro de chèque exigé quand l'opération en porte un ; un chèque importé sans son numéro (avant le 05/11/2026) se rapproche au montant
+    const numerosOp = String(op.libelle + " " + (op.detail || "") + " " + (op.cheque || "")).replace(/\D/g, " ").split(" ").filter(n => n.length >= 5);
+    if (j.cheque && (numerosOp.length || !/^cheque/i.test(norm(op.type || ""))) && !numerosOp.some(n => n === j.cheque || n.endsWith(j.cheque))) continue;
     const dejaTypes = (op.justificatifs || []).map(id => obtenir("justificatifs", id)).filter(x => x && !js.includes(x)).map(x => x.type);
     if (js.some(x => dejaTypes.includes(x.type))) continue;
     const cOp = op.commercant ? obtenir("commercants", op.commercant) : null;
@@ -118,6 +120,8 @@ function lier(js, op, auto){
 function delier(j){
   for (const id of j.operations || []){
     const op = obtenir("operations", id); if (!op) continue;
+    // Opération en espèces née de cette pièce : elle disparaît avec le rapprochement (sinon double compte)
+    if (op.empreinte === "especes|" + j.id){ supprimer("operations", op.id); continue; }
     op.justificatifs = (op.justificatifs || []).filter(x => x !== j.id);
     if (op.ventilation) op.ventilation = op.ventilation.filter(v => v.justificatif !== j.id);
     if (op.ventilation && op.ventilation.length < 2) delete op.ventilation;
@@ -126,14 +130,45 @@ function delier(j){
   enregistrer("justificatifs", Object.assign(j, {operations: [], statut: "a_rapprocher", auto: false, rapprocheLe: null, refuse: true}));
 }
 
-/* Le rapprochement modifierait-il l'opération ? Fournisseur différent, catégorie différente, ou ventilation
-   (plusieurs pièces) : oui. Une pièce sans fournisseur ni catégorie, ou conforme à l'opération : non. */
+/* Le rapprochement modifierait-il l'opération ? Ventilation (plusieurs pièces), fournisseur établi différent,
+   catégorie établie différente : oui. Compléter n'est pas modifier (précision de Frédéric, 05/11/2026) :
+   - une opération pas encore classée (« À préciser ») ou seulement devinée (« proposé ») prend la catégorie
+     saisie sur la pièce ;
+   - une fiche née de l'import du libellé bancaire, qui n'a encore rien appris (ni classement validé, ni
+     verrou), cède la place au fournisseur de la pièce (le libellé devient son alias, comme sur confirmation). */
+const ficheProvisoire = id => { const d = id ? obtenir("commercants", id) : null; return !!d && !d.fixe && !Object.keys(d.stats || {}).length; };
 function rapprochementModifie(js, op){
   if (js.length > 1) return true;
   const j = js[0];
-  if (j.commercant && op.commercant && j.commercant !== op.commercant) return true;
-  if (j.categorie && j.categorie !== "À préciser" && (j.categorie !== op.categorie || (j.sousCategorie && j.sousCategorie !== op.sousCategorie))) return true;
+  if (j.commercant && op.commercant && j.commercant !== op.commercant && !ficheProvisoire(op.commercant)) return true;
+  const classeeOp = op.verrou || (op.categorie && op.categorie !== "À préciser" && !["propose", "a_preciser"].includes(op.statut));
+  if (classeeOp && j.categorie && j.categorie !== "À préciser" && (j.categorie !== op.categorie || (j.sousCategorie && j.sousCategorie !== op.sousCategorie))) return true;
   return false;
+}
+/* Propositions sûres (montant exact, candidat unique ou nettement en tête) qui attendent une confirmation
+   parce qu'elles changeraient fournisseur ou catégorie, ou ventileraient : à valider en lot, après relecture. */
+function propositionsSures(){
+  const vus = new Set(), r = [];
+  for (const j of vivants("justificatifs").filter(x => pieceOuverte(x) && !x.aValider && !x.refuse)){
+    const p = (j.propositions || [])[0];
+    if (!p || !p.sur) continue;
+    const ids = p.groupe || [j.id], cle = ids.slice().sort().join("|");
+    if (vus.has(cle)) continue; vus.add(cle);
+    const op = obtenir("operations", p.op);
+    const js = ids.map(id => obtenir("justificatifs", id)).filter(x => x && x.statut === "a_rapprocher");
+    if (!op || js.length !== ids.length) continue;
+    r.push({js, op, changements: changementsRapprochement(js, op)});
+  }
+  return r;
+}
+function changementsRapprochement(js, op){
+  const r = [], nomC = id => obtenir("commercants", id)?.nom || "—";
+  if (js.length > 1) r.push("ventilée sur " + js.length + " pièces");
+  const j = js[0];
+  if (js.length === 1 && j.commercant && op.commercant && j.commercant !== op.commercant) r.push("fournisseur : " + nomC(op.commercant) + " → " + nomC(j.commercant));
+  if (js.length === 1 && j.categorie && j.categorie !== "À préciser" && (j.categorie !== op.categorie || (j.sousCategorie && j.sousCategorie !== op.sousCategorie)))
+    r.push("catégorie : " + [op.categorie, op.sousCategorie].filter(Boolean).join(" › ") + " → " + [j.categorie, j.sousCategorie].filter(Boolean).join(" › "));
+  return r;
 }
 /* Passe automatique, après chaque import ou fusion de la boîte. Décision de Frédéric (04/11/2026) : l'application
    ne change rien d'elle-même sur une déduction. Un cas sûr qui ne modifie pas l'opération est rapproché d'office ;
@@ -167,6 +202,132 @@ function rapprocherTout(){
   return auto;
 }
 
+/* Anomalies de rapprochement : ce qui est à traiter à la main (définition de Frédéric, 05/11/2026).
+   - « pièce sans débit » : pièce à rapprocher dont la période est déjà couverte par le relevé de son moyen
+     de paiement (le dernier relevé va au-delà de la fenêtre de la pièce) ;
+   - « montant différent » : même cas, mais un débit voisin existe (devise, pourboire, saisie) ;
+   - « débit sans pièce » : achat carte postérieur à la première pièce saisie, sans
+     pièce et non écarté (« pas de pièce pour celui-ci ») ;
+   - « fournisseur non reconnu » : pièce sans fiche, ou fiche seulement devinée dans le texte.
+   Chaque anomalie porte une piste. Les pièces dont le relevé n'est pas encore arrivé n'en sont pas.
+   Rien avant la date de début du contrôle (réglable ; 1er octobre 2026 : avant, les pièces n'étaient pas
+   saisies au fil de l'eau). */
+const debutAnomalies = () => LIVRE.parametres.anomaliesDepuis || "2026-10-01";
+/* Pièce antérieure au début du contrôle, jamais rapprochée : close (comptée comme réglée, hors compteurs, hors
+   dépenses en attente). Rien n'est écrit : changer la date de début la rouvre. Saisie à valider et note de frais
+   (remboursement attendu) restent ouvertes. */
+const pieceClose = j => j.statut === "a_rapprocher" && !j.aValider && !estNoteFrais(j) && (j.date || "") < debutAnomalies();
+const pieceOuverte = j => j.statut === "a_rapprocher" && !pieceClose(j);
+function anomaliesRapprochement(){
+  const comptes = vivants("comptes");
+  const derniere = new Map();
+  for (const o of vivants("operations")) if (o.date > (derniere.get(o.compte) || "")) derniere.set(o.compte, o.date);
+  const r = [], nomJ = j => (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || j.raisonSociale || "—";
+  const pieces = vivants("justificatifs").filter(x => !x.aValider && !estNoteFrais(x));
+  for (const j of pieces.filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES")){
+    const jj = Object.assign({}, j); if (!jj.carte && jj.carte4) jj.carte = carteDesChiffres(jj.carte4);
+    const [avant, apres] = fenetre(jj);
+    const compat = comptes.filter(c => c.type !== "especes" && compteCompatible(jj, c) && derniere.has(c.id));
+    const couvert = compat.reduce((m, c) => derniere.get(c.id) > m ? derniere.get(c.id) : m, "");
+    if (compat.length && couvert < ajouterJours(j.date, apres)) continue;   // relevé pas encore arrivé
+    const cents = versCentimes(j.montant);
+    const dansFenetre = o => { const d = ecartJours(j.date, o.date); return d >= -avant && d <= apres; };
+    const libre = o => !(o.justificatifs || []).some(id => obtenir("justificatifs", id)?.type === j.type);
+    let genre = "pièce sans débit", raison;
+    if ((j.propositions || []).length) raison = "rapprochement proposé, à confirmer";
+    else if (!compat.length) raison = "moyen de paiement inconnu ou sans relevé importé : préciser la carte";
+    else {
+      const ailleurs = vivants("operations").find(o => o.montant < 0 && -versCentimes(o.montant) === cents && dansFenetre(o) && libre(o) && !compat.some(c => c.id === o.compte));
+      const voisin = !ailleurs && vivants("operations").find(o => o.montant < 0 && compat.some(c => c.id === o.compte) && dansFenetre(o) && libre(o)
+        && Math.abs(-versCentimes(o.montant) - cents) <= Math.max(10, cents * 0.03) && -versCentimes(o.montant) !== cents);
+      if (voisin) genre = "montant différent";
+      raison = ailleurs ? "même montant le " + dateFr(ailleurs.date) + " sur " + libelleCompte(ailleurs.compte) + " : la carte de la pièce est-elle la bonne ?"
+        : voisin ? "au relevé : " + euros(voisin.montant) + " le " + dateFr(voisin.date) + " (devise, pourboire, erreur de saisie ?)"
+        : "aucun débit de ce montant au relevé (" + libelleMoyen(jj.carte) + ") : espèces, autre moyen, date ou montant mal lus ?";
+    }
+    r.push({genre, j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant), raison});
+  }
+  // Fournisseur non reconnu (pièces rapprochées ou non)
+  for (const j of pieces.filter(x => (!x.commercant || x.fournisseurDevine) && (x.statut === "a_rapprocher" || x.date >= debutAnomalies()))){
+    if (r.some(a => a.j === j)) { r.find(a => a.j === j).raison += " ; fournisseur non reconnu"; continue; }
+    r.push({genre: "fournisseur non reconnu", j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant),
+      raison: j.fournisseurDevine ? "fournisseur deviné dans le texte : à confirmer" : "aucune fiche fournisseur : choisir ou créer la fiche"});
+  }
+  // Débits carte sans pièce, depuis que des pièces sont saisies
+  const premiere = pieces.filter(x => x.type !== "facture" && x.type !== "devis").reduce((m, x) => !m || x.date < m ? x.date : m, "");
+  if (premiere){
+    const depuis = [premiere, debutAnomalies()].sort()[1];
+    const cartes = new Set(comptes.filter(c => c.type === "carte").map(c => c.id));
+    const debits = [];
+    for (const o of vivants("operations").filter(o => cartes.has(o.compte) && o.montant < 0 && o.date >= depuis && !(o.justificatifs || []).length && !o.sansPiece && !o.ndf && !(o.commercant && obtenir("commercants", o.commercant)?.sansPiece))){
+      if (pieces.some(j => j.statut === "a_rapprocher" && (j.propositions || []).some(p => p.op === o.id))) continue;
+      debits.push(o);
+    }
+    // Pièces voisines : chaque pièce va à un seul débit, les paires les plus proches d'abord
+    const paires = debits.flatMap(o => piecesPourDebit(o, pieces).map(x => ({o, j: x.j, cle: x.cle}))).sort((a, b) => a.cle - b.cle);
+    const pieceDe = new Map(), prises = new Set();
+    for (const x of paires) if (!pieceDe.has(x.o.id) && !prises.has(x.j.id)){ pieceDe.set(x.o.id, x.j); prises.add(x.j.id); }
+    for (const o of debits){
+      const nomO = (o.commercant && obtenir("commercants", o.commercant)?.nom) || o.libelle;
+      const pv = pieceDe.get(o.id);
+      r.push({genre: pv ? "montant différent" : "débit sans pièce", op: o, date: o.date, nom: nomO, montant: o.montant, piece: pv || null,
+        raison: pv ? "pièce voisine : " + nomJ(pv) + ", " + euros(pv.montant) + " du " + dateFr(pv.date) + " (écart " + eurosSigne(Math.abs(o.montant) - pv.montant) + ")"
+          : "au relevé de " + libelleCompte(o.compte) + ", aucune pièce : ticket à saisir, ou rien à joindre"});
+    }
+  }
+  // Une pièce appariée à un débit n'est pas signalée une seconde fois de son côté
+  const appariees = new Set(r.filter(a => a.piece).map(a => a.piece.id));
+  return r.filter(a => a.date >= debutAnomalies() && !(a.j && appariees.has(a.j.id) && a.genre !== "fournisseur non reconnu")).sort((a, b) => a.date < b.date ? 1 : -1);
+}
+/* Pièce encore ouverte qui paraît être celle d'un débit, à un écart de montant près : même fournisseur (fiche
+   ou nom proche) et écart d'au plus 25 %, ou montant à 3 % près ; date à 3 jours près (facture : jusqu'à 30
+   jours avant le débit). Une pièce ne va qu'à un débit : la paire la plus proche. Jamais rapprochée d'office : proposée avec l'écart (« Rapprocher quand même »). */
+function piecesPourDebit(o, pieces){
+  const nomO = [(o.commercant && obtenir("commercants", o.commercant)?.nom) || "", o.libelle].join(" ");
+  const m = Math.abs(o.montant);
+  const ok = pieces.filter(j => pieceOuverte(j) && !j.aValider && j.carte !== "ESPECES" && !(j.operations || []).length).map(j => {
+    const d = ecartJours(j.date, o.date), facture = j.type === "facture" || j.type === "devis";
+    if (facture ? (d < -7 || d > 30) : Math.abs(d) > 3) return null;
+    const meme = (j.commercant && j.commercant === o.commercant) || similarite([j.commercantNom, j.raisonSociale, j.commercant && obtenir("commercants", j.commercant)?.nom].filter(Boolean).join(" "), nomO) >= 0.5;
+    const ecart = Math.abs(m - j.montant);
+    if (!(meme ? ecart <= m * 0.25 : ecart <= Math.max(0.1, m * 0.03)) || ecart < 0.005) return null;
+    return {j, cle: (meme ? 0 : 1000) + Math.abs(d) * 10 + ecart};
+  }).filter(Boolean);
+  return ok;
+}
+/* Rapprochement malgré un écart de montant, sur décision de l'utilisateur : l'écart est noté sur la pièce. */
+function rapprocherAvecEcart(j, op){
+  j.ecartMontant = Math.round((Math.abs(op.montant) - j.montant) * 100) / 100;
+  lier([j], op, false);
+}
+/* Prélèvements d'impôt classés d'après les avis importés : un débit du Trésor public (libellé DGFiP, « DIRECTION
+   GENERALE DES FINANCES », « IMPOT », « TRESOR PUBLIC ») de même montant qu'une échéance d'avis, à 6 jours près,
+   prend la catégorie Impôts › (impôt sur le revenu, taxe foncière, taxe d'habitation). Seulement une opération
+   pas encore classée ou devinée : compléter n'est pas modifier. Chaque échéance ne sert qu'une fois. */
+function classerParAvisImpot(){
+  const avis = vivants("documents").filter(d => d.genre === "avis_impot" && (d.echeances || []).length);
+  if (!avis.length) return 0;
+  const sousCat = quoi => { const l = LIVRE.parametres.categories["Impôts"] || [];
+    return l.find(s => /revenu/i.test(s) && /revenu/i.test(quoi)) || l.find(s => /fonci/i.test(s) && /fonci/i.test(quoi)) || l.find(s => /habitation/i.test(s) && /habitation/i.test(quoi)) || quoi; };
+  const fisc = o => /DIRECTION GENERALE DE|DGFIP|FINANCES PUBLIQ|TRESOR PUBLIC|\bIMPOTS?\b/i.test(norm(o.libelle + " " + (o.detail || "")));
+  const ops = vivants("operations").filter(o => o.montant < 0 && fisc(o));
+  const prises = new Set(ops.filter(o => o.avisImpot).map(o => o.avisImpot));
+  let n = 0;
+  for (const d of avis) d.echeances.forEach((e, i) => {
+    const cle = d.id + "#" + i; if (prises.has(cle)) return;
+    const o = ops.filter(x => !x.avisImpot && versCentimes(-x.montant) === versCentimes(e.montant) && Math.abs(ecartJours(e.date, x.date)) <= 6)
+      .sort((a, b) => Math.abs(ecartJours(e.date, a.date)) - Math.abs(ecartJours(e.date, b.date)))[0];
+    if (!o) return;
+    o.avisImpot = cle; prises.add(cle);
+    if (o.verrou || !["a_preciser", "propose"].includes(o.statut || "a_preciser")){ enregistrer("operations", o); return; }
+    const sc = sousCat(d.quoi || d.titre || "");
+    ajouterCategorieSilencieuse("Impôts", sc);
+    enregistrer("operations", Object.assign(o, {categorie: "Impôts", sousCategorie: sc, nature: natureParDefaut("Impôts"), statut: "classe",
+      natureExacte: o.natureExacte || (d.titre || "").replace(/ · .*$/, "") + " (avis)"}));
+    n++;
+  });
+  return n;
+}
 /* En-cours : justificatifs à rapprocher (hors espèces), regroupés par moyen de paiement. */
 function libelleMoyen(carte){
   if (!carte) return "Non précisé";
@@ -178,7 +339,7 @@ function libelleMoyen(carte){
 }
 function encoursSaisis(){
   const m = new Map();
-  for (const j of vivants("justificatifs").filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES" && !estNoteFrais(x))){
+  for (const j of vivants("justificatifs").filter(x => pieceOuverte(x) && x.carte !== "ESPECES" && !estNoteFrais(x))){
     const k = libelleMoyen(j.carte); const g = m.get(k) || m.set(k, {moyen: k, n: 0, montant: 0, depuis: j.date}).get(k);
     g.n++; g.montant += j.montant || 0; if (j.date && j.date < g.depuis) g.depuis = j.date;
   }
@@ -202,7 +363,7 @@ async function creerJustificatif(donnees, piece){
   if (j.commercantNom || j.raisonSociale){
     const mobile = j.origine === "mobile";
     const sur = (j.raisonSociale && trouverCommercant(j.raisonSociale)) || (j.commercantNom && vivants("commercants").find(x => norm(x.nom) === norm(j.commercantNom)));
-    const c = sur || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR});
+    const c = sur || commercantPourTicket({raisonSociale: j.raisonSociale, enseigne: j.commercantNom, texte: j.texteOCR, type: j.type});
     if (c && !sur && !commercantSur({raisonSociale: j.raisonSociale, enseigne: j.commercantNom})) j.fournisseurDevine = true;
     if (c){
       // Aucune fiche n'est modifiée d'office (ni alias ni nature) : cela se fait à la validation, avec votre accord
@@ -219,6 +380,16 @@ function compteEspeces(){
   let c = vivants("comptes").find(x => x.type === "especes");
   if (!c) c = enregistrer("comptes", {nom: "Espèces", type: "especes", banque: "", actif: true});
   return c;
+}
+/* Réparation (05/11/2026) : opérations en espèces dont la pièce d'origine n'y est plus rattachée (rapprochement
+   défait avant ce correctif, ou pièce supprimée) : supprimées. */
+function reparerEspecesOrphelines(){
+  let n = 0;
+  for (const o of vivants("operations").filter(o => (o.empreinte || "").startsWith("especes|"))){
+    const j = obtenir("justificatifs", o.empreinte.slice(8));
+    if (!j || !(j.operations || []).includes(o.id)){ supprimer("operations", o.id); n++; }
+  }
+  return n;
 }
 function creerOperationEspeces(j){
   const compte = compteEspeces();

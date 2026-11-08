@@ -9,6 +9,7 @@
      ecrire(chemin, octets, etiquetteAttendue?) → nouvelle étiquette ; lève ConflitEcriture si le fichier a changé
      lister(dossier) → [{nom, chemin, etiquette}]
      deplacer(chemin, dossierCible)
+     supprimer(chemin) (sans erreur si le fichier n'existe plus)
    Les chemins sont relatifs au dossier de l'application (« budget.chiffre », « boite/xxx.chiffre »). */
 
 class ConflitEcriture extends Error { constructor(){ super("Le fichier a été modifié sur un autre appareil."); this.conflit = true; } }
@@ -59,6 +60,7 @@ const adaptateurLocal = {
     const v = await idbLire("fichiers", chemin); if (!v) return;
     await idbEcrire("fichiers", dossier + "/" + chemin.split("/").pop(), v); await idbSuppr("fichiers", chemin);
   },
+  async supprimer(chemin){ await idbSuppr("fichiers", chemin); },
   async pret(){ return true; }
 };
 
@@ -114,6 +116,11 @@ const adaptateurDossier = {
     const parts = chemin.split("/"); let d = this.racine;
     for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p);
     await d.removeEntry(parts[parts.length - 1]);
+  },
+  async supprimer(chemin){
+    const parts = chemin.split("/"); let d = this.racine;
+    try { for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p); await d.removeEntry(parts[parts.length - 1]); }
+    catch (e){ if (e.name !== "NotFoundError") throw e; }
   }
 };
 
@@ -204,6 +211,10 @@ const adaptateurGraph = {
     await this.ecrire(dossierCible + "/" + chemin.split("/").pop(), src.octets);
     const r = await this.requete(this.url(chemin), {method: "DELETE"});
     if (!r.ok && r.status !== 404) throw new Error("OneDrive : retrait de l'original impossible (" + r.status + ").");
+  },
+  async supprimer(chemin){
+    const r = await this.requete(this.url(chemin), {method: "DELETE"});
+    if (!r.ok && r.status !== 404) throw new Error("OneDrive : suppression impossible (" + r.status + ").");
   }
 };
 
@@ -221,7 +232,8 @@ function adaptateurSimule(){
     },
     async ecrireNouveau(c, octets){ if (fichiers.has(c)) throw new Error("existe"); return this.ecrire(c, octets); },
     async lister(d){ return [...fichiers.keys()].filter(k => k.startsWith(d + "/") && !k.slice(d.length + 1).includes("/")).map(k => ({nom: k.slice(d.length + 1), chemin: k})); },
-    async deplacer(c, d){ const v = fichiers.get(c); if (!v) return; fichiers.set(d + "/" + c.split("/").pop(), v); fichiers.delete(c); }
+    async deplacer(c, d){ const v = fichiers.get(c); if (!v) return; fichiers.set(d + "/" + c.split("/").pop(), v); fichiers.delete(c); },
+    async supprimer(c){ fichiers.delete(c); }
   };
 }
 
