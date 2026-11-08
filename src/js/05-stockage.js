@@ -133,6 +133,15 @@ const PORTEES_GRAPH = ["Files.ReadWrite.AppFolder"];
 // vide, il est demandé à la première connexion).
 const CLIENT_GRAPH_DEFAUT = "7dbf8c43-0fb3-4a77-9128-579ae0c620e6";
 const GRAPH = "https://graph.microsoft.com/v1.0/me/drive/special/approot";
+/* Une reconnexion interrompue (application fermée sur la page Microsoft, iPhone) laisse MSAL croire qu'une
+   interaction est en cours : toute nouvelle tentative échoue alors en « interaction_in_progress ». Appelé
+   seulement après handleRedirectPromise, quand aucune redirection n'est réellement en cours. */
+function effacerInteractionMsal(){
+  for (const s of [sessionStorage, localStorage]){
+    try { for (const k of Object.keys(s)) if (/interaction\.status/.test(k)) s.removeItem(k); } catch (e) {}
+  }
+}
+const interactionBloquee = e => /interaction_in_progress/.test((e && (e.errorCode || e.message)) || "");
 const adaptateurGraph = {
   nom: "graph", libelle: "OneDrive en ligne", msal: null, compte: null, clientId: "",
   async initialiser(clientId){
@@ -150,12 +159,20 @@ const adaptateurGraph = {
     if (!this.compte) this.compte = this.msal.getAllAccounts()[0] || null;
   },
   connecte(){ return !!this.compte; },
-  async connecter(){ await this.msal.loginRedirect(this.compte ? {scopes: PORTEES_GRAPH, loginHint: this.compte.username} : {scopes: PORTEES_GRAPH, prompt: "select_account"}); },
+  async connecter(){ effacerInteractionMsal(); await this.msal.loginRedirect(this.compte ? {scopes: PORTEES_GRAPH, loginHint: this.compte.username} : {scopes: PORTEES_GRAPH, prompt: "select_account"}); },
   async deconnecter(){ if (this.compte) await this.msal.logoutRedirect({account: this.compte}); },
   async jeton(){
     if (!this.compte) throw new Error("Pas de connexion à OneDrive.");
     try { return (await this.msal.acquireTokenSilent({scopes: PORTEES_GRAPH, account: this.compte})).accessToken; }
-    catch (e){ await this.msal.acquireTokenRedirect({scopes: PORTEES_GRAPH, account: this.compte}); throw new Error("Reconnexion à OneDrive…"); }
+    catch (e){
+      if (interactionBloquee(e)) effacerInteractionMsal();
+      try { await this.msal.acquireTokenRedirect({scopes: PORTEES_GRAPH, account: this.compte}); }
+      catch (e2){
+        if (!interactionBloquee(e2)) throw e2;
+        effacerInteractionMsal(); await this.msal.acquireTokenRedirect({scopes: PORTEES_GRAPH, account: this.compte});
+      }
+      throw new Error("Reconnexion à OneDrive…");
+    }
   },
   async requete(url, options){
     const jeton = await this.jeton();

@@ -6,9 +6,11 @@
    - renommerFiche {de, vers, categorie?, sousCategorie?}
    - creerFiche {nom, depuis, natureJustificatifs} : crée la fiche et y rattache les justificatifs de « depuis »
      dont la nature exacte contient le texte donné
-   - fusionnerFiches {garder, absorber: [noms], nom?} : opérations, justificatifs et alias rejoignent « garder »
+   - fusionnerFiches {garder, absorber: [noms], nom?, homonymes?} : opérations, justificatifs et alias rejoignent
+     « garder » ; homonymes: true absorbe aussi les autres fiches qui portent le même nom (désignables autrement)
    - deplacerSousCategorie {de: [cat, sous], vers: [cat, sous]} : liste des réglages et tous les enregistrements
    - reclasser {fournisseur, de: [cat, sous], vers: [cat, sous], ficheParDefaut?} : opérations de ce fournisseur
+     (de: ["", ""] vise ses opérations encore sans catégorie)
    - categorieFiche {fiche, categorie, sousCategorie} : classement par défaut fixé, sans toucher au passé
    - natureCategorie {categorie, sousCategorie?, nature} : nature (Courante, Exceptionnelle, Hors budget…) de toutes
      les opérations, et parts ventilées, de cette catégorie */
@@ -26,6 +28,9 @@ const ficheNommeeReelle = nom => vivants("commercants").find(c => c.nom === nom)
 const ficheNommee = ficheNommeeReelle;
 const opsDeFiche = f => f ? vivants("operations").filter(o => o.commercant === f.id) : [];
 const justifsDeFiche = f => f ? vivants("justificatifs").filter(j => j.commercant === f.id) : [];
+const homonymesDe = g => g ? vivants("commercants").filter(c => c !== g && cleNomFiche(c.nom) === cleNomFiche(g.nom)) : [];
+const absorbeesDe = (a, g, fiche) => [...new Set((a.absorber || []).map(fiche).concat(a.homonymes ? homonymesDe(g) : []))].filter(f => f && f !== g);
+const deCategorie = (o, de) => (o.categorie || "") === (de[0] || "") && (o.sousCategorie || "") === (de[1] || "");
 
 function lireCorrections(nom, o){
   const actions = (o.actions || []).filter(a => a && a.type);
@@ -57,7 +62,7 @@ function preparerCorrections(lu){
         return {ok: !existe || !!js.length, n: js.length, texte: "Fiche « " + a.nom + " » " + (existe ? "(existe déjà)" : "créée") + " ; " + js.length + " justificatif(s) de « " + a.depuis + " » (« " + a.natureJustificatifs + " ») y passent"};
       }
       if (a.type === "fusionnerFiches"){
-        const g = ficheNommee(a.garder), abs = (a.absorber || []).map(ficheNommee).filter(f => f && f !== g);
+        const g = ficheNommee(a.garder), abs = absorbeesDe(a, g, ficheNommee);
         if (!g) return {ok: false, texte: "Fiche « " + a.garder + " » introuvable : fusion ignorée"};
         const n = somme(abs, f => opsDeFiche(f).length);
         absorbees.set(g.id, (absorbees.get(g.id) || []).concat(abs));
@@ -70,8 +75,8 @@ function preparerCorrections(lu){
       }
       if (a.type === "reclasser"){
         const f = ficheNommee(a.fournisseur);
-        const ops = opsV(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]);
-        return f ? {ok: true, n: ops.length, texte: "« " + a.fournisseur + " » : " + ops.length + " opération(s) de " + a.de.join(" › ") + " vers " + a.vers.join(" › ") + (a.ficheParDefaut ? " (et classement par défaut de la fiche)" : "")}
+        const ops = opsV(f).filter(o => deCategorie(o, a.de));
+        return f ? {ok: true, n: ops.length, texte: "« " + a.fournisseur + " » : " + ops.length + " opération(s) " + (a.de[0] ? "de " + a.de.join(" › ") : "sans catégorie") + " vers " + a.vers.join(" › ") + (a.ficheParDefaut ? " (et classement par défaut de la fiche)" : "")}
           : {ok: false, texte: "Fiche « " + a.fournisseur + " » introuvable : ignorée"};
       }
       if (a.type === "categorieFiche"){
@@ -107,7 +112,7 @@ function appliquerCorrections(lu){
       faites++;
     } else if (a.type === "fusionnerFiches"){
       const g = ficheNommee(a.garder); if (!g) continue;
-      for (const f of (a.absorber || []).map(ficheNommee).filter(f => f && f !== g)) fusionnerCommercants(g, f);
+      for (const f of absorbeesDe(a, g, ficheNommee)) fusionnerCommercants(g, f);
       if (a.nom && a.nom !== g.nom){ g.nom = a.nom; enregistrer("commercants", g); for (const j of justifsDeFiche(g)) enregistrer("justificatifs", Object.assign(j, {commercantNom: g.nom})); }
       faites++;
     } else if (a.type === "deplacerSousCategorie"){
@@ -117,7 +122,7 @@ function appliquerCorrections(lu){
     } else if (a.type === "reclasser"){
       const f = ficheNommee(a.fournisseur); if (!f) continue;
       ajouterCategorieSilencieuse(a.vers[0], a.vers[1]);
-      for (const o of opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]))
+      for (const o of opsDeFiche(f).filter(o => deCategorie(o, a.de)))
         enregistrer("operations", Object.assign(o, {categorie: a.vers[0], sousCategorie: a.vers[1], nature: natureParDefaut(a.vers[0]), statut: "classe", verrou: true}));
       if (a.ficheParDefaut){ Object.assign(f, {categorie: a.vers[0], sousCategorie: a.vers[1], fixe: true}); enregistrer("commercants", f); }
       faites++;
