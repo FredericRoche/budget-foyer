@@ -11,7 +11,11 @@ Comptez une à deux heures la première fois. Les étapes 1 à 5 se font une seu
 - un compte GitHub (gratuit) ;
 - un compte Microsoft personnel, celui de votre OneDrive.
 
-Claude Code peut vous accompagner : ouvrez-le dans ce dossier, il y trouvera son guide (`CLAUDE.md`). **Les identifiants, c'est toujours vous qui les saisissez**, jamais Claude : mot de passe GitHub, compte Microsoft, mot de passe du livre.
+Claude Code peut vous accompagner : ouvrez-le dans ce dossier, il y trouvera son guide (`CLAUDE.md`). Pour commencer, dites-lui simplement :
+
+> Prends en main cette application en suivant la partie 0 de CLAUDE.md, puis accompagne-moi dans MISE-EN-ROUTE.md.
+
+Il fera tourner l'application sur des données fictives, vous posera quelques questions sur votre banque et vos usages, puis vous guidera étape par étape. **Les identifiants, c'est toujours vous qui les saisissez**, jamais Claude : mot de passe GitHub, compte Microsoft, mot de passe du livre.
 
 ---
 
@@ -149,3 +153,5 @@ Demandez à Claude Code, ouvert dans ce dossier, par exemple : « ajoute la lect
 - Le livre n'est lisible qu'avec votre mot de passe. Chaque jour d'écriture laisse une copie datée dans « sauvegardes/ », dans le dossier OneDrive de l'application.
 - **Mot de passe oublié = livre illisible.** Gardez-le dans un gestionnaire de mots de passe.
 - Le dépôt GitHub est public : n'y validez que du code. Le crochet installé à l'étape 2 et le fichier `.gitignore` refusent les relevés, classeurs et fichiers chiffrés.
+- **Avant toute opération lourde** (supprimer un budget, reclasser beaucoup d'opérations, appliquer un lot de corrections, essayer une fonction nouvelle) : Réglages › Sauvegarde et export › **Télécharger une copie chiffrée**, puis rangez-la à part sous un nom daté. La copie automatique du jour ne contient pas ce que vous avez fait depuis le matin, et l'application n'a pas de bouton de restauration.
+- Les photos des tickets sont gardées réduites (environ 0,1 Mo chacune) ; les dépôts du téléphone déjà intégrés sont retirés du OneDrive après 30 jours.

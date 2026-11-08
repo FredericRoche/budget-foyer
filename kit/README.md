@@ -22,7 +22,7 @@ Ensuite, compressez le dossier produit et transmettez-le : clé USB, courriel, o
 ## Contenu du kit
 
 - [MISE-EN-ROUTE.md](MISE-EN-ROUTE.md) : dépôt GitHub, publication, inscription Microsoft, premier livre, premiers imports.
-- [GUIDE-POUR-CLAUDE.md](GUIDE-POUR-CLAUDE.md) : architecture, conventions, garde-fou des données, ajout du lecteur d'une banque, publication.
+- [GUIDE-POUR-CLAUDE.md](GUIDE-POUR-CLAUDE.md) : prise en main par le Claude du destinataire (première session), architecture, conventions, garde-fou des données, ajout du lecteur d'une banque, publication, méthode de travail apprise à l'usage.
 - [FONCTIONNALITES.md](FONCTIONNALITES.md) : catalogue des fonctionnalités, pour un proche qui a déjà sa propre application et veut y reprendre des idées (son Claude lit la copie comme une référence, sans l'installer).
 
 Le dossier `kit/` lui-même n'est pas copié.

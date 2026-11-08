@@ -10,6 +10,33 @@ Le propriétaire n'est pas forcément développeur. Expliquez simplement, en fra
 
 Si le propriétaire a déjà sa propre application et veut seulement y reprendre des fonctionnalités, lisez plutôt `FONCTIONNALITES.md`.
 
+## 0. Prise en main : la première session
+
+Vous découvrez ce code avec son nouveau propriétaire. Avant toute modification, faites dans l'ordre :
+
+1. **Lisez ce guide en entier**, puis `MISE-EN-ROUTE.md` (ce que le propriétaire doit faire de son côté) et `FONCTIONNALITES.md` (ce que fait chaque partie du code, et où).
+2. **Vérifiez l'outillage du poste** : `git --version`, `python --version` (Python 3.10 ou plus récent). S'il manque l'un ou l'autre, dites au propriétaire comment l'installer, sans le faire à sa place.
+3. **Faites tourner le code tel qu'il est**, avant d'y toucher :
+   - `python outils/construire.py` ;
+   - `python -m http.server 8000` dans ce dossier ;
+   - `http://localhost:8000/?autotest` : tous les contrôles doivent être verts. Notez le nombre : c'est la référence ;
+   - `http://localhost:8000/?demo` : parcourez les écrans avec le propriétaire, sur données fictives.
+4. **Faites le point avec le propriétaire** :
+   - sa banque, ses cartes (débit immédiat ou différé), ses placements, ses appareils (PC, téléphone) ;
+   - ce qu'il attend de l'application ;
+   - ce qui, venant du foyer d'origine, ne le concerne pas (partie 6).
+
+   Proposez ensuite un ordre de travail court. Commencez par ce qui sert tout de suite : lire les relevés de **sa** banque.
+5. **Accompagnez la mise en route** (`MISE-EN-ROUTE.md`, parties 1 à 6) étape par étape. Le propriétaire saisit lui-même tous ses identifiants (GitHub, Microsoft, mot de passe du livre) ; vous ne les voyez ni ne les tapez jamais.
+   - La liste de motifs (partie 1) vient avant le premier `git commit`.
+   - Le crochet de contrôle est copié dans `.git/hooks/` juste après `git init`.
+6. **Créez votre mémoire de travail.** Écrivez à la racine un `CLAUDE.md` propre au propriétaire, ou complétez celui-ci sous un titre « Notes du propriétaire ». Gardez-y ses choix, ses formats de relevés (décrits, jamais recopiés) et les règles qu'il vous donne. Ce fichier est publié : rien de personnel n'y entre.
+
+Ensuite, à chaque session :
+
+- `git pull` si le propriétaire travaille sur plusieurs postes ;
+- lisez les derniers commits (`git log --since="3 weeks ago"`) : l'historique Git est le journal qui fait foi.
+
 ## 1. Règle absolue : aucune donnée réelle dans le dépôt
 
 Le dépôt est public, car GitHub Pages le publie.
@@ -145,4 +172,27 @@ Ces éléments restent en sommeil tant qu'ils ne servent pas. Ne les retirez que
 - **Reprise du classeur d'inventaire v7.**
 - **« Coût par site »** : visible seulement avec plusieurs lieux.
 - **Répartition du paiement d'une ligne de budget** entre « compte », « cartes LCL » et « Amex », qui sert à la trésorerie.
-- **Catégories par défaut** (`CATEGORIES_DEFAUT`), modifiables dans Réglages.
+- **Clôture du mois sur le relevé PDF** de LCL et d'Amex (`preparerClotureLcl`, `preparerClotureAmex`, `09-import.js`). L'idée vaut pour toute banque : le relevé PDF fait foi, ses écritures sont comparées au livre, les écarts sont tranchés à la main.
+- **Avis d'impôt, assurance-vie, livrets** : lecteurs propres aux documents de ce foyer.
+- **Date de début du contrôle des anomalies** (`anomaliesDepuis`, par défaut le 1er octobre 2026, dans `11-rapprochement.js`) : pour un nouveau propriétaire, proposez de la régler sur le début de **son** suivi des pièces.
+- **Catégories par défaut** (`CATEGORIES_DEFAUT`), modifiables dans Réglages ; « Créer une catégorie… » y ajoute une catégorie de premier niveau.
+
+## 7. Méthode de travail apprise à l'usage
+
+Ces règles viennent de l'usage réel de l'application d'origine. Chacune répond à un incident constaté.
+
+**Avec les données du propriétaire :**
+
+- **Une copie chiffrée avant toute action radicale.** Avant de supprimer ou remplacer un budget, de reclasser en masse, d'appliquer un lot de corrections ou d'essayer une fonction nouvelle sur le vrai livre, faites d'abord télécharger une copie chiffrée (Réglages › Sauvegarde et export › Télécharger une copie chiffrée), renommée et rangée à part. Cette étape vient en tête de la marche à suivre. Pourquoi : la copie automatique du jour est prise au premier enregistrement et ne contient pas le travail fait ensuite ; il n'y a pas de bouton de restauration.
+- **Modifier les lignes, ne pas réécrire un budget.** Une nouvelle version part du budget actif et ne change que les lignes concernées. Ne reconstruisez jamais un budget entier depuis un export Excel. Pourquoi : l'export ne contient ni les répartitions par lieu, ni les modes de paiement, ni les jours de prélèvement, ni le lien des échéances ; une version réécrite les a perdus.
+- **Corriger en masse par un lot.** Les corrections nombreuses (fusion de fiches, renommages, reclassements) se préparent dans un fichier « lot de corrections » (`09b-corrections.js`). Le propriétaire le relit, l'aperçu chiffré le confirme, puis il l'applique. Pas de manipulation directe du livre.
+- **Mesurer sur les vraies pièces, hors du dépôt.** Pour améliorer une lecture (tickets, relevés), faites exporter les cas réels par le propriétaire (Justificatifs › « Fiabilité de la lecture… »). Rejouez-les dans un dossier temporaire, hors du dépôt, avant et après la modification : un progrès sur un cas ne doit rien casser ailleurs. Supprimez ensuite ces fichiers et ne gardez dans le dépôt que des cas fictifs équivalents.
+- **Pas de déduction sans accord** (partie 3) : un réglage commode qui fausse un résultat se voit tôt ou tard. En cas de doute, l'application demande.
+
+**Avec le code :**
+
+- **Un commit par changement cohérent**, dont le message dit quoi **et pourquoi** : constat, correction, effet mesuré.
+- **Reconstruire après toute modification de `src/`** (`python outils/construire.py`) : le numéro de version change, et chaque appareil charge alors la nouvelle version.
+- Après une publication, vérifiez qu'elle est en ligne : la version de `https://<compte>.github.io/budget-foyer/sw.js` doit être la nouvelle.
+- **Fins de ligne** : un script Python qui lit un fichier en CRLF doit couper sur `"\r\n"`, et l'écrire avec `newline=""`.
+- **Un correctif resté sur un poste n'existe pas** : ni pour l'autre poste, ni pour l'application publiée.

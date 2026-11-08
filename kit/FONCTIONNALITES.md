@@ -25,10 +25,19 @@ Les chemins ci-dessous sont relatifs à `src/js/`. Les noms entre parenthèses s
 
   L'utilisateur valide ou corrige.
 - **Où :** `12-ocr.js`.
-  - Préparation de l'image : `cadrerPapier`, `preparerImage`.
-  - Lecture : `lireTicket`.
+  - Préparation de l'image : `cadrerPapier`, `preparerImage`. La copie gardée est réduite (1 200 px, niveaux de gris, JPEG 0,6 : environ 0,1 Mo par ticket).
+  - Lecture : `lireTicket`. Quand le montant n'est pas sûr, deux passes de secours relisent l'image autrement préparée (niveaux de gris étirés, `etirerGris` ; seuil adaptatif lu en bloc, `seuilAdaptatif`).
   - Extraction des champs : `extraireTicket`, `montantsDe`, `numeroFacture`.
   - Reconnaissance du fournisseur dans le texte : `commercantDansTexte`, `commercantPourTicket`.
+  - Règles du montant, mises au point sur des tickets réels :
+    - le total vient d'une ligne « TOTAL » ou « MONTANT », jamais d'un sous-total, d'un rendu, d'une remise ou d'une ligne de TVA ;
+    - les lettres lues pour des chiffres (O, S, I, B…) sont réparées dans les montants (`reparerMontantsOcr`) ;
+    - faute de total lisible, le montant en euros le plus répété, sans les lignes de téléphone, de version de caisse ou de SIRET.
+  - Règles du fournisseur :
+    - nom reconnu à une ou deux lettres près ; un mot seul seulement s'il est distinctif ;
+    - jamais une fiche de banque, de crédit, d'impôt ou de virement ;
+    - un alias (souvent la raison sociale) imprimé sur n'importe quelle ligne suffit.
+  - Mesure : Justificatifs › « Fiabilité de la lecture… » (`bilanLecture`, `22-ui-justificatifs.js`) rejoue la lecture sur les pièces déjà validées et exporte les écarts, avec ou sans les photos. C'est le banc d'essai de toute amélioration.
 - **Dépend de :**
   - `vendor/tesseract/`, chargé à la demande et autorisé par la CSP (`wasm-unsafe-eval`, `worker-src blob:`) ;
   - pour reconnaître le fournisseur, la liste des fournisseurs (voir « Fournisseurs qui apprennent »).
@@ -86,7 +95,8 @@ Les chemins ci-dessous sont relatifs à `src/js/`. Les noms entre parenthèses s
 - **Ordre de décision du classement :** règle explicite, puis fiche du fournisseur, puis code MCC de la carte ou catégorie proposée par la banque, sinon « À préciser ».
 - **Où :**
   - `07-classement.js` (`cleLibelle`, `trouverCommercant`, `assurerCommercant`, `apprendre`, `apprendreCorrection`, `proposerClassement`, `classerAutomatiquement`, `validerClassement`, tables `MCC`) ;
-  - écran `23-ui-commercants.js` (`doublonsProbables`, `fusionnerGroupe`).
+  - écran `23-ui-commercants.js` (`doublonsProbables`, `fusionnerGroupe`) ;
+  - export Excel des fiches (`exporterFournisseurs`) : alias, libellés bancaires les plus fréquents, raisons sociales lues sur les pièces, volume. Il sert à rapprocher sur papier nom commercial, enseigne et dénomination sociale, puis à préparer un lot de corrections.
 - **Se reprend :** seule, et c'est sans doute **la plus rentable**. `cleLibelle` et la table MCC se transposent telles quelles ; la logique d'apprentissage tient en quelques fonctions.
 
 ### Règles explicites et « plans »
@@ -104,6 +114,11 @@ Les chemins ci-dessous sont relatifs à `src/js/`. Les noms entre parenthèses s
   - `analyserReleveLibre` est une fonction pure, testée dans `29-autotest.js`.
 - **Lecteurs dédiés** (LCL, Amex, relevés PDF de placements, avis d'impôt) : `08-lecture-fichiers.js`. Ils servent d'exemples de reconnaissance par motifs.
 - **Détail des cartes dans un relevé de compte PDF** (quand la banque ne donne plus de CSV pour les mois anciens) : `extraireCartesReleveLcl` lit la section « paiements par carte » carte par carte, contrôle chaque carte contre le **sous-total imprimé** (un écart égal au double d'une ligne la désigne comme remboursement) ; `preparerCartesPdf` (`09-import.js`) ne recrée pas un achat déjà connu sur la même carte, à la même date et pour le même montant, quel que soit son libellé.
+- **Clôture du mois sur le relevé PDF** (`preparerClotureLcl`, `preparerClotureAmex`, `09-import.js`) : le relevé PDF de la banque fait foi.
+  - Ses écritures sont appariées à celles du livre, à quelques jours près.
+  - Les écritures manquantes sont proposées à l'ajout ; celles en trop sont expliquées (doublon exact, achat qui figure sur le relevé suivant), puis tranchées à la main.
+  - Pour une carte à débit différé, l'encours est comparé au solde du relevé et chaque achat reçoit sa date de débit.
+  - Les coches survivent au recalcul ; la clôture est mémorisée par compte et par période.
 - **Lot de corrections** (`09b-corrections.js`) : un fichier JSON préparé à part (renommer, fusionner, recréer une fiche, déplacer une sous-catégorie, reclasser, fixer un classement par défaut) s'importe avec un aperçu chiffré, puis s'applique sur un clic. Utile après un contrôle de cohérence fait hors de l'application.
 - **Dossier de dépôt :** importer tout un dossier d'un coup, puis ranger chaque fichier traité dans un dossier d'archives. Voir `21b-dossier-import.js` (API File System Access, Chrome et Edge).
 - **Excel sans bibliothèque :** `02-xlsx.js` lit et écrit des `.xlsx` (zip et XML) avec les seules API du navigateur.
@@ -156,7 +171,8 @@ Les chemins ci-dessous sont relatifs à `src/js/`. Les noms entre parenthèses s
   - chaque enregistrement porte `maj` (horodatage) et `app` (appareil) ;
   - avant d'écrire, l'appareil relit le livre partagé et **fusionne enregistrement par enregistrement**, en gardant le plus récent ; une suppression laisse une pierre tombale ;
   - les copies de conflit créées par OneDrive sont fusionnées puis rangées ;
-  - une copie datée est gardée par jour.
+  - une copie datée est gardée par jour ;
+  - les dépôts du téléphone déjà fusionnés sont retirés après 30 jours si la pièce est bien enregistrée (`purgerBoiteTraitees`), pour ne pas remplir le OneDrive.
 - **Stockage interchangeable :** trois « adaptateurs » de même interface :
   - dossier OneDrive synchronisé du PC ;
   - OneDrive en ligne via Graph, avec la seule autorisation `Files.ReadWrite.AppFolder` ;
