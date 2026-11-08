@@ -501,9 +501,9 @@ async function autotest(){
           extraireTicket("prete\nCARTE BANCAIRE\nFOURNIL ESSAI\nMONTANT 3,20 EUR\nTICKET CLIENT").enseigne], ["BIJOUTERIE ESSAI", "FOURNIL ESSAI"]);
         {
           const poignee = (name, chemin) => ({name, chemin, isSameEntry: async o => o.chemin === chemin, resolve: async o => o.chemin.startsWith(chemin + "/") ? o.chemin.slice(chemin.length + 1).split("/") : null});
-          const archivesT = poignee("02 Finances", "C/FROCHE/02 Finances"), depotT = poignee("À importer", "E/Budget/À importer");
-          const r = [await conflitDossiers("depot", poignee("02 Finances", "C/FROCHE/02 Finances"), archivesT), await conflitDossiers("depot", poignee("Banque", "C/FROCHE/02 Finances/Banque"), archivesT),
-            await conflitDossiers("archives", poignee("FROCHE", "C/FROCHE"), poignee("02 Finances", "C/FROCHE/02 Finances")), await conflitDossiers("depot", depotT, archivesT)];
+          const archivesT = poignee("02 Finances", "C/Documents/02 Finances"), depotT = poignee("À importer", "E/Budget/À importer");
+          const r = [await conflitDossiers("depot", poignee("02 Finances", "C/Documents/02 Finances"), archivesT), await conflitDossiers("depot", poignee("Banque", "C/Documents/02 Finances/Banque"), archivesT),
+            await conflitDossiers("archives", poignee("Documents", "C/Documents"), poignee("02 Finances", "C/Documents/02 Finances")), await conflitDossiers("depot", depotT, archivesT)];
           v("dossiers d'import : dépôt et archives jamais confondus ni imbriqués", r.map(x => x ? x.split(" : ")[0].replace(/«[^»]*»/g, "«»") : ""),
             ["«» est déjà le dossier des archives", "«» est à l'intérieur du dossier des archives («»)", "«» contient le dossier de dépôt («»)", ""]);
         }

@@ -140,7 +140,7 @@ async function importerDossierDepot(){
   }
   let archives = await dossierImport("archives", true);
   if (!archives && !(await reglage(DOSSIERS_IMPORT.archives.cle, null))
-    && await confirmer("Aucun dossier des archives n'est désigné sur cet appareil : sans lui, les fichiers enregistrés resteront au dépôt. Le choisir maintenant (par exemple « FROCHE\\02 Finances du foyer » sur le disque interne) ?", "Choisir…")){
+    && await confirmer("Aucun dossier des archives n'est désigné sur cet appareil : sans lui, les fichiers enregistrés resteront au dépôt. Le choisir maintenant (par exemple « Documents\\02 Finances du foyer » sur le disque interne) ?", "Choisir…")){
     try { archives = await choisirDossierImport("archives"); } catch (e){ if (e.name !== "AbortError") message(e.message, true); }
   }
   INDEX_ARCHIVES = archives ? await indexerArchives(archives) : [];
