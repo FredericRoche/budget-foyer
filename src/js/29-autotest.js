@@ -344,6 +344,20 @@ async function autotest(){
             supprimer("comptes", ck.id);
           }
           {
+            // Lot de corrections : homonymes fusionnés, opérations sans catégorie reclassées
+            const h1 = enregistrer("commercants", {nom: "Epicerie Homonyme", alias: ["EPI H UN"], stats: {}, natures: {}});
+            const h2 = enregistrer("commercants", {nom: "Epicerie Homonyme", alias: ["EPI H DEUX"], stats: {}, natures: {}});
+            const oh = enregistrer("operations", {compte: cc.id, date: "2027-02-03", montant: -7, libelle: "EPI H DEUX", commercant: h2.id});
+            const lotH = {actions: [{type: "fusionnerFiches", garder: "Epicerie Homonyme", homonymes: true},
+              {type: "reclasser", fournisseur: "Epicerie Homonyme", de: ["", ""], vers: ["Alimentation", "Courses"], ficheParDefaut: true}]};
+            const apH = preparerCorrections(lotH);
+            appliquerCorrections(lotH);
+            const reste = vivants("commercants").filter(c => c.nom === "Epicerie Homonyme");
+            v("lot de corrections : homonymes réunis, opération sans catégorie reclassée", [apH.lignes.map(l => l.ok + ":" + (l.n || 0)).join(" "), reste.length, obtenir("operations", oh.id).commercant === reste[0]?.id, obtenir("operations", oh.id).categorie, reste[0]?.alias.length],
+              ["true:1 true:1", 1, true, "Alimentation", 2]);
+            supprimer("operations", oh.id); for (const c of reste) supprimer("commercants", c.id);
+          }
+          {
             // Lot de corrections : aperçu sans effet, puis application sur clic
             const fa = enregistrer("commercants", {nom: "Etude Essai", alias: [], stats: {}, natures: {}});
             const fb = enregistrer("commercants", {nom: "Doublon Essai A", alias: ["DOUBLON A"], stats: {}, natures: {}});

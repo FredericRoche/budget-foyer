@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-bzzaQH/m6ziccCgViNCFWos2i+zqNM3muQJ9YvAIzMc=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-OpFjtykS5yxoO+MHJSCgOFrSwBb22gu8sLZJWtUNG6g=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-08.1612";
+const VERSION_APP = "2026-11-08.1839";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3051,9 +3051,11 @@ function appliquerRegles(contenu){
    - renommerFiche {de, vers, categorie?, sousCategorie?}
    - creerFiche {nom, depuis, natureJustificatifs} : crée la fiche et y rattache les justificatifs de « depuis »
      dont la nature exacte contient le texte donné
-   - fusionnerFiches {garder, absorber: [noms], nom?} : opérations, justificatifs et alias rejoignent « garder »
+   - fusionnerFiches {garder, absorber: [noms], nom?, homonymes?} : opérations, justificatifs et alias rejoignent
+     « garder » ; homonymes: true absorbe aussi les autres fiches qui portent le même nom (désignables autrement)
    - deplacerSousCategorie {de: [cat, sous], vers: [cat, sous]} : liste des réglages et tous les enregistrements
    - reclasser {fournisseur, de: [cat, sous], vers: [cat, sous], ficheParDefaut?} : opérations de ce fournisseur
+     (de: ["", ""] vise ses opérations encore sans catégorie)
    - categorieFiche {fiche, categorie, sousCategorie} : classement par défaut fixé, sans toucher au passé
    - natureCategorie {categorie, sousCategorie?, nature} : nature (Courante, Exceptionnelle, Hors budget…) de toutes
      les opérations, et parts ventilées, de cette catégorie */
@@ -3071,6 +3073,9 @@ const ficheNommeeReelle = nom => vivants("commercants").find(c => c.nom === nom)
 const ficheNommee = ficheNommeeReelle;
 const opsDeFiche = f => f ? vivants("operations").filter(o => o.commercant === f.id) : [];
 const justifsDeFiche = f => f ? vivants("justificatifs").filter(j => j.commercant === f.id) : [];
+const homonymesDe = g => g ? vivants("commercants").filter(c => c !== g && cleNomFiche(c.nom) === cleNomFiche(g.nom)) : [];
+const absorbeesDe = (a, g, fiche) => [...new Set((a.absorber || []).map(fiche).concat(a.homonymes ? homonymesDe(g) : []))].filter(f => f && f !== g);
+const deCategorie = (o, de) => (o.categorie || "") === (de[0] || "") && (o.sousCategorie || "") === (de[1] || "");
 
 function lireCorrections(nom, o){
   const actions = (o.actions || []).filter(a => a && a.type);
@@ -3102,7 +3107,7 @@ function preparerCorrections(lu){
         return {ok: !existe || !!js.length, n: js.length, texte: "Fiche « " + a.nom + " » " + (existe ? "(existe déjà)" : "créée") + " ; " + js.length + " justificatif(s) de « " + a.depuis + " » (« " + a.natureJustificatifs + " ») y passent"};
       }
       if (a.type === "fusionnerFiches"){
-        const g = ficheNommee(a.garder), abs = (a.absorber || []).map(ficheNommee).filter(f => f && f !== g);
+        const g = ficheNommee(a.garder), abs = absorbeesDe(a, g, ficheNommee);
         if (!g) return {ok: false, texte: "Fiche « " + a.garder + " » introuvable : fusion ignorée"};
         const n = somme(abs, f => opsDeFiche(f).length);
         absorbees.set(g.id, (absorbees.get(g.id) || []).concat(abs));
@@ -3115,8 +3120,8 @@ function preparerCorrections(lu){
       }
       if (a.type === "reclasser"){
         const f = ficheNommee(a.fournisseur);
-        const ops = opsV(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]);
-        return f ? {ok: true, n: ops.length, texte: "« " + a.fournisseur + " » : " + ops.length + " opération(s) de " + a.de.join(" › ") + " vers " + a.vers.join(" › ") + (a.ficheParDefaut ? " (et classement par défaut de la fiche)" : "")}
+        const ops = opsV(f).filter(o => deCategorie(o, a.de));
+        return f ? {ok: true, n: ops.length, texte: "« " + a.fournisseur + " » : " + ops.length + " opération(s) " + (a.de[0] ? "de " + a.de.join(" › ") : "sans catégorie") + " vers " + a.vers.join(" › ") + (a.ficheParDefaut ? " (et classement par défaut de la fiche)" : "")}
           : {ok: false, texte: "Fiche « " + a.fournisseur + " » introuvable : ignorée"};
       }
       if (a.type === "categorieFiche"){
@@ -3152,7 +3157,7 @@ function appliquerCorrections(lu){
       faites++;
     } else if (a.type === "fusionnerFiches"){
       const g = ficheNommee(a.garder); if (!g) continue;
-      for (const f of (a.absorber || []).map(ficheNommee).filter(f => f && f !== g)) fusionnerCommercants(g, f);
+      for (const f of absorbeesDe(a, g, ficheNommee)) fusionnerCommercants(g, f);
       if (a.nom && a.nom !== g.nom){ g.nom = a.nom; enregistrer("commercants", g); for (const j of justifsDeFiche(g)) enregistrer("justificatifs", Object.assign(j, {commercantNom: g.nom})); }
       faites++;
     } else if (a.type === "deplacerSousCategorie"){
@@ -3162,7 +3167,7 @@ function appliquerCorrections(lu){
     } else if (a.type === "reclasser"){
       const f = ficheNommee(a.fournisseur); if (!f) continue;
       ajouterCategorieSilencieuse(a.vers[0], a.vers[1]);
-      for (const o of opsDeFiche(f).filter(o => o.categorie === a.de[0] && (o.sousCategorie || "") === a.de[1]))
+      for (const o of opsDeFiche(f).filter(o => deCategorie(o, a.de)))
         enregistrer("operations", Object.assign(o, {categorie: a.vers[0], sousCategorie: a.vers[1], nature: natureParDefaut(a.vers[0]), statut: "classe", verrou: true}));
       if (a.ficheParDefaut){ Object.assign(f, {categorie: a.vers[0], sousCategorie: a.vers[1], fixe: true}); enregistrer("commercants", f); }
       faites++;
@@ -8809,6 +8814,20 @@ async function autotest(){
             for (const o of vivants("operations").filter(o => /ESSAI/.test(o.libelle) && o.date >= "2026-12-30" && o.date <= "2027-01-05")) supprimer("operations", o.id);
             for (const i of vivants("imports").filter(i => /2027-01|2026-12-30/.test(JSON.stringify(i.periode || {})))) supprimer("imports", i.id);
             supprimer("comptes", ck.id);
+          }
+          {
+            // Lot de corrections : homonymes fusionnés, opérations sans catégorie reclassées
+            const h1 = enregistrer("commercants", {nom: "Epicerie Homonyme", alias: ["EPI H UN"], stats: {}, natures: {}});
+            const h2 = enregistrer("commercants", {nom: "Epicerie Homonyme", alias: ["EPI H DEUX"], stats: {}, natures: {}});
+            const oh = enregistrer("operations", {compte: cc.id, date: "2027-02-03", montant: -7, libelle: "EPI H DEUX", commercant: h2.id});
+            const lotH = {actions: [{type: "fusionnerFiches", garder: "Epicerie Homonyme", homonymes: true},
+              {type: "reclasser", fournisseur: "Epicerie Homonyme", de: ["", ""], vers: ["Alimentation", "Courses"], ficheParDefaut: true}]};
+            const apH = preparerCorrections(lotH);
+            appliquerCorrections(lotH);
+            const reste = vivants("commercants").filter(c => c.nom === "Epicerie Homonyme");
+            v("lot de corrections : homonymes réunis, opération sans catégorie reclassée", [apH.lignes.map(l => l.ok + ":" + (l.n || 0)).join(" "), reste.length, obtenir("operations", oh.id).commercant === reste[0]?.id, obtenir("operations", oh.id).categorie, reste[0]?.alias.length],
+              ["true:1 true:1", 1, true, "Alimentation", 2]);
+            supprimer("operations", oh.id); for (const c of reste) supprimer("commercants", c.id);
           }
           {
             // Lot de corrections : aperçu sans effet, puis application sur clic
