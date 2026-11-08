@@ -85,6 +85,7 @@ declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   c.appendChild(entete("Fournisseurs", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " fournisseurs, dont " + nbVerifies + " vérifiés", [recherche, filtre, filtre2,
     h("button", {class: "discret", onclick: () => nouveauFournisseur(etat)}, "Nouveau fournisseur…"),
     h("button", {class: "discret", onclick: () => fusionDialogue()}, "Fusionner deux fiches…"),
+    h("button", {class: "discret", onclick: () => exporterFournisseurs()}, "Exporter en Excel"),
     h("button", {class: "discret", onclick: () => publierExtraitCommercants().then(() => message("Extrait publié pour le téléphone.")).catch(e => message(e.message, true))}, "Publier l'extrait pour le téléphone")]));
   const doublons = doublonsProbables(vivants("commercants"), LIVRE.parametres.doublonsIgnores);
   if (doublons.length){
@@ -163,4 +164,37 @@ async function fusionDialogue(){
     actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Fusionner", classe: "primaire", valeur: true}]});
   if (!ok || a.value === b.value) return;
   fusionnerCommercants(obtenir("commercants", a.value), obtenir("commercants", b.value)); message("Fiches fusionnées."); rafraichirEcran();
+}
+
+/* Export des fiches pour un travail sur papier : nom d'usage, alias (libellés bancaires appris), raisons sociales et
+   enseignes lues sur les pièces, classement, volume. La liste est née des relevés bancaires : on y rapproche nom
+   commercial, enseigne et dénomination sociale ; les corrections reviennent ensuite par un lot de corrections
+   (renommer, fusionner, alias), préparé à partir de cette liste. */
+function exporterFournisseurs(){
+  const achats = new Map(), montants = new Map(), premiers = new Map(), derniers = new Map(), libelles = new Map();
+  for (const o of vivants("operations")) if (o.commercant){
+    const k = o.commercant;
+    achats.set(k, (achats.get(k) || 0) + 1); montants.set(k, (montants.get(k) || 0) + o.montant);
+    if (!premiers.has(k) || o.date < premiers.get(k)) premiers.set(k, o.date);
+    if (!derniers.has(k) || o.date > derniers.get(k)) derniers.set(k, o.date);
+    if (o.libelle){ const m = libelles.get(k) || new Map(); m.set(o.libelle, (m.get(o.libelle) || 0) + 1); libelles.set(k, m); }
+  }
+  const lus = new Map();
+  for (const j of vivants("justificatifs")) if (j.commercant){
+    const s = lus.get(j.commercant) || new Set();
+    for (const x of [j.raisonSociale, j.enseigne]) if (x && x.trim()) s.add(x.trim());
+    lus.set(j.commercant, s);
+  }
+  const fiches = vivants("commercants").sort((a, b) => (achats.get(b.id) || 0) - (achats.get(a.id) || 0) || a.nom.localeCompare(b.nom, "fr"));
+  const libellesDe = id => [...(libelles.get(id) || new Map())].sort((a, b) => b[1] - a[1]).slice(0, 5).map(x => x[0]).join(" | ");
+  telecharger(ecrireClasseur([{nom: "Fournisseurs", colonnes: [{titre: "Nom d'usage", largeur: 30}, {titre: "Alias reconnus", largeur: 45}, {titre: "Libellés bancaires (les plus fréquents)", largeur: 50},
+      {titre: "Raisons sociales et enseignes lues sur les pièces", largeur: 40}, {titre: "SIRET", largeur: 16}, {titre: "Catégorie", largeur: 20}, {titre: "Sous-catégorie", largeur: 24},
+      {titre: "Nature", largeur: 14}, {titre: "Lieu", largeur: 10}, {titre: "Achats", type: "nombre", largeur: 8}, {titre: "Montant total", type: "euros", largeur: 13},
+      {titre: "Premier achat", type: "date", largeur: 12}, {titre: "Dernier achat", type: "date", largeur: 12}, {titre: "Vérifiée", largeur: 9}, {titre: "Pas de pièce attendue", largeur: 10},
+      {titre: "Nom à retenir (à remplir)", largeur: 30}, {titre: "À fusionner avec (à remplir)", largeur: 30}, {titre: "Remarque (à remplir)", largeur: 30}],
+    lignes: fiches.map(f => [f.nom, (f.alias || []).join(" | "), libellesDe(f.id), [...(lus.get(f.id) || [])].join(" | "), f.siret || "", f.categorie || "", f.sousCategorie || "",
+      f.nature || "", f.lieu || "", achats.get(f.id) || 0, Math.round((montants.get(f.id) || 0) * 100) / 100, premiers.get(f.id) || "", derniers.get(f.id) || "",
+      f.verifie ? "oui" : "", f.sansPiece ? "oui" : "", "", "", ""])}]),
+    "fournisseurs-" + aujourdhui() + ".xlsx");
+  message(fiches.length + " fiches exportées.");
 }
