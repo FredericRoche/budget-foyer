@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-c7+gyaOx6FRGzCdkMGmLrtt3HdiTy+kpf1Pni0pyib4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AZscUW8RGay9CadwYGjwSj+P1+iVmpViIu0rfkJJAIw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-08.1609";
+const VERSION_APP = "2026-11-08.1613";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -6718,7 +6718,7 @@ async function importerDossierDepot(){
   }
   let archives = await dossierImport("archives", true);
   if (!archives && !(await reglage(DOSSIERS_IMPORT.archives.cle, null))
-    && await confirmer("Aucun dossier des archives n'est désigné sur cet appareil : sans lui, les fichiers enregistrés resteront au dépôt. Le choisir maintenant (par exemple « FROCHE\\02 Finances du foyer » sur le disque interne) ?", "Choisir…")){
+    && await confirmer("Aucun dossier des archives n'est désigné sur cet appareil : sans lui, les fichiers enregistrés resteront au dépôt. Le choisir maintenant (par exemple « Documents\\02 Finances du foyer » sur le disque interne) ?", "Choisir…")){
     try { archives = await choisirDossierImport("archives"); } catch (e){ if (e.name !== "AbortError") message(e.message, true); }
   }
   INDEX_ARCHIVES = archives ? await indexerArchives(archives) : [];
@@ -9355,9 +9355,9 @@ async function autotest(){
           extraireTicket("prete\nCARTE BANCAIRE\nFOURNIL ESSAI\nMONTANT 3,20 EUR\nTICKET CLIENT").enseigne], ["BIJOUTERIE ESSAI", "FOURNIL ESSAI"]);
         {
           const poignee = (name, chemin) => ({name, chemin, isSameEntry: async o => o.chemin === chemin, resolve: async o => o.chemin.startsWith(chemin + "/") ? o.chemin.slice(chemin.length + 1).split("/") : null});
-          const archivesT = poignee("02 Finances", "C/FROCHE/02 Finances"), depotT = poignee("À importer", "E/Budget/À importer");
-          const r = [await conflitDossiers("depot", poignee("02 Finances", "C/FROCHE/02 Finances"), archivesT), await conflitDossiers("depot", poignee("Banque", "C/FROCHE/02 Finances/Banque"), archivesT),
-            await conflitDossiers("archives", poignee("FROCHE", "C/FROCHE"), poignee("02 Finances", "C/FROCHE/02 Finances")), await conflitDossiers("depot", depotT, archivesT)];
+          const archivesT = poignee("02 Finances", "C/Documents/02 Finances"), depotT = poignee("À importer", "E/Budget/À importer");
+          const r = [await conflitDossiers("depot", poignee("02 Finances", "C/Documents/02 Finances"), archivesT), await conflitDossiers("depot", poignee("Banque", "C/Documents/02 Finances/Banque"), archivesT),
+            await conflitDossiers("archives", poignee("Documents", "C/Documents"), poignee("02 Finances", "C/Documents/02 Finances")), await conflitDossiers("depot", depotT, archivesT)];
           v("dossiers d'import : dépôt et archives jamais confondus ni imbriqués", r.map(x => x ? x.split(" : ")[0].replace(/«[^»]*»/g, "«»") : ""),
             ["«» est déjà le dossier des archives", "«» est à l'intérieur du dossier des archives («»)", "«» contient le dossier de dépôt («»)", ""]);
         }
