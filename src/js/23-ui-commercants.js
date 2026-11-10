@@ -85,6 +85,7 @@ declarerEcran("commercants", {titre: "Fournisseurs", rendre(c, etat){
   c.appendChild(entete("Fournisseurs", "Fichier appris de vos validations et corrections · " + vivants("commercants").length + " fournisseurs, dont " + nbVerifies + " vérifiés", [recherche, filtre, filtre2,
     h("button", {class: "discret", onclick: () => nouveauFournisseur(etat)}, "Nouveau fournisseur…"),
     h("button", {class: "discret", onclick: () => fusionDialogue()}, "Fusionner deux fiches…"),
+    h("button", {class: "discret", onclick: () => dialogueClasserFiches()}, "Classer d'après les opérations…"),
     h("button", {class: "discret", onclick: () => exporterFournisseurs()}, "Exporter en Excel"),
     h("button", {class: "discret", onclick: () => publierExtraitCommercants().then(() => message("Extrait publié pour le téléphone.")).catch(e => message(e.message, true))}, "Publier l'extrait pour le téléphone")]));
   const doublons = doublonsProbables(vivants("commercants"), LIVRE.parametres.doublonsIgnores);
@@ -164,6 +165,52 @@ async function fusionDialogue(){
     actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Fusionner", classe: "primaire", valeur: true}]});
   if (!ok || a.value === b.value) return;
   fusionnerCommercants(obtenir("commercants", a.value), obtenir("commercants", b.value)); message("Fiches fusionnées."); rafraichirEcran();
+}
+
+/* Fiches sans classement par défaut dont les opérations classées concordent toutes (même catégorie et
+   sous-catégorie, au moins deux, aucune ventilée) : le défaut automatique exige aussi le même lieu et la
+   même nature, si bien qu'une fiche partagée entre deux lieux n'en reçoit jamais. Proposées, jamais
+   appliquées d'office ; lieu et nature ne sont repris que s'ils concordent eux aussi. */
+function fichesAClasser(){
+  const ops = new Map();
+  for (const o of vivants("operations")) if (o.commercant) (ops.get(o.commercant) || ops.set(o.commercant, []).get(o.commercant)).push(o);
+  const unique = l => new Set(l).size === 1 ? l[0] : "";
+  const r = [];
+  for (const c of vivants("commercants")){
+    if (c.categorie) continue;
+    const toutes = ops.get(c.id) || [];
+    const classees = toutes.filter(o => o.categorie && o.categorie !== "À préciser");
+    if (classees.length < 2 || classees.some(o => (o.ventilation || []).length)) continue;
+    const categorie = unique(classees.map(o => o.categorie)), sousCategorie = unique(classees.map(o => o.sousCategorie || ""));
+    if (!categorie || new Set(classees.map(o => o.sousCategorie || "")).size > 1) continue;
+    r.push({fiche: c, categorie, sousCategorie, nature: unique(classees.map(o => o.nature || "")), lieu: unique(classees.map(o => o.lieu || "")),
+      nb: classees.length, sansCategorie: toutes.length - classees.length});
+  }
+  return r.sort((a, b) => b.nb - a.nb || a.fiche.nom.localeCompare(b.fiche.nom, "fr"));
+}
+function appliquerClassementFiches(choix){
+  for (const x of choix){
+    Object.assign(x.fiche, {categorie: x.categorie, sousCategorie: x.sousCategorie, nature: x.nature, lieu: x.lieu, variable: false, fixe: true});
+    enregistrer("commercants", x.fiche);
+  }
+  invaliderIndex();
+  return choix.length;
+}
+async function dialogueClasserFiches(){
+  const props = fichesAClasser();
+  if (!props.length){ message("Aucune fiche à proposer : chaque fiche sans classement a moins de deux opérations classées, ou des opérations classées différemment."); return; }
+  const cases = props.map(() => h("input", {type: "checkbox", checked: true}));
+  const corps = h("div", null,
+    h("p", null, props.length + " fiche(s) sans classement par défaut dont toutes les opérations classées le sont de la même façon. Cochées, elles reçoivent ce classement pour les achats à venir ; les opérations passées ne changent pas."),
+    tableau([{titre: ""}, {titre: "Fournisseur"}, {titre: "Classement constaté"}, {titre: "Lieu"}, {titre: "Opérations", num: true}], props, {classe: "serre", ligne: (x, i) => h("tr", null,
+      h("td", null, cases[props.indexOf(x)]), h("td", null, x.fiche.nom), h("td", null, x.categorie + (x.sousCategorie ? " › " + x.sousCategorie : "")),
+      h("td", null, x.lieu || h("span", {class: "discret"}, "variable")), h("td", {class: "num"}, x.nb + (x.sansCategorie ? " (+" + x.sansCategorie + " sans catégorie)" : "")))}));
+  const ok = await dialogue({titre: "Classer les fiches d'après leurs opérations", large: true, corps,
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Tout décocher", classe: "discret", action: () => { cases.forEach(c => { c.checked = false; }); return false; }},
+      {libelle: "Appliquer aux fiches cochées", classe: "primaire", valeur: true}]});
+  if (!ok) return;
+  const n = appliquerClassementFiches(props.filter((x, i) => cases[i].checked));
+  message(n + " fiche(s) classée(s)."); rafraichirEcran();
 }
 
 /* Export des fiches pour un travail sur papier : nom d'usage, alias (libellés bancaires appris), raisons sociales et

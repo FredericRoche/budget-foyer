@@ -344,6 +344,19 @@ async function autotest(){
             supprimer("comptes", ck.id);
           }
           {
+            // Fiches à classer d'après leurs opérations : concordantes proposées, lieu variable laissé vide
+            const fk = enregistrer("commercants", {nom: "Classement Essai", alias: [], stats: {}, natures: {}});
+            const fm = enregistrer("commercants", {nom: "Mixte Essai", alias: [], stats: {}, natures: {}});
+            const ok = [["Ville A", -10], ["Ville B", -12]].map(([lieu, m], i) => enregistrer("operations", {compte: cc.id, date: "2027-02-0" + (i + 4), montant: m, libelle: "CLASSEMENT ESSAI", commercant: fk.id, categorie: "Logement", sousCategorie: "Électricité", nature: "Courante", lieu}));
+            const om = [["Alimentation", "Courses"], ["Maison", "Fleurs"]].map(([c, s], i) => enregistrer("operations", {compte: cc.id, date: "2027-02-0" + (i + 6), montant: -3, libelle: "MIXTE ESSAI", commercant: fm.id, categorie: c, sousCategorie: s}));
+            const props = fichesAClasser().filter(x => /Essai$/.test(x.fiche.nom));
+            appliquerClassementFiches(props);
+            const f = obtenir("commercants", fk.id);
+            v("fiches à classer : concordante proposée (lieu variable vide), mélangée écartée", [props.map(x => x.fiche.nom).join(","), f.categorie, f.sousCategorie, f.lieu, f.fixe, fichesAClasser().some(x => x.fiche.id === fk.id)],
+              ["Classement Essai", "Logement", "Électricité", "", true, false]);
+            for (const o of ok.concat(om)) supprimer("operations", o.id); supprimer("commercants", fk.id); supprimer("commercants", fm.id);
+          }
+          {
             // Lot de corrections : homonymes fusionnés, opérations sans catégorie reclassées
             const h1 = enregistrer("commercants", {nom: "Epicerie Homonyme", alias: ["EPI H UN"], stats: {}, natures: {}});
             const h2 = enregistrer("commercants", {nom: "Epicerie Homonyme", alias: ["EPI H DEUX"], stats: {}, natures: {}});
