@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-JGgrYKoBjj5pNZQADPN17MPv4Ya5yZR5jxgl/U+ExnY=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-4Bj69aPzz6O5LGanS3JVXwaT+Y356oajBjTd83O0YF0=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-11.1652";
+const VERSION_APP = "2026-11-11.1655";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -7286,7 +7286,7 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
     h("td"), h("td", {class: "num"}, euros(somme(lignes, l => l.cumul), 0)), h("td", {class: "num"}, euros(somme(lb, l => l.annuel - l.cumul), 0)), h("td"), h("td")));
   c.appendChild(h("div", {class: "tableau"}, h("table", null, h("thead", null, h("tr", null, h("th", null, "Nature · catégorie · sous-catégorie"), h("th", {class: "num"}, "Budget"), h("th", {class: "num"}, "Réalisé"),
     h("th", {class: "num"}, "Écart"), h("th", null, "Consommé"), h("th", {class: "num"}, "Cumul " + an), h("th", {class: "num"}, "Reste sur l'année"), h("th"), h("th"))), corps)));
-  const revenus = partsPeriode(debut, fin, p => p.nature === "Revenu" && (!lieu || p.lieu === lieu));
+  const revenus = partsPeriode(debut, fin, p => p.nature === "Revenu" && p.categorie !== "Transfert" && (!lieu || p.lieu === lieu));
   c.appendChild(h("p", {class: "note"}, "Réalisé compté à la date d'achat (débit différé ignoré), hors transferts et opérations « Hors budget ». Revenus de la période : " + euros(somme(revenus, p => p.montant), 0) +
     ". Un clic sur une ligne ouvre ses opérations."));
 }});
@@ -7448,7 +7448,7 @@ function donneesImpressionBudget(budget, an, d1, d2, lieu){
     const x = poste(cle(e.categorie, e.sousCategorie, e.libelle)); x.prevu += e.montant * n; x.aConfirmer = x.aConfirmer || !!e.aConfirmer;
     if (!e.recurrence || e.recurrence === "unique") x.ponctuel += e.montant * n;
   }
-  for (const pa of partsPeriode(debut, fin, q => q.nature === "Revenu" && (!lieu || q.lieu === lieu))) poste(cle(pa.categorie, pa.sousCategorie)).realise += pa.montant;
+  for (const pa of partsPeriode(debut, fin, q => q.nature === "Revenu" && q.categorie !== "Transfert" && (!lieu || q.lieu === lieu))) poste(cle(pa.categorie, pa.sousCategorie)).realise += pa.montant;
   // Produits de l'épargne : intérêts des livrets virés en janvier, rendement des assurances-vie tenu pour disponible
   // (à l'exercice : produits acquis pendant la période, quelle que soit la date de leur versement)
   const pe = produitsEpargne(aujourdhui()), prorata = (d2 - d1 + 1) / 12;

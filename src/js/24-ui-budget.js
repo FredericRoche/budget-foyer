@@ -60,7 +60,7 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
     h("td"), h("td", {class: "num"}, euros(somme(lignes, l => l.cumul), 0)), h("td", {class: "num"}, euros(somme(lb, l => l.annuel - l.cumul), 0)), h("td"), h("td")));
   c.appendChild(h("div", {class: "tableau"}, h("table", null, h("thead", null, h("tr", null, h("th", null, "Nature · catégorie · sous-catégorie"), h("th", {class: "num"}, "Budget"), h("th", {class: "num"}, "Réalisé"),
     h("th", {class: "num"}, "Écart"), h("th", null, "Consommé"), h("th", {class: "num"}, "Cumul " + an), h("th", {class: "num"}, "Reste sur l'année"), h("th"), h("th"))), corps)));
-  const revenus = partsPeriode(debut, fin, p => p.nature === "Revenu" && (!lieu || p.lieu === lieu));
+  const revenus = partsPeriode(debut, fin, p => p.nature === "Revenu" && p.categorie !== "Transfert" && (!lieu || p.lieu === lieu));
   c.appendChild(h("p", {class: "note"}, "Réalisé compté à la date d'achat (débit différé ignoré), hors transferts et opérations « Hors budget ». Revenus de la période : " + euros(somme(revenus, p => p.montant), 0) +
     ". Un clic sur une ligne ouvre ses opérations."));
 }});
@@ -222,7 +222,7 @@ function donneesImpressionBudget(budget, an, d1, d2, lieu){
     const x = poste(cle(e.categorie, e.sousCategorie, e.libelle)); x.prevu += e.montant * n; x.aConfirmer = x.aConfirmer || !!e.aConfirmer;
     if (!e.recurrence || e.recurrence === "unique") x.ponctuel += e.montant * n;
   }
-  for (const pa of partsPeriode(debut, fin, q => q.nature === "Revenu" && (!lieu || q.lieu === lieu))) poste(cle(pa.categorie, pa.sousCategorie)).realise += pa.montant;
+  for (const pa of partsPeriode(debut, fin, q => q.nature === "Revenu" && q.categorie !== "Transfert" && (!lieu || q.lieu === lieu))) poste(cle(pa.categorie, pa.sousCategorie)).realise += pa.montant;
   // Produits de l'épargne : intérêts des livrets virés en janvier, rendement des assurances-vie tenu pour disponible
   // (à l'exercice : produits acquis pendant la période, quelle que soit la date de leur versement)
   const pe = produitsEpargne(aujourdhui()), prorata = (d2 - d1 + 1) / 12;
