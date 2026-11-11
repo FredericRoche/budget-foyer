@@ -1,6 +1,42 @@
 /* ================= Écran « Contrôles » =================
    Contrôles par total (pièces qui font foi) en tête, puis contrôles de forme. Chaque alerte renvoie aux opérations
    en cause ; rien n'est corrigé d'ici, sinon l'écart d'une alerte reconnue sans objet. */
+/* Dossier des documents (par exemple le dossier de classement de tout le foyer) : propre à chaque appareil, lu
+   seulement. Une pièce de contrôle y est désignée par son chemin relatif : aucune copie n'est faite, et le même
+   chemin vaut sur un autre poste dont le dossier de classement a la même arborescence. */
+const DOSSIER_DOCUMENTS = {cle: "documents_racine", libelle: "Dossier des documents"};
+async function choisirDossierDocuments(){
+  const d = await window.showDirectoryPicker({id: "bf-documents", mode: "read", startIn: "documents"});
+  await definirReglage(DOSSIER_DOCUMENTS.cle, d);
+  return d;
+}
+async function dossierDocuments(interactif){
+  let d = await reglage(DOSSIER_DOCUMENTS.cle, null);
+  if (!d){ if (!interactif || !window.showDirectoryPicker) return null; d = await choisirDossierDocuments(); }
+  let p = await d.queryPermission({mode: "read"});
+  if (p !== "granted" && interactif) p = await d.requestPermission({mode: "read"});
+  return p === "granted" ? d : null;
+}
+async function choisirPieceDocuments(){
+  const racine = await dossierDocuments(true);
+  if (!racine) throw new Error("Dossier des documents non accessible sur cet appareil.");
+  const [f] = await window.showOpenFilePicker({id: "bf-piece-controle", startIn: racine, types: [{description: "Pièces", accept: {"application/pdf": [".pdf"], "image/*": [".jpg", ".jpeg", ".png"]}}]});
+  const parts = await racine.resolve(f);
+  if (!parts) throw new Error("Le fichier choisi n'est pas dans le dossier des documents (« " + racine.name + " »).");
+  return parts.join("/");
+}
+async function ouvrirPieceDocuments(chemin){
+  const racine = await dossierDocuments(true);
+  if (!racine) throw new Error("Dossier des documents non accessible sur cet appareil (Réglages › Dossiers d'import).");
+  const parts = chemin.split("/");
+  let d = racine;
+  try {
+    for (const n of parts.slice(0, -1)) d = await d.getDirectoryHandle(n);
+    const fichier = await (await d.getFileHandle(parts[parts.length - 1])).getFile();
+    window.open(URL.createObjectURL(fichier), "_blank", "noopener");
+  } catch (e){ throw new Error("Pièce introuvable : « " + chemin + " » dans « " + racine.name + " » (déplacée ou renommée ?)."); }
+}
+
 async function dialogueControle(c){
   const x = c || {sens: "credit", debut: (Number(aujourdhui().slice(0, 4)) - 1) + "-01-01", fin: (Number(aujourdhui().slice(0, 4)) - 1) + "-12-31"};
   const libelle = h("input", {type: "text", value: x.libelle || "", placeholder: "ex. Relevé annuel des paiements de la caisse"});
@@ -10,10 +46,18 @@ async function dialogueControle(c){
   const montant = h("input", {type: "text", inputmode: "decimal", value: x.montant ? nombre(x.montant) : ""});
   const sens = selection([["credit", "Sommes reçues (pension, salaire, remboursement)"], ["debit", "Sommes payées (échéancier, abonnement)"]], x.sens);
   const fichier = h("input", {type: "file", accept: "application/pdf,image/*"});
+  let chemin = x.chemin || "";
+  const zoneChemin = h("span", {class: chemin ? "" : "discret"}, chemin || "aucune");
+  const lier = h("button", {class: "mini", type: "button", onclick: async () => {
+    try { chemin = await choisirPieceDocuments(); zoneChemin.textContent = chemin; zoneChemin.className = ""; }
+    catch (e){ if (e.name !== "AbortError") message(e.message, true); }
+  }}, "Choisir dans le dossier des documents…");
   const ok = await dialogue({titre: c ? "Modifier le contrôle" : "Nouveau contrôle par total", large: true, corps: h("div", null,
       h("p", {class: "note"}, "Le total d'une pièce qui fait foi est comparé à la somme des opérations du fournisseur sur la période. Prenez le montant réellement versé ou payé (net versé, après prélèvement à la source), pas le net imposable."),
       champ("Pièce", libelle), champ("Fournisseur", fiche), h("div", {style: {display: "flex", gap: "1rem", flexWrap: "wrap"}}, champ("Du", du), champ("Au", au)),
-      champ("Total de la pièce (€)", montant), champ("Sens", sens), champ("Joindre la pièce (facultatif)", fichier, c ? "Laisser vide pour garder la pièce déjà jointe." : null)),
+      champ("Total de la pièce (€)", montant), champ("Sens", sens),
+      champ("Pièce dans vos documents (conseillé)", h("div", null, lier, " ", zoneChemin), "Le fichier reste où il est classé : l'application garde seulement son chemin, sans copie."),
+      champ("Ou joindre une copie (si le fichier n'est pas classé)", fichier, c ? "Laisser vide pour garder la copie déjà jointe." : null)),
     actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
       if (!fiche.value || !du.value || !au.value || !lireMontant(montant.value)){ message("Indiquez le fournisseur, la période et le total.", true); return false; }
       if (au.value < du.value){ message("La fin de la période précède son début.", true); return false; }
@@ -22,7 +66,7 @@ async function dialogueControle(c){
   if (!ok) return;
   const f = obtenir("commercants", fiche.value);
   const r = enregistrer("controles", Object.assign(x, {libelle: libelle.value.trim() || "Pièce sans titre", commercant: f.id, commercantNom: f.nom,
-    debut: du.value, fin: au.value, montant: Math.abs(lireMontant(montant.value)), sens: sens.value}));
+    debut: du.value, fin: au.value, montant: Math.abs(lireMontant(montant.value)), sens: sens.value, chemin}));
   const fi = fichier.files && fichier.files[0];
   if (fi){
     try { await enregistrerPiece(r.id, new Uint8Array(await fi.arrayBuffer()), fi.type || "application/pdf"); r.piece = true; enregistrer("controles", r); }
@@ -50,7 +94,8 @@ declarerEcran("controles", {titre: "Contrôles", rendre(c){
       h("td", {class: "num"}, euros(t.constate) + " (" + t.ops.length + ")"),
       h("td", {class: "num " + (t.ok ? "pos" : "neg")}, t.ok ? "✓" : eurosSigne(t.ecart)),
       h("td", null, h("button", {class: "mini discret", onclick: () => voirOps(t.fiche ? t.fiche.nom : "")}, "Opérations"),
-        t.controle.piece ? h("button", {class: "mini discret", onclick: () => voirPiece({id: t.controle.id, type: "", date: t.controle.fin, montant: t.controle.montant, commercantNom: t.controle.libelle})}, "Pièce") : null,
+        t.controle.chemin ? h("button", {class: "mini discret", title: t.controle.chemin, onclick: () => ouvrirPieceDocuments(t.controle.chemin).catch(e => message(e.message, true))}, "Pièce")
+          : t.controle.piece ? h("button", {class: "mini discret", onclick: () => voirPiece({id: t.controle.id, type: "", date: t.controle.fin, montant: t.controle.montant, commercantNom: t.controle.libelle})}, "Pièce") : null,
         h("button", {class: "mini discret", onclick: () => dialogueControle(t.controle)}, "Modifier"),
         h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer ce contrôle ? Les opérations ne changent pas.", "Supprimer", true)){ supprimer("controles", t.controle.id); rafraichirEcran(); } }}, "Supprimer")))}));
 

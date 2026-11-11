@@ -347,7 +347,13 @@ function sectionDossiersImport(){
     return h("li", null, h("span", null, DOSSIER_IMPOTS.libelle + " : ", zone),
       h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierImpots(); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
   })();
-  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives"), ligneNdf, ligneImpots));
+  const ligneDocuments = (() => {
+    const zone = h("span", {class: "discret"}, "…");
+    reglage(DOSSIER_DOCUMENTS.cle, null).then(d => { zone.textContent = d ? "« " + d.name + " »" : "non désigné (demandé à la première pièce de contrôle)"; zone.className = d ? "" : "discret"; });
+    return h("li", null, h("span", null, DOSSIER_DOCUMENTS.libelle + " (pièces de contrôle, lues sur place) : ", zone),
+      h("button", {class: "mini discret", onclick: async () => { try { await choisirDossierDocuments(); rafraichirEcran(); } catch (e){ if (e.name !== "AbortError") message(e.message, true); } }}, "Choisir…"));
+  })();
+  corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives"), ligneNdf, ligneImpots, ligneDocuments));
   const regles = Object.entries(reglesRangement()).sort((a, b) => libelleRangement(a[0]).localeCompare(libelleRangement(b[0])));
   if (regles.length) corps.appendChild(tableau([{titre: "Pièces"}, {titre: "Rangées dans (+ année)"}, {titre: ""}], regles, {classe: "serre", ligne: ([cle, d]) =>
     h("tr", null, h("td", null, libelleRangement(cle)), h("td", {class: "petit"}, d), h("td", null, h("button", {class: "mini discret", onclick: () => modifierRangement(cle, d)}, "Modifier")))}));
