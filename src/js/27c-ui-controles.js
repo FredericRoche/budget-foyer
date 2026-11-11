@@ -171,7 +171,15 @@ declarerEcran("controles", {titre: "Contrôles", rendre(c){
   c.appendChild(h("h2", null, "Opérations importées en double (" + doublons.length + ")"));
   c.appendChild(h("p", {class: "note"}, "Même compte, même date, même montant, libellés de même début : souvent une même opération venue de deux exports. Deux achats réellement identiques du même jour (deux abonnements, deux lignes de téléphone) : « Pas une erreur ». Ne sont pas signalées : les lignes d'une période clôturée sur relevé PDF déjà présentes à la clôture (le relevé les a vérifiées), ni les lignes venues ensemble du même fichier (le relevé les porte deux fois)."));
   // Chaque exemplaire est montré avec son classement et le fichier d'où il vient ; celui qui est en trop se supprime ici
-  const origine = o => { const i = o.import ? obtenir("imports", o.import) : null; return i ? (i.fichier || "") + (i.date ? " (importé le " + dateFr(String(i.date).slice(0, 10)) + ")" : "") : "saisie"; };
+  // Origine : fichier et date d'import ; à défaut (saisie, reprise, ligne d'une facture de cartes), date
+  // du dernier enregistrement. Débit et nature exacte aident à départager deux paiements identiques.
+  const quand = ms => { const d = new Date(ms); return isNaN(d) ? "" : d.toLocaleDateString("fr-FR") + " " + d.toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"}); };
+  const origine = o => {
+    const i = o.import ? obtenir("imports", o.import) : null;
+    const src = i ? (i.fichier || "") + (i.date ? " (importé le " + dateFr(String(i.date).slice(0, 10)) + ")" : "")
+      : "sans fichier d'import" + (o.maj ? ", enregistré le " + quand(o.maj) : "");
+    return src + (o.dateDebit ? " · débité le " + dateFr(o.dateDebit) : "") + (o.natureExacte ? " · " + o.natureExacte : "") + (o.detail ? " · " + o.detail : "");
+  };
   const exemplaire = o => h("div", {class: "petit", style: {margin: ".2rem 0"}}, o.libelle, " · ", h("span", {class: "discret"}, (o.categorie || "—") + (o.sousCategorie ? " › " + o.sousCategorie : "") + " · " + origine(o)),
     (o.justificatifs || []).length ? h("span", {class: "pos"}, " · pièce jointe") : h("button", {class: "mini danger", style: {marginLeft: ".4rem"}, onclick: async e => {
       e.stopPropagation();

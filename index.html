@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-TzrOfOBK4bzYqM5WXcXW2RMIotbm61hhj48dfvcLTSs=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-GT4lJg/ZoQD9p8LrKROGsTXVvvDoUnVoZPFv+wv4K8o=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-11.1749";
+const VERSION_APP = "2026-11-11.1756";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -8597,7 +8597,15 @@ declarerEcran("controles", {titre: "Contrôles", rendre(c){
   c.appendChild(h("h2", null, "Opérations importées en double (" + doublons.length + ")"));
   c.appendChild(h("p", {class: "note"}, "Même compte, même date, même montant, libellés de même début : souvent une même opération venue de deux exports. Deux achats réellement identiques du même jour (deux abonnements, deux lignes de téléphone) : « Pas une erreur ». Ne sont pas signalées : les lignes d'une période clôturée sur relevé PDF déjà présentes à la clôture (le relevé les a vérifiées), ni les lignes venues ensemble du même fichier (le relevé les porte deux fois)."));
   // Chaque exemplaire est montré avec son classement et le fichier d'où il vient ; celui qui est en trop se supprime ici
-  const origine = o => { const i = o.import ? obtenir("imports", o.import) : null; return i ? (i.fichier || "") + (i.date ? " (importé le " + dateFr(String(i.date).slice(0, 10)) + ")" : "") : "saisie"; };
+  // Origine : fichier et date d'import ; à défaut (saisie, reprise, ligne d'une facture de cartes), date
+  // du dernier enregistrement. Débit et nature exacte aident à départager deux paiements identiques.
+  const quand = ms => { const d = new Date(ms); return isNaN(d) ? "" : d.toLocaleDateString("fr-FR") + " " + d.toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"}); };
+  const origine = o => {
+    const i = o.import ? obtenir("imports", o.import) : null;
+    const src = i ? (i.fichier || "") + (i.date ? " (importé le " + dateFr(String(i.date).slice(0, 10)) + ")" : "")
+      : "sans fichier d'import" + (o.maj ? ", enregistré le " + quand(o.maj) : "");
+    return src + (o.dateDebit ? " · débité le " + dateFr(o.dateDebit) : "") + (o.natureExacte ? " · " + o.natureExacte : "") + (o.detail ? " · " + o.detail : "");
+  };
   const exemplaire = o => h("div", {class: "petit", style: {margin: ".2rem 0"}}, o.libelle, " · ", h("span", {class: "discret"}, (o.categorie || "—") + (o.sousCategorie ? " › " + o.sousCategorie : "") + " · " + origine(o)),
     (o.justificatifs || []).length ? h("span", {class: "pos"}, " · pièce jointe") : h("button", {class: "mini danger", style: {marginLeft: ".4rem"}, onclick: async e => {
       e.stopPropagation();
