@@ -53,7 +53,8 @@ declarerEcran("budget", {titre: "Budget et réalisé", rendre(c, etat){
         h("td", {class: "retrait", title: l.ligne?.note || ""}, l.categorie + " › " + l.sousCategorie, l.horsBudget ? h("span", {class: "petit neg"}, " (sans ligne de budget)") : null, l.ligne?.nouvelle ? h("span", {class: "petit discret"}, " (nouvelle)") : null),
         h("td", {class: "num"}, euros(l.budget, 0)), h("td", {class: "num"}, euros(l.realise, 0)), h("td", {class: "num " + (ecart < 0 ? "neg" : "")}, eurosSigne(Math.round(ecart))),
         h("td", null, barreConsomme(l.budget, l.realise)), h("td", {class: "num"}, euros(l.cumul, 0)), h("td", {class: "num"}, euros(l.annuel - l.cumul, 0)),
-        h("td", null, l.ligne && !budget.fige ? h("button", {class: "mini discret", onclick: e => { e.stopPropagation(); editerLigne(budget, l.ligne); }}, "Modifier") : null), h("td")));
+        h("td", null, budget.fige ? null : l.ligne ? h("button", {class: "mini discret", onclick: e => { e.stopPropagation(); editerLigne(budget, l.ligne); }}, "Modifier")
+          : l.horsBudget ? h("button", {class: "mini discret", onclick: e => { e.stopPropagation(); editerLigne(budget, null, {categorie: l.categorie, sousCategorie: l.sousCategorie, nature: natureParDefaut(l.categorie)}); }}, "Ajouter") : null), h("td")));
     }
   }
   corps.appendChild(h("tr", {class: "total"}, h("td", null, "Total"), h("td", {class: "num"}, euros(tb, 0)), h("td", {class: "num"}, euros(tr, 0)), h("td", {class: "num " + (tb - tr < 0 ? "neg" : "pos")}, eurosSigne(Math.round(tb - tr))),
@@ -146,8 +147,9 @@ function imprimerCoutParSite(budget, an, d1, d2, periode){
   window.addEventListener("afterprint", finImp);
   window.print();
 }
-async function editerLigne(budget, ligne){
-  const l = ligne || {id: "lb-" + idAleatoire(8), nature: "Courante", categorie: "", sousCategorie: "", annuel: 0, paiement: {compte: 1, cartes: 0, amex: 0}};
+async function editerLigne(budget, ligne, modele){
+  // modele : catégorie et sous-catégorie préremplies (ligne « sans ligne de budget »)
+  const l = ligne || {id: "lb-" + idAleatoire(8), nature: modele?.nature || "Courante", categorie: modele?.categorie || "", sousCategorie: modele?.sousCategorie || "", annuel: 0, paiement: {compte: 1, cartes: 0, amex: 0}};
   const cat = selectionCategorie(l.categorie, l.sousCategorie);
   const nat = selectionNature(l.nature);
   const annuel = h("input", {type: "text", value: nombre(l.annuel)});
