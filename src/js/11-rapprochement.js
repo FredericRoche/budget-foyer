@@ -111,7 +111,8 @@ function lier(js, op, auto){
   }
   if (j0.categorie && js.every(j => j.categorie === j0.categorie) && j0.categorie !== "À préciser"){
     const corrige = op.categorie !== j0.categorie || (j0.sousCategorie && op.sousCategorie !== j0.sousCategorie);
-    Object.assign(op, {categorie: j0.categorie, sousCategorie: j0.sousCategorie || op.sousCategorie, nature: j0.nature || op.nature || natureParDefaut(j0.categorie)});
+    // Catégorie changée : la nature suit la nouvelle catégorie (un virement « Revenu » devenu Transfert passe hors budget)
+    Object.assign(op, {categorie: j0.categorie, sousCategorie: j0.sousCategorie || op.sousCategorie, nature: j0.nature || (op.categorie === j0.categorie && op.nature) || natureParDefaut(j0.categorie)});
     if (j0.lieu) op.lieu = j0.lieu;
     validerClassement(op, corrige && !auto);
   } else enregistrer("operations", op);

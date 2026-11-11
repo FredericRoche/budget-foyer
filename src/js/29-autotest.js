@@ -344,6 +344,14 @@ async function autotest(){
             supprimer("comptes", ck.id);
           }
           {
+            // Rapprochement qui change la catégorie : la nature suit (virement « Revenu » devenu Transfert)
+            const ov = enregistrer("operations", {compte: cc.id, date: "2027-02-10", montant: 321.5, libelle: "VIREMENT EMPLOYEUR ESSAI", categorie: "Revenus", sousCategorie: "Salaire", nature: "Revenu"});
+            const jn = enregistrer("justificatifs", {type: "notefrais", date: "2027-02-05", montant: 321.5, categorie: "Transfert", sousCategorie: "Notes de frais", statut: "a_rapprocher", operations: []});
+            lier([jn], ov, false);
+            v("rapprochement : la nature suit la catégorie changée", [obtenir("operations", ov.id).categorie, obtenir("operations", ov.id).nature], ["Transfert", "Hors budget"]);
+            supprimer("operations", ov.id); supprimer("justificatifs", jn.id);
+          }
+          {
             // Fiches à classer d'après leurs opérations : concordantes proposées, lieu variable laissé vide
             const fk = enregistrer("commercants", {nom: "Classement Essai", alias: [], stats: {}, natures: {}});
             const fm = enregistrer("commercants", {nom: "Mixte Essai", alias: [], stats: {}, natures: {}});
