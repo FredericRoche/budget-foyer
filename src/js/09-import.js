@@ -12,6 +12,14 @@ function empreintes(compteId, lignes){
     return base + "|" + r;
   });
 }
+/* Deux exports d'une même banque tronquent parfois différemment un libellé (« …PRESTATIONS RETR » / « …RETRAI ») :
+   même compte, même date, même montant et un libellé qui commence par l'autre désignent la même opération. */
+function libellesCompatibles(a, b){
+  const x = cleEmpreinte(a || ""), y = cleEmpreinte(b || ""), court = x.length < y.length ? x : y;
+  return court.length >= 8 && (x.startsWith(y) || y.startsWith(x));
+}
+const jumelleImportee = o => vivants("operations").find(x => x !== o && x.id !== o.id && x.compte === o.compte && x.date === o.date && x.empreinte
+  && versCentimes(x.montant) === versCentimes(o.montant) && libellesCompatibles(x.libelle, o.libelle)) || null;
 function indexEmpreintes(){
   const m = new Map();
   for (const op of vivants("operations")) if (op.empreinte) m.set(op.empreinte, op);
@@ -132,6 +140,16 @@ function preparerReleve(lu, compte){
     else if (nv && idx.has(empNv[i])) res.reattribuees.push({ligne: l, op: idx.get(empNv[i]), empreinte: emp[i]});
     else res.nouvelles.push(Object.assign({}, l, {empreinte: emp[i]}));
   });
+  // Ligne déjà venue d'un autre export sous un libellé tronqué autrement : connue, pas nouvelle
+  if (res.nouvelles.length && compte){
+    const dansFichier = new Set(emp);
+    const libres = vivants("operations").filter(o => o.compte === compte.id && o.empreinte && !dansFichier.has(o.empreinte));
+    res.nouvelles = res.nouvelles.filter(l => {
+      const i = libres.findIndex(o => o.date === l.date && versCentimes(o.montant) === versCentimes(l.montant) && libellesCompatibles(o.libelle, l.libelle));
+      if (i < 0) return true;
+      libres.splice(i, 1); res.deja.push(l); return false;
+    });
+  }
   if (res.cartesSansTitulaire?.length){
     const c = vivants("comptes").find(x => x.carte === "LCL-NV");
     const e2 = empreintes(c ? c.id : "LCL-NV", res.cartesSansTitulaire);

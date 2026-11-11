@@ -102,7 +102,9 @@ function panneauOperation(o, etat){
     }}, "Enregistrer"),
     h("button", {class: "mini discret", onclick: () => ventilerOperation(o)}, "Ventiler…"),
     cm ? h("button", {class: "mini discret", onclick: () => aller("commercants", {choisi: cm.id})}, "Fiche fournisseur") : null,
-    !o.import && !o.empreinte?.startsWith("facture") ? h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer cette opération saisie à la main ?", "Supprimer", true)){ supprimer("operations", o.id); etat.choisie = null; rafraichirEcran(); } }}, "Supprimer") : null));
+    !o.import && !o.empreinte?.startsWith("facture") ? h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer cette opération saisie à la main ?", "Supprimer", true)){ supprimer("operations", o.id); etat.choisie = null; rafraichirEcran(); } }}, "Supprimer")
+      // Opération importée en double (même opération venue de deux exports) : seule la jumelle se supprime
+      : o.import && !(o.justificatifs || []).length && jumelleImportee(o) ? h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Une opération identique (même compte, même date, même montant, libellé de même début) existe déjà : supprimer celle-ci, importée en double ?", "Supprimer le doublon", true)){ supprimer("operations", o.id); etat.choisie = null; rafraichirEcran(); } }}, "Supprimer ce doublon") : null));
   return p;
 }
 

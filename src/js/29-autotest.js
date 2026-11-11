@@ -344,6 +344,14 @@ async function autotest(){
             supprimer("comptes", ck.id);
           }
           {
+            // Libellé tronqué autrement par un second export : même opération, pas une nouvelle ; doublon supprimable
+            const o1 = enregistrer("operations", {compte: cc.id, date: "2027-02-11", montant: 250.5, libelle: "VIREMENT CAISSE ESSAI PRESTATIONS RETRAI", empreinte: "essai|tronque|1", import: "imp-essai"});
+            const p = preparerReleve({genre: "compte", banque: "Essai", periode: {debut: "2027-02-01", fin: "2027-02-28"}, lignes: [{date: "2027-02-11", montant: 250.5, libelle: "VIREMENT CAISSE ESSAI PRESTATIONS RETR"}]}, cc);
+            const o2 = enregistrer("operations", {compte: cc.id, date: "2027-02-11", montant: 250.5, libelle: "VIREMENT CAISSE ESSAI PRESTATIONS RETR", empreinte: "essai|tronque|2", import: "imp-essai"});
+            v("import : libellé tronqué autrement reconnu, doublon désigné", [p.nouvelles.length, p.deja.length, jumelleImportee(o2)?.id === o1.id, libellesCompatibles("CB SHORT", "CB SHORTER")], [0, 1, true, false]);
+            supprimer("operations", o1.id); supprimer("operations", o2.id);
+          }
+          {
             // Rapprochement qui change la catégorie : la nature suit (virement « Revenu » devenu Transfert)
             const ov = enregistrer("operations", {compte: cc.id, date: "2027-02-10", montant: 321.5, libelle: "VIREMENT EMPLOYEUR ESSAI", categorie: "Revenus", sousCategorie: "Salaire", nature: "Revenu"});
             const jn = enregistrer("justificatifs", {type: "notefrais", date: "2027-02-05", montant: 321.5, categorie: "Transfert", sousCategorie: "Notes de frais", statut: "a_rapprocher", operations: []});
