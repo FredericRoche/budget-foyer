@@ -185,12 +185,15 @@ function resultat(debut, fin){
 }
 /* Variation de valeur des placements non expliquée par les versements (plus-values latentes). */
 function plusValuesLatentes(debut, fin){
-  /* Variation de valeur des placements valorisés aux deux dates, moins les versements d'épargne de la période. */
+  /* Variation de valeur des placements valorisés aux deux dates, moins les versements d'épargne de la période, plus
+     les cessions (conversion d'actif) : le titre cédé quitte les placements et le prix entre sur un compte sans
+     passer par le résultat ; sans cette reprise, chaque cession créait un faux écart de son montant au contrôle. */
   let variation = 0;
   for (const c of vivants("comptes").filter(c => ["livret", "assurance_vie", "retraite", "prevoyance", "pea", "titres", "immobilier"].includes(c.type))){
     const v0 = derniereValorisation(c.id, ajouterJours(debut, -1)), v1 = derniereValorisation(c.id, fin);
     if (v0 && v1) variation += v1.valeur - v0.valeur;
   }
   const versements = somme(partsPeriode(debut, fin, p => p.categorie === "Épargne"), p => -p.montant);
-  return variation - versements;
+  const cessions = somme(partsPeriode(debut, fin, p => p.categorie === "Patrimoine"), p => p.montant);
+  return variation - versements + cessions;
 }

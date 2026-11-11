@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-e8tk8AwV2TLjR8Xrf3EJr6oOGwAUpQSSCnlNE07FuUU=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-zn2F9q33UvDSwGNeHjxDxDtyyGPM5Sxrbj9GoQF4Lmw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-11.1920";
+const VERSION_APP = "2026-11-11.1927";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4790,14 +4790,17 @@ function resultat(debut, fin){
 }
 /* Variation de valeur des placements non expliquée par les versements (plus-values latentes). */
 function plusValuesLatentes(debut, fin){
-  /* Variation de valeur des placements valorisés aux deux dates, moins les versements d'épargne de la période. */
+  /* Variation de valeur des placements valorisés aux deux dates, moins les versements d'épargne de la période, plus
+     les cessions (conversion d'actif) : le titre cédé quitte les placements et le prix entre sur un compte sans
+     passer par le résultat ; sans cette reprise, chaque cession créait un faux écart de son montant au contrôle. */
   let variation = 0;
   for (const c of vivants("comptes").filter(c => ["livret", "assurance_vie", "retraite", "prevoyance", "pea", "titres", "immobilier"].includes(c.type))){
     const v0 = derniereValorisation(c.id, ajouterJours(debut, -1)), v1 = derniereValorisation(c.id, fin);
     if (v0 && v1) variation += v1.valeur - v0.valeur;
   }
   const versements = somme(partsPeriode(debut, fin, p => p.categorie === "Épargne"), p => -p.montant);
-  return variation - versements;
+  const cessions = somme(partsPeriode(debut, fin, p => p.categorie === "Patrimoine"), p => p.montant);
+  return variation - versements + cessions;
 }
 
 /* ===== 13b-controles.js ===== */
@@ -9851,6 +9854,13 @@ async function autotest(){
     enregistrer("echeances", {libelle: "Essai remplacée", montant: 10, recurrence: "unique", debut: "2027-05-02", compte: cj.id, aConfirmer: true, active: false});
     v("à traiter : échéance désactivée non comptée", compteATraiter().echeances - avantConf, 0);
     v("plan : compte-titres et valorisations, hors épargne", [rp.comptes, soldeCompte(ct, "2027-04-01"), soldeCompte(ct, "2027-06-01"), estMobilisable(ct)], [1, 1000, 0, false]);
+    {
+      // Contrôle du résultat : le prix d'une cession, encaissé hors résultat, compense la sortie du titre
+      const pv0 = plusValuesLatentes("2027-03-02", "2027-05-31");
+      const oc = enregistrer("operations", {compte: cj.id, date: "2027-04-15", montant: 1000, libelle: "CESSION TITRES ESSAI", categorie: "Patrimoine", sousCategorie: "Cession", nature: "Revenu", verrou: true});
+      v("contrôle du résultat : cession reprise dans la variation de valeur des placements", Math.round(plusValuesLatentes("2027-03-02", "2027-05-31") - pv0), 1000);
+      supprimer("operations", oc.id);
+    }
     v("projet : prochain paiement net de la reprise du même jour", prochainPaiement([{date: "2027-06-15", montant: -61092}, {date: "2027-06-15", montant: 20000}, {date: "2027-07-01", montant: -5}]), {date: "2027-06-15", montant: -41092});
     enregistrer("operations", {compte: cj.id, date: "2027-03-05", montant: 1234.56, libelle: "VIREMENT EMPLOYEUR EXEMPLE", categorie: "Revenus", sousCategorie: "Salaire", nature: "Revenu", verrou: true});
     const rr = appliquerPlan({reclasser: [{date: "2027-03-05", montant: 1234.56, contient: "EMPLOYEUR", categorie: "Professionnel", sousCategorie: "Remboursements de frais", nature: "Hors budget"}]});
