@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-eZIyDYTQ7OAvkxD6uZPpVLN3Tm4RNoTaEwqilJge/lE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-TzrOfOBK4bzYqM5WXcXW2RMIotbm61hhj48dfvcLTSs=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-11.1748";
+const VERSION_APP = "2026-11-11.1749";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4811,6 +4811,9 @@ function plusValuesLatentes(debut, fin){
      d'opérations. Le total se saisit à la main (trois champs) : aucune lecture de format n'est nécessaire.
    Une alerte de forme peut être écartée (« ce n'est pas une erreur ») : sa clé va dans parametres.controlesIgnores. */
 
+/* Début des contrôles de forme (réglable sur l'écran) : par défaut le 1er janvier de l'année en cours ; les années
+   antérieures, reprises en bloc, ne sont pas reprises une à une. */
+const debutControles = () => LIVRE.parametres.controlesDepuis || aujourdhui().slice(0, 4) + "-01-01";
 const cleIgnoree = k => (LIVRE.parametres.controlesIgnores || []).includes(k);
 function ignorerControle(k){ modifierParametres({controlesIgnores: [...new Set([...(LIVRE.parametres.controlesIgnores || []), k])]}); }
 
@@ -4831,7 +4834,7 @@ function verifieParCloture(ops){
 function doublonsOperations(){
   const groupes = new Map();
   for (const o of vivants("operations")){
-    if (!o.empreinte || (o.ventilation || []).length) continue;
+    if (!o.empreinte || (o.ventilation || []).length || o.date < debutControles()) continue;
     const k = o.compte + "|" + o.date + "|" + versCentimes(o.montant);
     (groupes.get(k) || groupes.set(k, []).get(k)).push(o);
   }
@@ -4851,7 +4854,7 @@ function doublonsOperations(){
 function classementsIncoherents(){
   const r = [];
   for (const o of vivants("operations")){
-    if ((o.ventilation || []).length) continue;
+    if ((o.ventilation || []).length || o.date < debutControles()) continue;
     let motif = "";
     if (o.categorie === "Transfert" && o.nature === "Revenu") motif = "transfert compté comme revenu";
     else if (o.categorie === "Revenus" && o.montant < 0) motif = "débit classé en revenu";
@@ -4882,7 +4885,8 @@ function periodesNonCloturees(){
     }
     if (couvert < borne) r.push({compte, debut: ajouterJours(couvert, 1), fin: borne});
   }
-  return r.filter(x => !cleIgnoree("cloture|" + x.compte.id + "|" + x.debut)).map(x => Object.assign(x, {cle: "cloture|" + x.compte.id + "|" + x.debut}));
+  return r.filter(x => x.fin >= debutControles()).map(x => Object.assign(x, {debut: x.debut < debutControles() ? debutControles() : x.debut}))
+    .filter(x => !cleIgnoree("cloture|" + x.compte.id + "|" + x.debut)).map(x => Object.assign(x, {cle: "cloture|" + x.compte.id + "|" + x.debut}));
 }
 
 /* Contrôle par total : somme des opérations du fournisseur sur la période, comparée au total de la pièce.
@@ -8566,11 +8570,14 @@ declarerEcran("controles", {titre: "Contrôles", rendre(c){
   const totaux = vivants("controles").map(x => Object.assign({controle: x}, resultatControle(x))).sort((a, b) => (a.ok - b.ok) || (a.controle.fin < b.controle.fin ? 1 : -1));
   const doublons = doublonsOperations(), classements = classementsIncoherents(), trous = periodesNonCloturees();
   const nbAlertes = totaux.filter(t => !t.ok).length + doublons.length + classements.length + trous.length;
+  const depuis = champDate({value: debutControles()});
+  depuis.addEventListener("change", () => { if (depuis.value){ modifierParametres({controlesDepuis: depuis.value}); rafraichirEcran(); } });
   c.appendChild(entete("Contrôles", nbAlertes ? nbAlertes + " point(s) à examiner" : "Aucune alerte",
     [h("button", {class: "primaire", onclick: () => dialogueControle(null)}, "Nouveau contrôle par total…")]));
   const ignorer = k => h("button", {class: "mini discret", title: "Ce n'est pas une erreur : ne plus signaler", onclick: e => { e.stopPropagation(); ignorerControle(k); rafraichirEcran(); }}, "Pas une erreur");
   const voirOps = (recherche, compte) => aller("operations", {recherche, compte: compte || "", mois: "", categorie: ""});
 
+  c.appendChild(h("p", {class: "note"}, "Contrôles de forme à partir du ", depuis, " (les années antérieures ne sont pas examinées ; les contrôles par total valent pour leur propre période)."));
   // 1. Contrôles par total
   c.appendChild(h("h2", null, "Contrôles par total (" + totaux.length + ")"));
   c.appendChild(h("p", {class: "note"}, "Une pièce qui fait foi (relevé annuel des paiements d'une caisse, bulletin de paie de décembre, échéancier, avis d'impôt…) donne un total pour un fournisseur et une période ; l'écart montre l'opération manquante, en double ou mal rattachée."));

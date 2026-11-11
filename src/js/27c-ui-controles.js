@@ -144,11 +144,14 @@ declarerEcran("controles", {titre: "Contrôles", rendre(c){
   const totaux = vivants("controles").map(x => Object.assign({controle: x}, resultatControle(x))).sort((a, b) => (a.ok - b.ok) || (a.controle.fin < b.controle.fin ? 1 : -1));
   const doublons = doublonsOperations(), classements = classementsIncoherents(), trous = periodesNonCloturees();
   const nbAlertes = totaux.filter(t => !t.ok).length + doublons.length + classements.length + trous.length;
+  const depuis = champDate({value: debutControles()});
+  depuis.addEventListener("change", () => { if (depuis.value){ modifierParametres({controlesDepuis: depuis.value}); rafraichirEcran(); } });
   c.appendChild(entete("Contrôles", nbAlertes ? nbAlertes + " point(s) à examiner" : "Aucune alerte",
     [h("button", {class: "primaire", onclick: () => dialogueControle(null)}, "Nouveau contrôle par total…")]));
   const ignorer = k => h("button", {class: "mini discret", title: "Ce n'est pas une erreur : ne plus signaler", onclick: e => { e.stopPropagation(); ignorerControle(k); rafraichirEcran(); }}, "Pas une erreur");
   const voirOps = (recherche, compte) => aller("operations", {recherche, compte: compte || "", mois: "", categorie: ""});
 
+  c.appendChild(h("p", {class: "note"}, "Contrôles de forme à partir du ", depuis, " (les années antérieures ne sont pas examinées ; les contrôles par total valent pour leur propre période)."));
   // 1. Contrôles par total
   c.appendChild(h("h2", null, "Contrôles par total (" + totaux.length + ")"));
   c.appendChild(h("p", {class: "note"}, "Une pièce qui fait foi (relevé annuel des paiements d'une caisse, bulletin de paie de décembre, échéancier, avis d'impôt…) donne un total pour un fournisseur et une période ; l'écart montre l'opération manquante, en double ou mal rattachée."));

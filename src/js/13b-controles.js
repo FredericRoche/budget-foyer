@@ -8,6 +8,9 @@
      d'opérations. Le total se saisit à la main (trois champs) : aucune lecture de format n'est nécessaire.
    Une alerte de forme peut être écartée (« ce n'est pas une erreur ») : sa clé va dans parametres.controlesIgnores. */
 
+/* Début des contrôles de forme (réglable sur l'écran) : par défaut le 1er janvier de l'année en cours ; les années
+   antérieures, reprises en bloc, ne sont pas reprises une à une. */
+const debutControles = () => LIVRE.parametres.controlesDepuis || aujourdhui().slice(0, 4) + "-01-01";
 const cleIgnoree = k => (LIVRE.parametres.controlesIgnores || []).includes(k);
 function ignorerControle(k){ modifierParametres({controlesIgnores: [...new Set([...(LIVRE.parametres.controlesIgnores || []), k])]}); }
 
@@ -28,7 +31,7 @@ function verifieParCloture(ops){
 function doublonsOperations(){
   const groupes = new Map();
   for (const o of vivants("operations")){
-    if (!o.empreinte || (o.ventilation || []).length) continue;
+    if (!o.empreinte || (o.ventilation || []).length || o.date < debutControles()) continue;
     const k = o.compte + "|" + o.date + "|" + versCentimes(o.montant);
     (groupes.get(k) || groupes.set(k, []).get(k)).push(o);
   }
@@ -48,7 +51,7 @@ function doublonsOperations(){
 function classementsIncoherents(){
   const r = [];
   for (const o of vivants("operations")){
-    if ((o.ventilation || []).length) continue;
+    if ((o.ventilation || []).length || o.date < debutControles()) continue;
     let motif = "";
     if (o.categorie === "Transfert" && o.nature === "Revenu") motif = "transfert compté comme revenu";
     else if (o.categorie === "Revenus" && o.montant < 0) motif = "débit classé en revenu";
@@ -79,7 +82,8 @@ function periodesNonCloturees(){
     }
     if (couvert < borne) r.push({compte, debut: ajouterJours(couvert, 1), fin: borne});
   }
-  return r.filter(x => !cleIgnoree("cloture|" + x.compte.id + "|" + x.debut)).map(x => Object.assign(x, {cle: "cloture|" + x.compte.id + "|" + x.debut}));
+  return r.filter(x => x.fin >= debutControles()).map(x => Object.assign(x, {debut: x.debut < debutControles() ? debutControles() : x.debut}))
+    .filter(x => !cleIgnoree("cloture|" + x.compte.id + "|" + x.debut)).map(x => Object.assign(x, {cle: "cloture|" + x.compte.id + "|" + x.debut}));
 }
 
 /* Contrôle par total : somme des opérations du fournisseur sur la période, comparée au total de la pièce.
