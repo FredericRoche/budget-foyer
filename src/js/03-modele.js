@@ -5,7 +5,7 @@
    Une suppression laisse une pierre tombale (supprime: true). */
 
 const COLLECTIONS = ["comptes", "operations", "commercants", "regles", "budgets", "echeances",
-  "valorisations", "justificatifs", "factures", "soldes", "imports", "documents"];
+  "valorisations", "justificatifs", "factures", "soldes", "imports", "documents", "controles"];
 
 const TYPES_COMPTE = {
   courant: "Compte courant", carte: "Carte à débit différé", livret: "Livret d'épargne",

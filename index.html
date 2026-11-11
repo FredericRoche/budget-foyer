@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-CZ0Oeg9DhFhKpv0mH0i8KZrKOcmKjmSTDFQoNLvIG7U=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-FgADrMTb/AWzAHsBPHj6ktbn2gNgs1JnYetqmFsLp+Q=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-11.1713";
+const VERSION_APP = "2026-11-11.1732";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -791,7 +791,7 @@ function ecrireClasseur(feuilles){
    Une suppression laisse une pierre tombale (supprime: true). */
 
 const COLLECTIONS = ["comptes", "operations", "commercants", "regles", "budgets", "echeances",
-  "valorisations", "justificatifs", "factures", "soldes", "imports", "documents"];
+  "valorisations", "justificatifs", "factures", "soldes", "imports", "documents", "controles"];
 
 const TYPES_COMPTE = {
   courant: "Compte courant", carte: "Carte à débit différé", livret: "Livret d'épargne",
@@ -4800,6 +4800,97 @@ function plusValuesLatentes(debut, fin){
   return variation - versements;
 }
 
+/* ===== 13b-controles.js ===== */
+/* ================= Contrôles de cohérence =================
+   Deux familles, qui ne corrigent jamais rien d'office :
+   - contrôles de forme, sans pièce : opérations importées en double, classements contradictoires, périodes
+     d'un compte qui n'ont pas été clôturées sur un relevé PDF ;
+   - contrôles par total : une pièce qui fait foi (relevé annuel des paiements d'une caisse, bulletin de paie
+     de décembre, échéancier…) donne un total pour un fournisseur et une période ; il est comparé à la somme
+     des opérations de ce fournisseur sur la période. Quelques pièces par an couvrent ainsi des centaines
+     d'opérations. Le total se saisit à la main (trois champs) : aucune lecture de format n'est nécessaire.
+   Une alerte de forme peut être écartée (« ce n'est pas une erreur ») : sa clé va dans parametres.controlesIgnores. */
+
+const cleIgnoree = k => (LIVRE.parametres.controlesIgnores || []).includes(k);
+function ignorerControle(k){ modifierParametres({controlesIgnores: [...new Set([...(LIVRE.parametres.controlesIgnores || []), k])]}); }
+
+/* Opérations importées en double : même compte, même date, même montant, libellés de même début
+   (deux exports qui tronquent différemment le même libellé). Les vrais achats identiques du même jour
+   (deux abonnements, deux lignes de téléphone) s'écartent une fois pour toutes. */
+function doublonsOperations(){
+  const groupes = new Map();
+  for (const o of vivants("operations")){
+    if (!o.empreinte || (o.ventilation || []).length) continue;
+    const k = o.compte + "|" + o.date + "|" + versCentimes(o.montant);
+    (groupes.get(k) || groupes.set(k, []).get(k)).push(o);
+  }
+  const r = [];
+  for (const [k, ops] of groupes){
+    if (ops.length < 2) continue;
+    const g = ops.filter(o => ops.some(x => x !== o && libellesCompatibles(x.libelle, o.libelle)));
+    if (g.length >= 2 && !cleIgnoree("doublon|" + k)) r.push({cle: "doublon|" + k, ops: g});
+  }
+  return r.sort((a, b) => a.ops[0].date < b.ops[0].date ? 1 : -1);
+}
+
+/* Classements contradictoires : la nature et la catégorie se démentent. */
+function classementsIncoherents(){
+  const r = [];
+  for (const o of vivants("operations")){
+    if ((o.ventilation || []).length) continue;
+    let motif = "";
+    if (o.categorie === "Transfert" && o.nature === "Revenu") motif = "transfert compté comme revenu";
+    else if (o.categorie === "Revenus" && o.montant < 0) motif = "débit classé en revenu";
+    else if (o.nature === "Revenu" && o.categorie && o.categorie !== "Revenus" && o.categorie !== "À préciser") motif = "revenu classé hors de la catégorie Revenus";
+    if (motif && !cleIgnoree("classement|" + o.id)) r.push({cle: "classement|" + o.id, op: o, motif});
+  }
+  return r.sort((a, b) => a.op.date < b.op.date ? 1 : -1);
+}
+
+/* Périodes non clôturées : pour un compte déjà clôturé au moins une fois sur relevé PDF, trous entre la première
+   clôture et la fin du mois avant-dernier (le relevé du mois écoulé arrive dans les jours qui suivent). */
+function periodesNonCloturees(){
+  const parCompte = new Map();
+  for (const [k, c] of Object.entries(LIVRE.parametres.clotures || {})){
+    const id = k.split("|")[0];
+    if (!c || !c.debut || !c.fin) continue;
+    (parCompte.get(id) || parCompte.set(id, []).get(id)).push({debut: c.debut, fin: c.fin});
+  }
+  const borne = finDeMois(ajouterJours(aujourdhui().slice(0, 8) + "01", -32));
+  const r = [];
+  for (const [id, ps] of parCompte){
+    const compte = obtenir("comptes", id); if (!compte) continue;
+    ps.sort((a, b) => a.debut < b.debut ? -1 : 1);
+    let couvert = ps[0].fin;
+    for (const p of ps.slice(1)){
+      if (p.debut > ajouterJours(couvert, 1)) r.push({compte, debut: ajouterJours(couvert, 1), fin: ajouterJours(p.debut, -1)});
+      if (p.fin > couvert) couvert = p.fin;
+    }
+    if (couvert < borne) r.push({compte, debut: ajouterJours(couvert, 1), fin: borne});
+  }
+  return r.filter(x => !cleIgnoree("cloture|" + x.compte.id + "|" + x.debut)).map(x => Object.assign(x, {cle: "cloture|" + x.compte.id + "|" + x.debut}));
+}
+
+/* Contrôle par total : somme des opérations du fournisseur sur la période, comparée au total de la pièce.
+   sens « credit » : sommes reçues (pension, salaire) ; « debit » : sommes payées (échéancier). */
+function ficheDuControle(c){ return obtenir("commercants", c.commercant) || vivants("commercants").find(x => norm(x.nom) === norm(c.commercantNom || "")) || null; }
+function resultatControle(c){
+  const f = ficheDuControle(c);
+  const ops = f ? vivants("operations").filter(o => o.commercant === f.id && o.date >= c.debut && o.date <= c.fin) : [];
+  const constate = somme(ops, o => o.montant);
+  const attendu = c.sens === "debit" ? -Math.abs(c.montant) : Math.abs(c.montant);
+  const ecart = Math.round((constate - attendu) * 100) / 100;
+  return {fiche: f, ops, constate, attendu, ecart, ok: !!f && Math.abs(ecart) < 0.01};
+}
+
+/* Nombre d'alertes, pour la pastille du menu. */
+function nombreAlertesControles(){
+  try {
+    return doublonsOperations().length + classementsIncoherents().length + periodesNonCloturees().length
+      + vivants("controles").filter(c => !resultatControle(c).ok).length;
+  } catch (e) { return 0; }
+}
+
 /* ===== 14-tresorerie.js ===== */
 /* ================= Trésorerie prévisionnelle (12 mois, au jour le jour) =================
    Compte suivi : le compte de trésorerie (compte courant). Flux projetés :
@@ -5309,6 +5400,7 @@ function construireNavigation(){
     h("div", {class: "rubrique"}, "Comptes"), lien("operations", "Opérations"), lien("import", "Importer"),
     lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(pieceOuverte).length || null),
     lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Fournisseurs"),
+    lien("controles", "Contrôles", nombreAlertesControles() || null, true),
     h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), lien("sites", "Coût par site"), lien("patrimoine", "Bilan et résultat"),
     lien("tresorerie", "Trésorerie", ana?.premierBas ? "!" : null, true),
     lien("epargne", "Épargne"), lien("projets", "Projets"),
@@ -8307,6 +8399,85 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
     h("p", {class: "note"}, "Poste = sous-catégorie des paiements et des échéances. Pour suivre un budget par poste, saisissez une échéance par lot (même projet, sous-catégorie du lot) et réduisez d'autant l'enveloppe non ventilée.")));
 }});
 
+/* ===== 27c-ui-controles.js ===== */
+/* ================= Écran « Contrôles » =================
+   Contrôles par total (pièces qui font foi) en tête, puis contrôles de forme. Chaque alerte renvoie aux opérations
+   en cause ; rien n'est corrigé d'ici, sinon l'écart d'une alerte reconnue sans objet. */
+async function dialogueControle(c){
+  const x = c || {sens: "credit", debut: (Number(aujourdhui().slice(0, 4)) - 1) + "-01-01", fin: (Number(aujourdhui().slice(0, 4)) - 1) + "-12-31"};
+  const libelle = h("input", {type: "text", value: x.libelle || "", placeholder: "ex. Relevé annuel des paiements de la caisse"});
+  const fiches = vivants("commercants").sort((a, b) => a.nom.localeCompare(b.nom, "fr")).map(f => [f.id, f.nom]);
+  const fiche = selection([["", "— choisir —"], ...fiches], x.commercant || "");
+  const du = champDate({value: x.debut}), au = champDate({value: x.fin});
+  const montant = h("input", {type: "text", inputmode: "decimal", value: x.montant ? nombre(x.montant) : ""});
+  const sens = selection([["credit", "Sommes reçues (pension, salaire, remboursement)"], ["debit", "Sommes payées (échéancier, abonnement)"]], x.sens);
+  const fichier = h("input", {type: "file", accept: "application/pdf,image/*"});
+  const ok = await dialogue({titre: c ? "Modifier le contrôle" : "Nouveau contrôle par total", large: true, corps: h("div", null,
+      h("p", {class: "note"}, "Le total d'une pièce qui fait foi est comparé à la somme des opérations du fournisseur sur la période. Prenez le montant réellement versé ou payé (net versé, après prélèvement à la source), pas le net imposable."),
+      champ("Pièce", libelle), champ("Fournisseur", fiche), h("div", {style: {display: "flex", gap: "1rem", flexWrap: "wrap"}}, champ("Du", du), champ("Au", au)),
+      champ("Total de la pièce (€)", montant), champ("Sens", sens), champ("Joindre la pièce (facultatif)", fichier, c ? "Laisser vide pour garder la pièce déjà jointe." : null)),
+    actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
+      if (!fiche.value || !du.value || !au.value || !lireMontant(montant.value)){ message("Indiquez le fournisseur, la période et le total.", true); return false; }
+      if (au.value < du.value){ message("La fin de la période précède son début.", true); return false; }
+      return true;
+    }}]});
+  if (!ok) return;
+  const f = obtenir("commercants", fiche.value);
+  const r = enregistrer("controles", Object.assign(x, {libelle: libelle.value.trim() || "Pièce sans titre", commercant: f.id, commercantNom: f.nom,
+    debut: du.value, fin: au.value, montant: Math.abs(lireMontant(montant.value)), sens: sens.value}));
+  const fi = fichier.files && fichier.files[0];
+  if (fi){
+    try { await enregistrerPiece(r.id, new Uint8Array(await fi.arrayBuffer()), fi.type || "application/pdf"); r.piece = true; enregistrer("controles", r); }
+    catch (e){ message("Pièce non enregistrée : " + e.message, true); }
+  }
+  rafraichirEcran();
+}
+
+declarerEcran("controles", {titre: "Contrôles", rendre(c){
+  const totaux = vivants("controles").map(x => Object.assign({controle: x}, resultatControle(x))).sort((a, b) => (a.ok - b.ok) || (a.controle.fin < b.controle.fin ? 1 : -1));
+  const doublons = doublonsOperations(), classements = classementsIncoherents(), trous = periodesNonCloturees();
+  const nbAlertes = totaux.filter(t => !t.ok).length + doublons.length + classements.length + trous.length;
+  c.appendChild(entete("Contrôles", nbAlertes ? nbAlertes + " point(s) à examiner" : "Aucune alerte",
+    [h("button", {class: "primaire", onclick: () => dialogueControle(null)}, "Nouveau contrôle par total…")]));
+  const ignorer = k => h("button", {class: "mini discret", title: "Ce n'est pas une erreur : ne plus signaler", onclick: e => { e.stopPropagation(); ignorerControle(k); rafraichirEcran(); }}, "Pas une erreur");
+  const voirOps = (recherche, compte) => aller("operations", {recherche, compte: compte || "", mois: "", categorie: ""});
+
+  // 1. Contrôles par total
+  c.appendChild(h("h2", null, "Contrôles par total (" + totaux.length + ")"));
+  c.appendChild(h("p", {class: "note"}, "Une pièce qui fait foi (relevé annuel des paiements d'une caisse, bulletin de paie de décembre, échéancier, avis d'impôt…) donne un total pour un fournisseur et une période ; l'écart montre l'opération manquante, en double ou mal rattachée."));
+  c.appendChild(tableau([{titre: "Pièce"}, {titre: "Fournisseur"}, {titre: "Période"}, {titre: "Pièce", num: true}, {titre: "Opérations", num: true}, {titre: "Écart", num: true}, {titre: ""}], totaux,
+    {classe: "serre", vide: "Aucun contrôle par total : « Nouveau contrôle par total… » pour en créer un.", ligne: t => h("tr", null,
+      h("td", null, t.controle.libelle), h("td", null, t.fiche ? t.fiche.nom : h("span", {class: "neg"}, (t.controle.commercantNom || "?") + " (fiche introuvable)")),
+      h("td", null, dateFr(t.controle.debut) + " – " + dateFr(t.controle.fin)), h("td", {class: "num"}, euros(t.attendu)),
+      h("td", {class: "num"}, euros(t.constate) + " (" + t.ops.length + ")"),
+      h("td", {class: "num " + (t.ok ? "pos" : "neg")}, t.ok ? "✓" : eurosSigne(t.ecart)),
+      h("td", null, h("button", {class: "mini discret", onclick: () => voirOps(t.fiche ? t.fiche.nom : "")}, "Opérations"),
+        t.controle.piece ? h("button", {class: "mini discret", onclick: () => voirPiece({id: t.controle.id, type: "", date: t.controle.fin, montant: t.controle.montant, commercantNom: t.controle.libelle})}, "Pièce") : null,
+        h("button", {class: "mini discret", onclick: () => dialogueControle(t.controle)}, "Modifier"),
+        h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer ce contrôle ? Les opérations ne changent pas.", "Supprimer", true)){ supprimer("controles", t.controle.id); rafraichirEcran(); } }}, "Supprimer")))}));
+
+  // 2. Opérations en double
+  c.appendChild(h("h2", null, "Opérations importées en double (" + doublons.length + ")"));
+  c.appendChild(h("p", {class: "note"}, "Même compte, même date, même montant, libellés de même début : souvent une même opération venue de deux exports. Deux achats réellement identiques du même jour (deux abonnements, deux lignes de téléphone) : « Pas une erreur »."));
+  c.appendChild(tableau([{titre: "Date"}, {titre: "Compte"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Nombre", num: true}, {titre: ""}], doublons,
+    {classe: "serre", vide: "Aucun doublon.", ligne: d => { const o = d.ops[0]; return h("tr", null, h("td", null, dateFr(o.date)), h("td", null, obtenir("comptes", o.compte)?.nom || ""),
+      h("td", null, o.libelle), h("td", {class: "num"}, euros(o.montant)), h("td", {class: "num"}, d.ops.length),
+      h("td", null, h("button", {class: "mini discret", onclick: () => voirOps(o.libelle.slice(0, 24), o.compte)}, "Voir"), ignorer(d.cle))); }}));
+
+  // 3. Classements contradictoires
+  c.appendChild(h("h2", null, "Classements contradictoires (" + classements.length + ")"));
+  c.appendChild(tableau([{titre: "Date"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Classement"}, {titre: "Motif"}, {titre: ""}], classements,
+    {classe: "serre", vide: "Aucun.", ligne: x => h("tr", null, h("td", null, dateFr(x.op.date)), h("td", null, x.op.libelle), h("td", {class: "num"}, euros(x.op.montant)),
+      h("td", null, x.op.categorie + (x.op.sousCategorie ? " › " + x.op.sousCategorie : "") + " · " + (x.op.nature || "")), h("td", {class: "neg"}, x.motif),
+      h("td", null, h("button", {class: "mini discret", onclick: () => voirOps(x.op.libelle.slice(0, 24), x.op.compte)}, "Voir"), ignorer(x.cle)))}));
+
+  // 4. Périodes non clôturées
+  c.appendChild(h("h2", null, "Périodes non clôturées sur relevé PDF (" + trous.length + ")"));
+  c.appendChild(h("p", {class: "note"}, "Comptes déjà clôturés au moins une fois : périodes sans relevé PDF rapproché, jusqu'à la fin de l'avant-dernier mois. Déposez le relevé dans Importer pour la clôturer."));
+  c.appendChild(tableau([{titre: "Compte"}, {titre: "Période"}, {titre: ""}], trous,
+    {classe: "serre", vide: "Aucune.", ligne: x => h("tr", null, h("td", null, x.compte.nom), h("td", null, dateFr(x.debut) + " – " + dateFr(x.fin)), h("td", null, ignorer(x.cle)))}));
+}});
+
 /* ===== 28-mobile.js ===== */
 /* ================= Mode saisie mobile (écriture seule) =================
    Le téléphone ne détient que la clé publique du foyer et la clé de l'extrait des
@@ -8903,6 +9074,28 @@ async function autotest(){
             for (const o of vivants("operations").filter(o => /ESSAI/.test(o.libelle) && o.date >= "2026-12-30" && o.date <= "2027-01-05")) supprimer("operations", o.id);
             for (const i of vivants("imports").filter(i => /2027-01|2026-12-30/.test(JSON.stringify(i.periode || {})))) supprimer("imports", i.id);
             supprimer("comptes", ck.id);
+          }
+          {
+            // Contrôles : doublon importé, classement contradictoire, total d'une pièce, période non clôturée
+            const fc = enregistrer("commercants", {nom: "Caisse Controle Essai", alias: [], stats: {}, natures: {}});
+            const ops = [
+              enregistrer("operations", {compte: cc.id, date: "2027-03-02", montant: 400, libelle: "VIR CAISSE CONTROLE ESSAI RETRAI", empreinte: "ctl|1", import: "i", commercant: fc.id, categorie: "Revenus", sousCategorie: "Pension", nature: "Revenu"}),
+              enregistrer("operations", {compte: cc.id, date: "2027-03-02", montant: 400, libelle: "VIR CAISSE CONTROLE ESSAI RETR", empreinte: "ctl|2", import: "i", commercant: fc.id, categorie: "Revenus", sousCategorie: "Pension", nature: "Revenu"}),
+              enregistrer("operations", {compte: cc.id, date: "2027-04-02", montant: 400, libelle: "VIR CAISSE CONTROLE ESSAI RETR", empreinte: "ctl|3", import: "i", commercant: fc.id, categorie: "Revenus", sousCategorie: "Pension", nature: "Revenu"}),
+              enregistrer("operations", {compte: cc.id, date: "2027-04-05", montant: 90, libelle: "VIR NOTE ESSAI", empreinte: "ctl|4", categorie: "Transfert", sousCategorie: "Notes de frais", nature: "Revenu"})];
+            const ctl = enregistrer("controles", {libelle: "Relevé essai", commercant: fc.id, commercantNom: fc.nom, debut: "2027-03-01", fin: "2027-04-30", montant: 800, sens: "credit"});
+            const dbl = doublonsOperations().filter(d => d.ops.some(o => o.id === ops[0].id));
+            const inc = classementsIncoherents().filter(x => x.op.id === ops[3].id);
+            const r1 = resultatControle(ctl);
+            supprimer("operations", ops[1].id);
+            const r2 = resultatControle(ctl);
+            const avant = LIVRE.parametres.clotures;
+            LIVRE.parametres.clotures = Object.assign({}, avant, {[cc.id + "|2026-01-31"]: {debut: "2026-01-01", fin: "2026-01-31"}, [cc.id + "|2026-03-31"]: {debut: "2026-03-01", fin: "2026-03-31"}});
+            const trou = periodesNonCloturees().filter(x => x.compte.id === cc.id).map(x => x.debut + ">" + x.fin)[0];
+            LIVRE.parametres.clotures = avant;
+            v("contrôles : doublon importé, transfert en revenu, écart d'un total puis accord, trou de clôture", [dbl.length, dbl[0]?.ops.length, inc[0]?.motif, r1.ecart, r1.ok, r2.ok, trou],
+              [1, 2, "transfert compté comme revenu", 400, false, true, "2026-02-01>2026-02-28"]);
+            for (const o of ops) supprimer("operations", o.id); supprimer("controles", ctl.id); supprimer("commercants", fc.id);
           }
           {
             // Libellé tronqué autrement par un second export : même opération, pas une nouvelle ; doublon supprimable

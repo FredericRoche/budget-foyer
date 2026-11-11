@@ -344,6 +344,28 @@ async function autotest(){
             supprimer("comptes", ck.id);
           }
           {
+            // Contrôles : doublon importé, classement contradictoire, total d'une pièce, période non clôturée
+            const fc = enregistrer("commercants", {nom: "Caisse Controle Essai", alias: [], stats: {}, natures: {}});
+            const ops = [
+              enregistrer("operations", {compte: cc.id, date: "2027-03-02", montant: 400, libelle: "VIR CAISSE CONTROLE ESSAI RETRAI", empreinte: "ctl|1", import: "i", commercant: fc.id, categorie: "Revenus", sousCategorie: "Pension", nature: "Revenu"}),
+              enregistrer("operations", {compte: cc.id, date: "2027-03-02", montant: 400, libelle: "VIR CAISSE CONTROLE ESSAI RETR", empreinte: "ctl|2", import: "i", commercant: fc.id, categorie: "Revenus", sousCategorie: "Pension", nature: "Revenu"}),
+              enregistrer("operations", {compte: cc.id, date: "2027-04-02", montant: 400, libelle: "VIR CAISSE CONTROLE ESSAI RETR", empreinte: "ctl|3", import: "i", commercant: fc.id, categorie: "Revenus", sousCategorie: "Pension", nature: "Revenu"}),
+              enregistrer("operations", {compte: cc.id, date: "2027-04-05", montant: 90, libelle: "VIR NOTE ESSAI", empreinte: "ctl|4", categorie: "Transfert", sousCategorie: "Notes de frais", nature: "Revenu"})];
+            const ctl = enregistrer("controles", {libelle: "Relevé essai", commercant: fc.id, commercantNom: fc.nom, debut: "2027-03-01", fin: "2027-04-30", montant: 800, sens: "credit"});
+            const dbl = doublonsOperations().filter(d => d.ops.some(o => o.id === ops[0].id));
+            const inc = classementsIncoherents().filter(x => x.op.id === ops[3].id);
+            const r1 = resultatControle(ctl);
+            supprimer("operations", ops[1].id);
+            const r2 = resultatControle(ctl);
+            const avant = LIVRE.parametres.clotures;
+            LIVRE.parametres.clotures = Object.assign({}, avant, {[cc.id + "|2026-01-31"]: {debut: "2026-01-01", fin: "2026-01-31"}, [cc.id + "|2026-03-31"]: {debut: "2026-03-01", fin: "2026-03-31"}});
+            const trou = periodesNonCloturees().filter(x => x.compte.id === cc.id).map(x => x.debut + ">" + x.fin)[0];
+            LIVRE.parametres.clotures = avant;
+            v("contrôles : doublon importé, transfert en revenu, écart d'un total puis accord, trou de clôture", [dbl.length, dbl[0]?.ops.length, inc[0]?.motif, r1.ecart, r1.ok, r2.ok, trou],
+              [1, 2, "transfert compté comme revenu", 400, false, true, "2026-02-01>2026-02-28"]);
+            for (const o of ops) supprimer("operations", o.id); supprimer("controles", ctl.id); supprimer("commercants", fc.id);
+          }
+          {
             // Libellé tronqué autrement par un second export : même opération, pas une nouvelle ; doublon supprimable
             const o1 = enregistrer("operations", {compte: cc.id, date: "2027-02-11", montant: 250.5, libelle: "VIREMENT CAISSE ESSAI PRESTATIONS RETRAI", empreinte: "essai|tronque|1", import: "imp-essai"});
             const p = preparerReleve({genre: "compte", banque: "Essai", periode: {debut: "2027-02-01", fin: "2027-02-28"}, lignes: [{date: "2027-02-11", montant: 250.5, libelle: "VIREMENT CAISSE ESSAI PRESTATIONS RETR"}]}, cc);

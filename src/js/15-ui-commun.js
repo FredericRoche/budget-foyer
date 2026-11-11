@@ -235,6 +235,7 @@ function construireNavigation(){
     h("div", {class: "rubrique"}, "Comptes"), lien("operations", "Opérations"), lien("import", "Importer"),
     lien("justificatifs", "Justificatifs", vivants("justificatifs").filter(pieceOuverte).length || null),
     lien("boite", "Boîte de saisies", BOITE_CACHE.length || null), lien("commercants", "Fournisseurs"),
+    lien("controles", "Contrôles", nombreAlertesControles() || null, true),
     h("div", {class: "rubrique"}, "Restitution"), lien("budget", "Budget et réalisé"), lien("sites", "Coût par site"), lien("patrimoine", "Bilan et résultat"),
     lien("tresorerie", "Trésorerie", ana?.premierBas ? "!" : null, true),
     lien("epargne", "Épargne"), lien("projets", "Projets"),
