@@ -101,10 +101,17 @@ declarerEcran("controles", {titre: "Contrôles", rendre(c){
 
   // 2. Opérations en double
   c.appendChild(h("h2", null, "Opérations importées en double (" + doublons.length + ")"));
-  c.appendChild(h("p", {class: "note"}, "Même compte, même date, même montant, libellés de même début : souvent une même opération venue de deux exports. Deux achats réellement identiques du même jour (deux abonnements, deux lignes de téléphone) : « Pas une erreur »."));
-  c.appendChild(tableau([{titre: "Date"}, {titre: "Compte"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Nombre", num: true}, {titre: ""}], doublons,
+  c.appendChild(h("p", {class: "note"}, "Même compte, même date, même montant, libellés de même début : souvent une même opération venue de deux exports. Deux achats réellement identiques du même jour (deux abonnements, deux lignes de téléphone) : « Pas une erreur ». Les périodes déjà clôturées sur relevé PDF ne sont pas examinées : le relevé y a vérifié chaque ligne."));
+  // Chaque exemplaire est montré avec son classement et le fichier d'où il vient ; celui qui est en trop se supprime ici
+  const origine = o => { const i = o.import ? obtenir("imports", o.import) : null; return i ? (i.fichier || "") + (i.date ? " (importé le " + dateFr(String(i.date).slice(0, 10)) + ")" : "") : "saisie"; };
+  const exemplaire = o => h("div", {class: "petit", style: {margin: ".2rem 0"}}, o.libelle, " · ", h("span", {class: "discret"}, (o.categorie || "—") + (o.sousCategorie ? " › " + o.sousCategorie : "") + " · " + origine(o)),
+    (o.justificatifs || []).length ? h("span", {class: "pos"}, " · pièce jointe") : h("button", {class: "mini danger", style: {marginLeft: ".4rem"}, onclick: async e => {
+      e.stopPropagation();
+      if (await confirmer("Supprimer cet exemplaire (" + o.libelle + ", " + euros(o.montant) + ") ? L'autre est gardé.", "Supprimer", true)){ supprimer("operations", o.id); rafraichirEcran(); }
+    }}, "Supprimer celui-ci"));
+  c.appendChild(tableau([{titre: "Date"}, {titre: "Compte"}, {titre: "Exemplaires"}, {titre: "Montant", num: true}, {titre: "Nombre", num: true}, {titre: ""}], doublons,
     {classe: "serre", vide: "Aucun doublon.", ligne: d => { const o = d.ops[0]; return h("tr", null, h("td", null, dateFr(o.date)), h("td", null, obtenir("comptes", o.compte)?.nom || ""),
-      h("td", null, o.libelle), h("td", {class: "num"}, euros(o.montant)), h("td", {class: "num"}, d.ops.length),
+      h("td", null, d.ops.map(exemplaire)), h("td", {class: "num"}, euros(o.montant)), h("td", {class: "num"}, d.ops.length),
       h("td", null, h("button", {class: "mini discret", onclick: () => voirOps(o.libelle.slice(0, 24), o.compte)}, "Voir"), ignorer(d.cle))); }}));
 
   // 3. Classements contradictoires

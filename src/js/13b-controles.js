@@ -14,10 +14,15 @@ function ignorerControle(k){ modifierParametres({controlesIgnores: [...new Set([
 /* Opérations importées en double : même compte, même date, même montant, libellés de même début
    (deux exports qui tronquent différemment le même libellé). Les vrais achats identiques du même jour
    (deux abonnements, deux lignes de téléphone) s'écartent une fois pour toutes. */
+/* Une période clôturée sur relevé PDF a vu chaque ligne appariée à une écriture du relevé : des opérations
+   identiques y sont de vrais achats distincts (plusieurs abonnements le même jour), pas des doublons. */
+function periodeCloturee(compteId, date){
+  return Object.entries(LIVRE.parametres.clotures || {}).some(([k, c]) => k.split("|")[0] === compteId && c && c.debut <= date && date <= c.fin);
+}
 function doublonsOperations(){
   const groupes = new Map();
   for (const o of vivants("operations")){
-    if (!o.empreinte || (o.ventilation || []).length) continue;
+    if (!o.empreinte || (o.ventilation || []).length || periodeCloturee(o.compte, o.date)) continue;
     const k = o.compte + "|" + o.date + "|" + versCentimes(o.montant);
     (groupes.get(k) || groupes.set(k, []).get(k)).push(o);
   }

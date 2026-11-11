@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ZIo+V+wCWywJCxe/r7cuJ99BGK6JkUYmwYPiXBvsTDk=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-tdVJsEPl+ofDIpn5VZBmW+HJxlzSved2/urNUZ5dfXM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-11.1735";
+const VERSION_APP = "2026-11-11.1739";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4817,10 +4817,15 @@ function ignorerControle(k){ modifierParametres({controlesIgnores: [...new Set([
 /* Opérations importées en double : même compte, même date, même montant, libellés de même début
    (deux exports qui tronquent différemment le même libellé). Les vrais achats identiques du même jour
    (deux abonnements, deux lignes de téléphone) s'écartent une fois pour toutes. */
+/* Une période clôturée sur relevé PDF a vu chaque ligne appariée à une écriture du relevé : des opérations
+   identiques y sont de vrais achats distincts (plusieurs abonnements le même jour), pas des doublons. */
+function periodeCloturee(compteId, date){
+  return Object.entries(LIVRE.parametres.clotures || {}).some(([k, c]) => k.split("|")[0] === compteId && c && c.debut <= date && date <= c.fin);
+}
 function doublonsOperations(){
   const groupes = new Map();
   for (const o of vivants("operations")){
-    if (!o.empreinte || (o.ventilation || []).length) continue;
+    if (!o.empreinte || (o.ventilation || []).length || periodeCloturee(o.compte, o.date)) continue;
     const k = o.compte + "|" + o.date + "|" + versCentimes(o.montant);
     (groupes.get(k) || groupes.set(k, []).get(k)).push(o);
   }
@@ -8509,10 +8514,17 @@ declarerEcran("controles", {titre: "Contrôles", rendre(c){
 
   // 2. Opérations en double
   c.appendChild(h("h2", null, "Opérations importées en double (" + doublons.length + ")"));
-  c.appendChild(h("p", {class: "note"}, "Même compte, même date, même montant, libellés de même début : souvent une même opération venue de deux exports. Deux achats réellement identiques du même jour (deux abonnements, deux lignes de téléphone) : « Pas une erreur »."));
-  c.appendChild(tableau([{titre: "Date"}, {titre: "Compte"}, {titre: "Libellé"}, {titre: "Montant", num: true}, {titre: "Nombre", num: true}, {titre: ""}], doublons,
+  c.appendChild(h("p", {class: "note"}, "Même compte, même date, même montant, libellés de même début : souvent une même opération venue de deux exports. Deux achats réellement identiques du même jour (deux abonnements, deux lignes de téléphone) : « Pas une erreur ». Les périodes déjà clôturées sur relevé PDF ne sont pas examinées : le relevé y a vérifié chaque ligne."));
+  // Chaque exemplaire est montré avec son classement et le fichier d'où il vient ; celui qui est en trop se supprime ici
+  const origine = o => { const i = o.import ? obtenir("imports", o.import) : null; return i ? (i.fichier || "") + (i.date ? " (importé le " + dateFr(String(i.date).slice(0, 10)) + ")" : "") : "saisie"; };
+  const exemplaire = o => h("div", {class: "petit", style: {margin: ".2rem 0"}}, o.libelle, " · ", h("span", {class: "discret"}, (o.categorie || "—") + (o.sousCategorie ? " › " + o.sousCategorie : "") + " · " + origine(o)),
+    (o.justificatifs || []).length ? h("span", {class: "pos"}, " · pièce jointe") : h("button", {class: "mini danger", style: {marginLeft: ".4rem"}, onclick: async e => {
+      e.stopPropagation();
+      if (await confirmer("Supprimer cet exemplaire (" + o.libelle + ", " + euros(o.montant) + ") ? L'autre est gardé.", "Supprimer", true)){ supprimer("operations", o.id); rafraichirEcran(); }
+    }}, "Supprimer celui-ci"));
+  c.appendChild(tableau([{titre: "Date"}, {titre: "Compte"}, {titre: "Exemplaires"}, {titre: "Montant", num: true}, {titre: "Nombre", num: true}, {titre: ""}], doublons,
     {classe: "serre", vide: "Aucun doublon.", ligne: d => { const o = d.ops[0]; return h("tr", null, h("td", null, dateFr(o.date)), h("td", null, obtenir("comptes", o.compte)?.nom || ""),
-      h("td", null, o.libelle), h("td", {class: "num"}, euros(o.montant)), h("td", {class: "num"}, d.ops.length),
+      h("td", null, d.ops.map(exemplaire)), h("td", {class: "num"}, euros(o.montant)), h("td", {class: "num"}, d.ops.length),
       h("td", null, h("button", {class: "mini discret", onclick: () => voirOps(o.libelle.slice(0, 24), o.compte)}, "Voir"), ignorer(d.cle))); }}));
 
   // 3. Classements contradictoires
