@@ -857,6 +857,24 @@ async function autotest(){
     vrai("projet et cession : hors de la marche courante", analyseTresorerie(s2).premierBas === undefined && !s2.evenements.some(e => /Grosse|Cession/.test(e.libelle)));
     const k2 = simulerEpargne({depart: "2027-03-31", jours: 120, rendement: false});
     v("épargne : cession puis paiement du projet", [k2.jours.find(j => j.date === "2027-04-10").solde, k2.jours[k2.jours.length - 1].solde], [50000, 20000]);
+    {
+      // Période de projection : simulation depuis le solde connu, fenêtre montrée seulement
+      const sp = simulerTresorerie({depart: "2027-03-31", fin: "2027-12-31"}), fp = fenetreSimulation(sp, "2027-06-01");
+      v("période : fenêtre du 01/06 au 31/12, ouverture = solde projeté du 31/05", [fp.jours[0].date, fp.jours[fp.jours.length - 1].date, Math.round(fp.soldeOuverture * 100), fp.debutFenetre],
+        [ "2027-06-01", "2027-12-31", Math.round(sp.jours.find(j => j.date === "2027-05-31").solde * 100), "2027-06-01"]);
+      v("période : année à venir, année en cours entamée, défaut", [normaliserPeriode({choix: "2027", debut: "2027-01-01", fin: "2027-12-31"}, "2026-11-11").libelle,
+        normaliserPeriode({choix: "2027", debut: "2027-01-01", fin: "2027-12-31"}, "2027-03-31").debut, normaliserPeriode({choix: "2026", debut: "2026-01-01", fin: "2026-12-31"}, "2027-03-31").choix],
+        ["Année 2027", "2027-03-31", "12"]);
+      // Excédent à placer : flux de capital « à laisser sur le compte » déduits, marche courante inchangée
+      const sh = LIVRE.parametres.seuilHaut; LIVRE.parametres.seuilHaut = -1000000;
+      const sansR = simulerTresorerie({depart: "2027-03-31", jours: 120}), a0 = analyseTresorerie(sansR);
+      const er = enregistrer("echeances", {libelle: "Avance d'impôt essai", montant: -1000, recurrence: "mensuelle", debut: "2027-04-15", fin: "2027-12-31", compte: cj.id, categorie: "Impôts", capital: true, resteCourant: true});
+      const avecR = simulerTresorerie({depart: "2027-03-31", jours: 120}), a1 = analyseTresorerie(avecR);
+      enregistrer("echeances", Object.assign(er, {resteCourant: false})); const a2 = analyseTresorerie(simulerTresorerie({depart: "2027-03-31", jours: 120}));
+      v("excédent : capital laissé sur le compte déduit (4 × 1 000 €), courant inchangé", [a0.excedent.reserve, a1.excedent.reserve, a2.excedent.reserve, [0, 5000].includes(a0.excedent.montant - a1.excedent.montant), avecR.jours[avecR.jours.length - 1].solde === sansR.jours[sansR.jours.length - 1].solde],
+        [0, 4000, 0, true, true]);
+      supprimer("echeances", er.id); LIVRE.parametres.seuilHaut = sh;
+    }
     enregistrer("operations", {compte: cj.id, date: "2027-03-02", montant: -950, libelle: "VIR ARCHITECTE EXEMPLE", categorie: "Travaux maison", sousCategorie: "Honoraires", nature: "Exceptionnelle"});
     enregistrer("echeances", Object.assign(grosse, {rattache: [{categorie: "Travaux maison"}]}));
     v("projet : dépenses déjà faites rattachées par catégorie", etatProjet("Travaux").paye, 950);

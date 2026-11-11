@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-rKwhCwDff892BS92vZRQlxao2tfJBBMvKA8xVPE6ftE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-mwpfTsPeseW7n/Y79WfKBzQqEXxlfHS/3XocQvkU4l0=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-11.1803";
+const VERSION_APP = "2026-11-11.1907";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -5012,13 +5012,43 @@ function fluxPasses(compte, nbMois = 12, jusquA = aujourdhui()){
   const premier = r.findIndex(m => m.nb);
   return (premier < 0 ? [] : r.slice(premier)).map(m => { delete m.ops; return m; });
 }
+/* Période de projection choisie à l'écran, mémorisée sur l'appareil : les 12 prochains mois (défaut), une année
+   civile ou deux dates. La simulation part toujours du solde connu d'aujourd'hui et court jusqu'à la fin de la
+   période ; seule la fenêtre choisie est montrée (son solde d'ouverture est donc projeté). */
+const CLE_PERIODE = "bf_periode_projection", HORIZON_MAX_ANS = 5;
+function periodeProjection(){
+  const auj = aujourdhui(); let p = null;
+  try { p = JSON.parse(localStorage.getItem(CLE_PERIODE) || "null"); } catch (e) {}
+  return normaliserPeriode(p, auj);
+}
+function normaliserPeriode(p, auj){
+  const defaut = {choix: "12", debut: auj, fin: ajouterJours(auj, 365), libelle: "12 prochains mois", court: "12 mois", fenetre: false};
+  if (!p || !p.debut || !p.fin || p.fin <= auj || p.debut > p.fin) return defaut;
+  const debut = p.debut < auj ? auj : p.debut, fin = p.fin < ajouterMois(auj, 12 * HORIZON_MAX_ANS) ? p.fin : ajouterMois(auj, 12 * HORIZON_MAX_ANS);
+  const annee = /^\d{4}$/.test(p.choix || "") ? p.choix : null;
+  return {choix: p.choix || "libre", debut, fin, fenetre: debut > auj,
+    libelle: annee ? "Année " + annee + (debut > annee + "-01-01" ? " (à partir du " + dateFr(debut) + ")" : "") : "Du " + dateFr(debut) + " au " + dateFr(fin),
+    court: annee || "période"};
+}
+function choisirPeriodeProjection(p){ try { if (p) localStorage.setItem(CLE_PERIODE, JSON.stringify(p)); else localStorage.removeItem(CLE_PERIODE); } catch (e) {} }
+/* Ne garde d'une simulation que les jours et les mouvements de la fenêtre ; soldeOuverture = solde projeté la veille. */
+function fenetreSimulation(sim, debut){
+  if (!sim || !debut || debut <= sim.depart) return sim;
+  const jours = sim.jours.filter(j => j.date >= debut);
+  return Object.assign({}, sim, {jours, evenements: sim.evenements.filter(e => e.date >= debut), debutFenetre: debut,
+    soldeOuverture: jours.length ? jours[0].solde - jours[0].flux : null});
+}
 function simulerTresorerie(options){
   const o = Object.assign({jours: 365, depart: aujourdhui(), supplements: [], perimetre: "courant"}, options);
+  if (o.fin) o.jours = Math.max(1, ecartJours(o.depart, o.fin));
   const compte = obtenir("comptes", LIVRE.parametres.compteTresorerie) || comptesDeType("courant")[0];
   if (!compte) return null;
   const fin = ajouterJours(o.depart, o.jours);
   const soldeDepart = soldeCompte(compte, o.depart);
   const flux = new Map(); const evenements = [];
+  // Flux de capital prélevés au fil des mois sur ce compte (case « à laisser sur le compte courant », ex. avance
+  // d'impôt par le PAS) : hors marche courante, mais à garder sur le compte, donc déduits de l'excédent à placer.
+  const reserves = [];
   const ajouter = (date, montant, libelle, genre, gros, recurrent) => {
     if (date <= o.depart || date > fin) return;
     flux.set(date, (flux.get(date) || 0) + montant);
@@ -5028,7 +5058,10 @@ function simulerTresorerie(options){
   const lignesLiees = new Set();
   for (const e of vivants("echeances").filter(x => x.active !== false && (!x.compte || x.compte === compte.id))){
     if (e.ligneBudget) lignesLiees.add(e.ligneBudget);
-    if (o.perimetre === "courant" && estCapital(e)) continue;
+    if (o.perimetre === "courant" && estCapital(e)){
+      if (e.resteCourant && !e.projet) for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)){ const m = montantEcheance(e); if (m < 0) reserves.push({date: d, montant: -m, libelle: e.libelle}); }
+      continue;
+    }
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, montantEcheance(e), e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
   }
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
@@ -5083,7 +5116,7 @@ function simulerTresorerie(options){
     const f = flux.get(d) || 0; solde += f;
     jours.push({date: d, flux: f, solde});
   }
-  return {compte, depart: o.depart, soldeDepart, soldeConnu: soldeDepart !== null, jours, perimetre: o.perimetre, evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
+  return {compte, depart: o.depart, soldeDepart, soldeConnu: soldeDepart !== null, jours, perimetre: o.perimetre, reserves: reserves.sort((a, b) => a.date < b.date ? -1 : 1), evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
 }
 /* Approvisionnements du compte courant par l'épargne : à chaque passage sous le seuil bas de la
    marche courante, le virement qui l'y ramène (arrondi à la centaine supérieure). */
@@ -5112,6 +5145,7 @@ function produitsEpargne(date){
 }
 function simulerEpargne(options){
   const o = Object.assign({jours: 365, depart: aujourdhui(), rendement: true}, options);
+  if (o.fin) o.jours = Math.max(1, ecartJours(o.depart, o.fin));
   const fin = ajouterJours(o.depart, o.jours);
   const comptes = vivants("comptes").filter(estMobilisable).map(c => ({compte: c, solde: soldeCompte(c, o.depart) || 0, taux: tauxRendement(c)}));
   const soldeDepart = somme(comptes, x => x.solde);
@@ -5165,10 +5199,22 @@ function analyseTresorerie(sim){
   const hauts = sim.jours.filter(j => j.solde > p.seuilHaut);
   let virement = 0, avant = null;
   if (premierBas){ virement = Math.ceil((p.seuilBas - min.solde + 5000) / 5000) * 5000; avant = ajouterJours(premierBas.date, -1); }
-  // Excédent durable : au-dessus du seuil haut pendant 30 jours consécutifs ou plus
+  // Excédent durable : au-dessus du seuil haut pendant 30 jours consécutifs ou plus. Montant à placer : ce qui peut
+  // quitter le compte sans qu'il repasse sous le seuil haut jusqu'à la fin de la période, compte tenu des flux de
+  // capital à y laisser (cumulés au jour le jour). Arrondi aux 5 000 € inférieurs.
   let serie = 0, excedent = null;
   for (const j of sim.jours){ if (j.solde > p.seuilHaut){ serie++; if (serie >= 30 && !excedent) excedent = {depuis: ajouterJours(j.date, -29), montant: 0}; } else serie = 0; }
-  if (excedent) excedent.montant = Math.floor((Math.min(...sim.jours.filter(j => j.date >= excedent.depuis).slice(0, 90).map(j => j.solde)) - p.seuilHaut) / 5000) * 5000;
+  if (excedent){
+    const reserves = (sim.reserves || []).filter(r => r.date >= excedent.depuis);
+    let k = 0, cumul = 0, plancher = Infinity;
+    for (const j of sim.jours.filter(x => x.date >= excedent.depuis)){
+      while (k < reserves.length && reserves[k].date <= j.date) cumul += reserves[k++].montant;
+      plancher = Math.min(plancher, j.solde - cumul);
+    }
+    excedent.reserve = Math.round(cumul);
+    excedent.montant = Math.max(0, Math.floor((plancher - p.seuilHaut) / 5000) * 5000);
+    excedent.jusquA = sim.jours[sim.jours.length - 1].date;
+  }
   const parMois = new Map();
   for (const j of sim.jours){
     const k = j.date.slice(0, 7);
@@ -7791,18 +7837,21 @@ function exporterPatrimoine(b1, b0, date){
 declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
   const p = LIVRE.parametres;
   const supplements = etat.supplements || [];
-  const sim = simulerTresorerie({supplements});
+  const per = periodeProjection();
+  const complet = simulerTresorerie({supplements, fin: per.fin}), sim = fenetreSimulation(complet, per.debut);
   const ana = analyseTresorerie(sim);
   const bas = h("input", {type: "text", value: nombre(p.seuilBas, 0), style: {width: "6.5rem"}, onchange: e => { const v = lireMontant(e.target.value); if (!isNaN(v)){ modifierParametres({seuilBas: v}); rafraichirEcran(); } }});
   const haut = h("input", {type: "text", value: nombre(p.seuilHaut, 0), style: {width: "7.5rem"}, onchange: e => { const v = lireMontant(e.target.value); if (!isNaN(v)){ modifierParametres({seuilHaut: v}); rafraichirEcran(); } }});
-  c.appendChild(entete("Trésorerie prévisionnelle", sim ? "Marche courante · " + sim.compte.nom + " · " + dateFr(sim.depart) + " → " + dateFr(ajouterJours(sim.depart, 365)) + " · simulation au jour le jour" : "Aucun compte de trésorerie",
-    [h("label", {style: {margin: 0}}, "Seuil bas"), bas, h("label", {style: {margin: 0}}, "Seuil haut"), haut, h("button", {class: "discret", onclick: () => editerEcheance(null)}, "Nouvelle échéance")]));
+  c.appendChild(entete("Trésorerie prévisionnelle", sim ? "Marche courante · " + sim.compte.nom + " · " + per.libelle + " : " + dateFr(per.debut) + " → " + dateFr(per.fin) + " · simulation au jour le jour" : "Aucun compte de trésorerie",
+    [selecteurPeriode(), h("label", {style: {margin: 0}}, "Seuil bas"), bas, h("label", {style: {margin: 0}}, "Seuil haut"), haut, h("button", {class: "discret", onclick: () => editerEcheance(null)}, "Nouvelle échéance")]));
   if (!sim){ c.appendChild(h("p", {class: "vide"}, "Choisissez le compte de trésorerie dans Réglages › Comptes.")); return; }
-  const anFin = +ajouterJours(sim.depart, 365).slice(0, 4);
+  const anFin = +per.fin.slice(0, 4);
   for (let an = +sim.depart.slice(0, 4); an <= anFin; an++) if (!budgetActif(an) && dernierBudgetAvant(an))
     c.appendChild(h("div", {class: "bandeau info"}, "Pas de budget " + an + " : la projection prolonge « " + dernierBudgetAvant(an).nom + " ». Créez le budget " + an + " (écran Budget, bouton « Copier pour " + an + " ») pour l'affiner."));
   if (!sim.soldeConnu) c.appendChild(h("div", {class: "bandeau info"}, "Aucun solde relevé pour ce compte : la projection part de 0 €. Importez l'export CSV du compte."));
-  c.appendChild(h("section", {class: "carte"}, h("div", {class: "petit discret"}, "Solde de départ : " + euros(sim.soldeDepart ?? 0) + " (" + sourceSolde(sim.compte, sim.depart) + ")"),
+  c.appendChild(h("section", {class: "carte"}, h("div", {class: "petit discret"}, sim.debutFenetre
+      ? "Solde projeté au " + dateFr(ajouterJours(sim.debutFenetre, -1)) + " au soir : " + euros(sim.soldeOuverture ?? 0, 0) + " (projection depuis le solde connu au " + dateFr(sim.depart) + " : " + euros(sim.soldeDepart ?? 0) + ", " + sourceSolde(sim.compte, sim.depart) + ")"
+      : "Solde de départ : " + euros(sim.soldeDepart ?? 0) + " (" + sourceSolde(sim.compte, sim.depart) + ")"),
     grapheTresorerie(sim, ana, 300, false), h("div", {class: "legende"},
       h("span", null, h("i", {style: {background: COULEURS.vert}}), "solde projeté (jour par jour)"), h("span", null, h("i", {style: {background: COULEURS.garnet, height: "2px"}}), "seuil bas (découvert)"),
       h("span", null, h("i", {style: {background: "repeating-linear-gradient(90deg,#6F8678 0 4px,transparent 4px 7px)", height: "2px"}}), "seuil haut (excédent à placer)"),
@@ -7835,9 +7884,13 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
       h("div", {class: "outils", style: {marginTop: ".4rem"}},
         h("button", {class: "mini", onclick: () => { etat.supplements = [...supplements, {date: ana.avant, montant: ana.virement, libelle: "Virement simulé"}]; rafraichirEcran(); }}, "Simuler ce virement"),
         h("button", {class: "mini primaire", onclick: () => { enregistrer("echeances", {libelle: "Virement depuis l'épargne", montant: ana.virement, recurrence: "unique", debut: ana.avant, compte: sim.compte.id, categorie: "Transfert", sousCategorie: "Virement entre comptes"}); etat.supplements = []; rafraichirEcran(); }}, "Ajouter aux échéances"))));
-  } else droite.appendChild(h("div", {class: "bandeau calme"}, "Pas de passage sous le seuil bas sur 12 mois. Plus bas : " + euros(ana.min.solde, 0) + " le " + dateFr(ana.min.date) + "."));
+  } else droite.appendChild(h("div", {class: "bandeau calme"}, "Pas de passage sous le seuil bas sur la période (" + per.court + "). Plus bas : " + euros(ana.min.solde, 0) + " le " + dateFr(ana.min.date) + "."));
+  if (sim.debutFenetre && complet.jours.some(j => j.date < sim.debutFenetre && j.solde < p.seuilBas)) droite.appendChild(h("div", {class: "bandeau alerte"}, "Attention : le compte passe sous le seuil bas avant le début de la période choisie. Voir les 12 prochains mois."));
   if (supplements.length) droite.appendChild(h("p", {class: "note"}, supplements.length + " virement(s) simulé(s), non enregistré(s). ", h("button", {class: "lien", onclick: () => { etat.supplements = []; rafraichirEcran(); }}, "Retirer la simulation")));
-  if (ana.excedent && ana.excedent.montant > 0) droite.appendChild(h("div", {class: "bandeau info"}, "Excédent durable au-dessus du seuil haut à partir du " + dateFr(ana.excedent.depuis) + " : environ " + euros(ana.excedent.montant, 0) + " à placer."));
+  if (ana.excedent && ana.excedent.montant > 0) droite.appendChild(h("div", {class: "bandeau info"}, "Excédent durable au-dessus du seuil haut à partir du " + dateFr(ana.excedent.depuis) + " : environ " + euros(ana.excedent.montant, 0)
+    + " à placer, sans repasser sous le seuil haut d'ici le " + dateFr(ana.excedent.jusquA) + (ana.excedent.reserve ? ", une fois laissés sur le compte " + euros(ana.excedent.reserve, 0) + " de flux de capital prélevés au fil des mois (" + [...new Set(sim.reserves.filter(r => r.date >= ana.excedent.depuis).map(r => r.libelle))].join(" ; ") + ")" : "") + "."));
+  else if (ana.excedent) droite.appendChild(h("p", {class: "note"}, "Seuil haut dépassé durablement à partir du " + dateFr(ana.excedent.depuis) + ", mais le compte y redescend d'ici le " + dateFr(ana.excedent.jusquA)
+    + (ana.excedent.reserve ? " (compte tenu de " + euros(ana.excedent.reserve, 0) + " de flux de capital à y laisser)" : "") + " : rien à placer."));
   else if (ana.auDessus) droite.appendChild(h("p", {class: "note"}, "Seuil haut dépassé " + ana.auDessus + " jour(s), sans excédent durable (moins de 30 jours de suite) : rien à placer."));
 
   /* Débits différés à venir */
@@ -7865,13 +7918,36 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
   const ech = vivants("echeances").sort((a, b) => (a.debut || "") < (b.debut || "") ? -1 : 1);
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Échéances (" + ech.length + ")"));
   c.appendChild(tableau([{titre: "Libellé", cle: e => e.libelle}, {titre: "Montant", num: true, cle: e => e.montant}, {titre: "Récurrence"}, {titre: "À partir du", cle: e => e.debut || ""}, {titre: "Jusqu'au"}, {titre: "Statut"}, {titre: ""}], ech, {classe: "serre", vide: "Aucune échéance.", ligne: e =>
-    h("tr", {class: e.aConfirmer ? "choisie" : ""}, h("td", null, e.libelle, estCapital(e) ? h("span", {class: "libbanque"}, e.projet ? "projet " + e.projet : "capital, hors marche courante") : null, e.ligneBudget ? h("span", {class: "libbanque"}, "remplace sa ligne de budget en trésorerie") : null, e.note ? h("div", {class: "petit discret"}, e.note) : null), montantCellule(e.montant),
+    h("tr", {class: e.aConfirmer ? "choisie" : ""}, h("td", null, e.libelle, estCapital(e) ? h("span", {class: "libbanque"}, e.projet ? "projet " + e.projet : e.resteCourant ? "capital, hors marche courante, laissé sur le compte" : "capital, hors marche courante") : null, e.ligneBudget ? h("span", {class: "libbanque"}, "remplace sa ligne de budget en trésorerie") : null, e.note ? h("div", {class: "petit discret"}, e.note) : null), montantCellule(e.montant),
       h("td", null, e.recurrence || "unique"), h("td", null, dateFr(e.debut)), h("td", null, e.fin ? dateFr(e.fin) : "—"),
       h("td", null, e.active === false ? "inactive" : e.aConfirmer ? h("span", {class: "neg"}, "à confirmer") : "confirmée"),
       h("td", null, e.aConfirmer ? h("button", {class: "mini primaire", onclick: () => { enregistrer("echeances", Object.assign(e, {aConfirmer: false})); rafraichirEcran(); }}, "Confirmer") : null, " ",
         h("button", {class: "mini discret", onclick: () => editerEcheance(e)}, "Modifier")))}));
   c.appendChild(h("p", {class: "note"}, "Les échéances « à confirmer » proviennent de la reprise du classeur (hypothèses) : elles comptent déjà dans la projection. Vérifiez montants et dates (travaux : à éclater en appels de fonds ; cessions de titres : quantités et prix)."));
 }});
+
+/* Choix de la période de projection (Trésorerie, Épargne) : 12 prochains mois, une année civile, ou deux dates. */
+function selecteurPeriode(){
+  const per = periodeProjection(), an = +aujourdhui().slice(0, 4);
+  const options = [["12", "12 prochains mois"], ...[an, an + 1, an + 2].map(y => [String(y), "Année " + y]), ["libre", per.choix === "libre" ? per.libelle : "Autre période…"]];
+  const s = selection(options, per.choix, {title: "Période de la projection", onchange: async ev => {
+    const v = ev.target.value;
+    if (v === "12") choisirPeriodeProjection(null);
+    else if (/^\d{4}$/.test(v)) choisirPeriodeProjection({choix: v, debut: v + "-01-01", fin: v + "-12-31"});
+    else {
+      const d1 = champDate({value: per.debut}), d2 = champDate({value: per.fin});
+      const ok = await dialogue({titre: "Période de la projection", corps: h("div", null, h("div", {class: "grille-champs"}, champ("Du", d1), champ("Au", d2)),
+        h("p", {class: "note"}, "La projection part toujours du solde connu d'aujourd'hui ; seule la période choisie est montrée, au plus " + HORIZON_MAX_ANS + " ans devant.")),
+        actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Appliquer", classe: "primaire", action: () => {
+          if (!dateSaisieOk(d1, "Du") || !dateSaisieOk(d2, "Au")) return false;
+          if (d2.value <= aujourdhui() || d1.value > d2.value){ message("La période doit finir après aujourd'hui, et commencer avant de finir.", true); return false; }
+          choisirPeriodeProjection({choix: "libre", debut: d1.value, fin: d2.value}); return true; }}]});
+      if (!ok){ ev.target.value = per.choix; return; }
+    }
+    rafraichirEcran(); if (typeof afficherBandeaux === "function") afficherBandeaux();
+  }});
+  return h("label", {style: {margin: 0}}, "Période ", s);
+}
 
 async function editerEcheance(e){
   const x = e || {libelle: "", montant: 0, recurrence: "unique", debut: aujourdhui(), compte: LIVRE.parametres.compteTresorerie};
@@ -7889,11 +7965,13 @@ async function editerEcheance(e){
   const listeProj = h("datalist", {id: "ech-projets"}, ...projets.map(n => h("option", {value: n})));
   const capi = h("input", {type: "checkbox", checked: !!x.capital || x.categorie === "Patrimoine", id: "ech-capital"});
   const env = h("input", {type: "checkbox", checked: !!x.enveloppe, id: "ech-enveloppe"});
+  const resteCourant = h("input", {type: "checkbox", checked: !!x.resteCourant, id: "ech-reste-courant"});
   const ok = await dialogue({titre: e ? "Modifier l'échéance" : "Nouvelle échéance", large: true, corps: h("div", null, h("div", {class: "grille-champs"},
     champ("Libellé", lib), champ("Montant (négatif = sortie)", mt), champ("Récurrence", rec), champ("Date (ou première date)", d1), champ("Jusqu'au (facultatif)", d2),
     champ("Catégorie", cat), champ("Nature", nat), champ("Remplace en trésorerie la ligne de budget", lb, "Évite de compter deux fois le loyer, par exemple."),
     champ("Projet (hors marche courante)", h("span", null, proj, listeProj), "Travaux, voiture… : suivis à part, avec leur financement.")),
     h("div", {class: "case"}, capi, h("label", {for: "ech-capital"}, "Flux de capital (cession de titres, placement…) : hors marche courante, suivi dans Projets ; un projet l'est toujours")),
+    h("div", {class: "case"}, resteCourant, h("label", {for: "ech-reste-courant"}, "Flux de capital prélevé au fil des mois sur le compte courant (ex. avance d'impôt par le PAS) : à y laisser, déduit de l'excédent à placer")),
     h("div", {class: "case"}, env, h("label", {for: "ech-enveloppe"}, "Enveloppe du projet : les paiements du projet s'imputent sur ce montant, le reste à payer diminue d'autant")),
     h("div", {class: "case"}, active, h("label", {for: "ech-active"}, "Active"))),
     actions: [e ? {libelle: "Supprimer", classe: "danger", action: () => { supprimer("echeances", e.id); return true; }} : null, {libelle: "Annuler", classe: "discret", valeur: false},
@@ -7902,7 +7980,7 @@ async function editerEcheance(e){
         const v = valeurCategorie(cat);
         if (!dateSaisieOk(d1, "Date") || !dateSaisieOk(d2, "Jusqu'au", true)) return false;
         enregistrer("echeances", Object.assign(x, {libelle: lib.value.trim(), montant: m, recurrence: rec.value, debut: d1.value, fin: d2.value || null, ligneBudget: lb.value || null,
-          active: active.checked, aConfirmer: false, nature: nat.value, projet: proj.value.trim() || null, capital: capi.checked, enveloppe: env.checked && !!proj.value.trim()}, v.categorie === "À préciser" ? {} : v));
+          active: active.checked, aConfirmer: false, nature: nat.value, projet: proj.value.trim() || null, capital: capi.checked, resteCourant: capi.checked && resteCourant.checked, enveloppe: env.checked && !!proj.value.trim()}, v.categorie === "À préciser" ? {} : v));
         return true;
       }}].filter(Boolean)});
   if (ok) rafraichirEcran();
@@ -8269,10 +8347,17 @@ function detailComptesEpargne(ep){
   if (autres.length) groupes.push({nom: "Autres placements mobilisables", lignes: autres.sort((a, b) => b.solde - a.solde)});
   return groupes.filter(g => g.lignes.length).map(g => Object.assign(g, {total: somme(g.lignes, l => l.solde)}));
 }
-// De l'épargne d'aujourd'hui à celle dans 12 mois : un total par genre de mouvement.
+// Fenêtre de l'épargne : jours et mouvements de la période, rendement de la période seulement.
+function fenetreEpargne(ep, debut){
+  const f = fenetreSimulation(ep, debut);
+  if (f === ep) return ep;
+  return Object.assign(f, {rendement: Math.round(somme(f.evenements.filter(e => e.genre === "rendement"), e => e.montant) * 100) / 100,
+    approvisionnements: (ep.approvisionnements || []).filter(a => a.date >= debut)});
+}
+// De l'épargne du début de la période à celle de la fin : un total par genre de mouvement.
 function decompositionEpargne(ep){
   const s = f => somme(ep.evenements.filter(f), e => e.montant);
-  return {depart: ep.soldeDepart, cessions: s(e => e.genre === "capital" && e.montant > 0), autresCapital: s(e => e.genre === "capital" && e.montant < 0),
+  return {depart: ep.soldeOuverture ?? ep.soldeDepart, date: ep.jours.length ? ep.jours[ep.jours.length - 1].date : ep.depart, cessions: s(e => e.genre === "capital" && e.montant > 0), autresCapital: s(e => e.genre === "capital" && e.montant < 0),
     projets: s(e => e.genre === "projet"), courant: s(e => e.genre === "courant"), rendement: s(e => e.genre === "rendement"),
     fin: ep.jours.length ? ep.jours[ep.jours.length - 1].solde : ep.soldeDepart};
 }
@@ -8316,25 +8401,25 @@ function vueDetailEpargne(ep, quoi){
       + "« À actualiser » au-delà de quatre mois. Rendement : taux annuel estimé, brut (* taux par défaut du type de compte, à préciser dans Réglages). Les comptes-titres et les comptes marqués non mobilisables (Réglages) n'y figurent pas."));
   } else if (quoi === "cessions"){
     const ev = ep.evenements.filter(e => e.genre === "capital");
-    s.appendChild(h("h2", null, "Cessions de titres et autres mouvements de capital (12 mois)"));
-    s.appendChild(tableau([{titre: "Date"}, {titre: "Mouvement"}, {titre: "Compte crédité"}, {titre: "Montant", num: true}, {titre: ""}], ev, {classe: "serre", vide: "Aucune cession prévue dans les 12 mois.", ligne: e => h("tr", {class: e.echeance?.aConfirmer ? "choisie" : ""},
+    s.appendChild(h("h2", null, "Cessions de titres et autres mouvements de capital (" + periodeProjection().court + ")"));
+    s.appendChild(tableau([{titre: "Date"}, {titre: "Mouvement"}, {titre: "Compte crédité"}, {titre: "Montant", num: true}, {titre: ""}], ev, {classe: "serre", vide: "Aucune cession prévue sur la période.", ligne: e => h("tr", {class: e.echeance?.aConfirmer ? "choisie" : ""},
       h("td", null, dateFr(e.date)), h("td", null, e.libelle, e.echeance?.note ? h("div", {class: "petit discret"}, e.echeance.note) : null), h("td", null, e.echeance?.compte ? libelleCompte(e.echeance.compte) : ""),
       montantCellule(e.montant, null, 0), h("td", null, e.echeance ? h("button", {class: "mini discret", onclick: () => editerEcheance(e.echeance)}, "Modifier") : null))}));
     s.appendChild(h("p", {class: "note"}, "Total des encaissements : " + euros(somme(ev.filter(e => e.montant > 0), e => e.montant), 0) + ". Montants des échéances : prix et volumes restent à confirmer jusqu'à la cession."));
   } else if (quoi === "financements"){
     const parDest = financementsParDestination(ep);
-    s.appendChild(h("h2", null, "Ce que l'épargne finance (12 mois)"));
+    s.appendChild(h("h2", null, "Ce que l'épargne finance (" + periodeProjection().court + ")"));
     s.appendChild(tableau([{titre: "Destination"}, {titre: "Mouvements", num: true}, {titre: "Du"}, {titre: "Au"}, {titre: "Versé", num: true}, {titre: "Reçu en retour", num: true}, {titre: "Net", num: true}], parDest, {classe: "serre", vide: "Aucun financement prévu.", ligne: g => h("tr", null,
       h("td", null, g.destination), h("td", {class: "num"}, String(g.nombre)), h("td", null, dateFr(g.premiere)), h("td", null, dateFr(g.derniere)),
       h("td", {class: "num"}, euros(g.sorties, 0)), h("td", {class: "num"}, g.entrees ? euros(g.entrees, 0) : ""), h("td", {class: "num"}, euros(g.sorties - g.entrees, 0)))}));
     const ev = ep.evenements.filter(e => e.genre === "projet" || e.genre === "courant");
     if (ev.length) s.appendChild(tableau([{titre: "Date"}, {titre: "Mouvement"}, {titre: "Montant", num: true}], ev, {classe: "serre", ligne: e => h("tr", null, h("td", null, dateFr(e.date)), h("td", null, e.libelle), montantCellule(e.montant, null, 0))}));
-    if (!ev.some(e => e.genre === "courant")) s.appendChild(h("p", {class: "note"}, "Aucun approvisionnement du compte courant n'est nécessaire sur 12 mois : ses encaissements prévus (cessions versées au compte joint, paie de sortie…) couvrent le déficit de la marche courante. Voir Trésorerie."));
+    if (!ev.some(e => e.genre === "courant")) s.appendChild(h("p", {class: "note"}, "Aucun approvisionnement du compte courant n'est nécessaire sur la période : ses encaissements prévus (cessions versées au compte joint, paie de sortie…) couvrent le déficit de la marche courante. Voir Trésorerie."));
   } else if (quoi === "fin"){
     const d = decompositionEpargne(ep);
-    s.appendChild(h("h2", null, "De l'épargne d'aujourd'hui à celle dans 12 mois"));
-    const lignes = [["Épargne disponible aujourd'hui", d.depart, true], ["Cessions de titres", d.cessions], ["Autres mouvements de capital", d.autresCapital],
-      ["Projets (nets des reprises)", d.projets], ["Approvisionnements du compte courant", d.courant], ["Rendement estimé des placements", d.rendement], ["Épargne dans 12 mois", d.fin, true]].filter(x => x[2] || Math.abs(x[1]) > 0.5);
+    s.appendChild(h("h2", null, ep.debutFenetre ? "De l'épargne du " + dateFr(ep.debutFenetre) + " à celle du " + dateFr(d.date) : "De l'épargne d'aujourd'hui à celle du " + dateFr(d.date)));
+    const lignes = [[ep.debutFenetre ? "Épargne projetée au début de la période" : "Épargne disponible aujourd'hui", d.depart, true], ["Cessions de titres", d.cessions], ["Autres mouvements de capital", d.autresCapital],
+      ["Projets (nets des reprises)", d.projets], ["Approvisionnements du compte courant", d.courant], ["Rendement estimé des placements", d.rendement], ["Épargne au " + dateFr(d.date), d.fin, true]].filter(x => x[2] || Math.abs(x[1]) > 0.5);
     s.appendChild(h("div", {class: "tableau"}, h("table", {class: "serre"}, h("tbody", null, lignes.map(([lib, v, tot]) => h("tr", {class: tot ? "total" : ""}, h("td", null, lib), tot ? h("td", {class: "num"}, euros(v, 0)) : montantCellule(v, null, 0)))))));
     const mois = [];
     for (const j of ep.jours){ const k = j.date.slice(0, 7); let m = mois[mois.length - 1]; if (!m || m.mois !== k){ m = {mois: k, entrees: 0, sorties: 0, fin: 0}; mois.push(m); } if (j.flux > 0) m.entrees += j.flux; else m.sorties -= j.flux; m.fin = j.solde; }
@@ -8350,27 +8435,29 @@ function vueDetailEpargne(ep, quoi){
 }
 
 declarerEcran("epargne", {titre: "Épargne", rendre(c, etat){
-  const ep = simulerEpargne();
-  c.appendChild(entete("Épargne", "Livrets, assurances-vie et PER (leurs revenus y restent ; valeurs brutes, sans fiscalité latente) · cessions de titres · financement des projets et du compte courant"));
+  const per = periodeProjection();
+  const ep = fenetreEpargne(simulerEpargne({fin: per.fin}), per.debut);
+  c.appendChild(entete("Épargne", "Livrets, assurances-vie et PER (leurs revenus y restent ; valeurs brutes, sans fiscalité latente) · cessions de titres · financement des projets et du compte courant · " + per.libelle,
+    [selecteurPeriode()]));
   const min = ep.jours.length ? ep.jours.reduce((a, j) => j.solde < a.solde ? j : a, ep.jours[0]) : null;
   const fin = ep.jours.length ? ep.jours[ep.jours.length - 1].solde : ep.soldeDepart;
   const parGenre = g => -somme(ep.evenements.filter(e => e.genre === g && e.montant < 0), e => e.montant);
   const ind = h("div", {class: "indicateurs"});
   const bascule = q => () => { etat.detail = etat.detail === q ? null : q; rafraichirEcran(); };
   ind.append(carteInd("Épargne disponible aujourd'hui", euros(ep.soldeDepart, 0), ep.comptes.length + " compte(s) mobilisable(s)", false, bascule("comptes"), etat.detail === "comptes"),
-    carteInd("Cessions de titres (12 mois)", euros(somme(ep.evenements.filter(e => e.genre === "capital" && e.montant > 0), e => e.montant), 0), "encaissements prévus", false, bascule("cessions"), etat.detail === "cessions"),
-    carteInd("Financements (12 mois)", euros(parGenre("projet") + parGenre("courant"), 0), "projets " + euros(parGenre("projet"), 0) + " · compte courant " + euros(parGenre("courant"), 0), false, bascule("financements"), etat.detail === "financements"),
-    carteInd("Épargne dans 12 mois", euros(fin, 0), (ep.rendement ? "dont rendement estimé " + euros(ep.rendement, 0) + " · " : "") + (min ? "au plus bas " + euros(min.solde, 0) + " le " + dateFr(min.date) : ""), fin < 0 || (min && min.solde < 0), bascule("fin"), etat.detail === "fin"));
+    carteInd("Cessions de titres (" + per.court + ")", euros(somme(ep.evenements.filter(e => e.genre === "capital" && e.montant > 0), e => e.montant), 0), "encaissements prévus", false, bascule("cessions"), etat.detail === "cessions"),
+    carteInd("Financements (" + per.court + ")", euros(parGenre("projet") + parGenre("courant"), 0), "projets " + euros(parGenre("projet"), 0) + " · compte courant " + euros(parGenre("courant"), 0), false, bascule("financements"), etat.detail === "financements"),
+    carteInd(per.fenetre || per.choix !== "12" ? "Épargne au " + dateFr(per.fin) : "Épargne dans 12 mois", euros(fin, 0), (ep.rendement ? "dont rendement estimé " + euros(ep.rendement, 0) + " · " : "") + (min ? "au plus bas " + euros(min.solde, 0) + " le " + dateFr(min.date) : ""), fin < 0 || (min && min.solde < 0), bascule("fin"), etat.detail === "fin"));
   c.appendChild(ind);
   if (etat.detail) c.appendChild(vueDetailEpargne(ep, etat.detail));
   if (min && min.solde < 0) c.appendChild(h("div", {class: "bandeau alerte"}, "L'épargne disponible passe sous zéro le " + dateFr(ep.jours.find(j => j.solde < 0).date)
     + " : il manque " + euros(-min.solde, 0) + " (avancer une cession, décaler un paiement de projet, ou mobiliser un autre placement)."));
   if (!ep.comptes.length) c.appendChild(h("div", {class: "bandeau info"}, "Aucune épargne mobilisable connue : importez les relevés des livrets, assurances-vie et PER (ou saisissez une valorisation dans Bilan), sinon l'épargne part de 0 €."));
-  c.appendChild(h("section", {class: "carte"}, h("div", {class: "petit discret"}, "Au départ : " + euros(ep.soldeDepart, 0) + " sur " + ep.comptes.length + " compte(s). Cliquez sur une case ci-dessus pour son détail."),
+  c.appendChild(h("section", {class: "carte"}, h("div", {class: "petit discret"}, (ep.debutFenetre ? "Épargne projetée au " + dateFr(ajouterJours(ep.debutFenetre, -1)) + " au soir : " + euros(ep.soldeOuverture, 0) + " ; aujourd'hui : " : "Au départ : ") + euros(ep.soldeDepart, 0) + " sur " + ep.comptes.length + " compte(s). Cliquez sur une case ci-dessus pour son détail."),
     grapheTresorerie(ep, null, 260, false, {seuilBas: 0, seuilHaut: Infinity}),
     h("div", {class: "legende"}, h("span", null, h("i", {style: {background: COULEURS.vert}}), "épargne disponible"), h("span", null, h("i", {style: {background: COULEURS.garnet, height: "2px"}}), "zéro"),
       h("span", null, h("i", {style: {background: COULEURS.or}}), "mouvements de plus de 10 000 €"))));
-  c.appendChild(h("h2", null, "Mouvements prévus (12 mois)"));
+  c.appendChild(h("h2", null, "Mouvements prévus (" + per.court + ")"));
   c.appendChild(tableau([{titre: "Date"}, {titre: "Mouvement"}, {titre: "Vers / depuis"}, {titre: "Montant", num: true}, {titre: "Épargne après", num: true}, {titre: ""}], ep.evenements.filter(e => e.genre !== "rendement"), {classe: "serre", vide: "Aucun mouvement prévu.", ligne: ev => {
     const jour = ep.jours.find(j => j.date === ev.date);
     return h("tr", {class: ev.echeance?.aConfirmer ? "choisie" : ""}, h("td", null, dateFr(ev.date)), h("td", null, ev.libelle, ev.echeance?.note ? h("div", {class: "petit discret"}, ev.echeance.note) : null),
@@ -8379,9 +8466,9 @@ declarerEcran("epargne", {titre: "Épargne", rendre(c, etat){
   }}));
   c.appendChild(h("p", {class: "note"}, "Les cessions encaissées sur le compte joint et les paiements des projets qui en partent sont comptés ici : ils ne relèvent pas de la marche courante. "
     + "Les approvisionnements du compte courant sont ceux qui le maintiennent au-dessus du seuil bas (" + euros(LIVRE.parametres.seuilBas || 0, 0) + "). Les revenus de l'épargne restent dans l'épargne, jusqu'à un virement décidé."));
-  const tout = simulerTresorerie({perimetre: "tout"}); const anaTout = analyseTresorerie(tout);
+  const tout = fenetreSimulation(simulerTresorerie({perimetre: "tout", fin: per.fin}), per.debut); const anaTout = analyseTresorerie(tout);
   if (tout && anaTout) c.appendChild(h("p", {class: "note"}, "Contrôle — " + tout.compte.nom + " réel, si cessions et projets y passent sans virement vers ou depuis l'épargne : au plus bas "
-    + euros(anaTout.min.solde, 0) + " le " + dateFr(anaTout.min.date) + ", " + euros(tout.jours[tout.jours.length - 1].solde, 0) + " dans 12 mois."));
+    + euros(anaTout.min.solde, 0) + " le " + dateFr(anaTout.min.date) + ", " + euros(tout.jours[tout.jours.length - 1].solde, 0) + " au " + dateFr(tout.jours[tout.jours.length - 1].date) + "."));
 }});
 
 declarerEcran("projets", {titre: "Projets", rendre(c, etat){
@@ -9745,6 +9832,24 @@ async function autotest(){
     vrai("projet et cession : hors de la marche courante", analyseTresorerie(s2).premierBas === undefined && !s2.evenements.some(e => /Grosse|Cession/.test(e.libelle)));
     const k2 = simulerEpargne({depart: "2027-03-31", jours: 120, rendement: false});
     v("épargne : cession puis paiement du projet", [k2.jours.find(j => j.date === "2027-04-10").solde, k2.jours[k2.jours.length - 1].solde], [50000, 20000]);
+    {
+      // Période de projection : simulation depuis le solde connu, fenêtre montrée seulement
+      const sp = simulerTresorerie({depart: "2027-03-31", fin: "2027-12-31"}), fp = fenetreSimulation(sp, "2027-06-01");
+      v("période : fenêtre du 01/06 au 31/12, ouverture = solde projeté du 31/05", [fp.jours[0].date, fp.jours[fp.jours.length - 1].date, Math.round(fp.soldeOuverture * 100), fp.debutFenetre],
+        [ "2027-06-01", "2027-12-31", Math.round(sp.jours.find(j => j.date === "2027-05-31").solde * 100), "2027-06-01"]);
+      v("période : année à venir, année en cours entamée, défaut", [normaliserPeriode({choix: "2027", debut: "2027-01-01", fin: "2027-12-31"}, "2026-11-11").libelle,
+        normaliserPeriode({choix: "2027", debut: "2027-01-01", fin: "2027-12-31"}, "2027-03-31").debut, normaliserPeriode({choix: "2026", debut: "2026-01-01", fin: "2026-12-31"}, "2027-03-31").choix],
+        ["Année 2027", "2027-03-31", "12"]);
+      // Excédent à placer : flux de capital « à laisser sur le compte » déduits, marche courante inchangée
+      const sh = LIVRE.parametres.seuilHaut; LIVRE.parametres.seuilHaut = -1000000;
+      const sansR = simulerTresorerie({depart: "2027-03-31", jours: 120}), a0 = analyseTresorerie(sansR);
+      const er = enregistrer("echeances", {libelle: "Avance d'impôt essai", montant: -1000, recurrence: "mensuelle", debut: "2027-04-15", fin: "2027-12-31", compte: cj.id, categorie: "Impôts", capital: true, resteCourant: true});
+      const avecR = simulerTresorerie({depart: "2027-03-31", jours: 120}), a1 = analyseTresorerie(avecR);
+      enregistrer("echeances", Object.assign(er, {resteCourant: false})); const a2 = analyseTresorerie(simulerTresorerie({depart: "2027-03-31", jours: 120}));
+      v("excédent : capital laissé sur le compte déduit (4 × 1 000 €), courant inchangé", [a0.excedent.reserve, a1.excedent.reserve, a2.excedent.reserve, [0, 5000].includes(a0.excedent.montant - a1.excedent.montant), avecR.jours[avecR.jours.length - 1].solde === sansR.jours[sansR.jours.length - 1].solde],
+        [0, 4000, 0, true, true]);
+      supprimer("echeances", er.id); LIVRE.parametres.seuilHaut = sh;
+    }
     enregistrer("operations", {compte: cj.id, date: "2027-03-02", montant: -950, libelle: "VIR ARCHITECTE EXEMPLE", categorie: "Travaux maison", sousCategorie: "Honoraires", nature: "Exceptionnelle"});
     enregistrer("echeances", Object.assign(grosse, {rattache: [{categorie: "Travaux maison"}]}));
     v("projet : dépenses déjà faites rattachées par catégorie", etatProjet("Travaux").paye, 950);

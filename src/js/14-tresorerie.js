@@ -100,13 +100,43 @@ function fluxPasses(compte, nbMois = 12, jusquA = aujourdhui()){
   const premier = r.findIndex(m => m.nb);
   return (premier < 0 ? [] : r.slice(premier)).map(m => { delete m.ops; return m; });
 }
+/* Période de projection choisie à l'écran, mémorisée sur l'appareil : les 12 prochains mois (défaut), une année
+   civile ou deux dates. La simulation part toujours du solde connu d'aujourd'hui et court jusqu'à la fin de la
+   période ; seule la fenêtre choisie est montrée (son solde d'ouverture est donc projeté). */
+const CLE_PERIODE = "bf_periode_projection", HORIZON_MAX_ANS = 5;
+function periodeProjection(){
+  const auj = aujourdhui(); let p = null;
+  try { p = JSON.parse(localStorage.getItem(CLE_PERIODE) || "null"); } catch (e) {}
+  return normaliserPeriode(p, auj);
+}
+function normaliserPeriode(p, auj){
+  const defaut = {choix: "12", debut: auj, fin: ajouterJours(auj, 365), libelle: "12 prochains mois", court: "12 mois", fenetre: false};
+  if (!p || !p.debut || !p.fin || p.fin <= auj || p.debut > p.fin) return defaut;
+  const debut = p.debut < auj ? auj : p.debut, fin = p.fin < ajouterMois(auj, 12 * HORIZON_MAX_ANS) ? p.fin : ajouterMois(auj, 12 * HORIZON_MAX_ANS);
+  const annee = /^\d{4}$/.test(p.choix || "") ? p.choix : null;
+  return {choix: p.choix || "libre", debut, fin, fenetre: debut > auj,
+    libelle: annee ? "Année " + annee + (debut > annee + "-01-01" ? " (à partir du " + dateFr(debut) + ")" : "") : "Du " + dateFr(debut) + " au " + dateFr(fin),
+    court: annee || "période"};
+}
+function choisirPeriodeProjection(p){ try { if (p) localStorage.setItem(CLE_PERIODE, JSON.stringify(p)); else localStorage.removeItem(CLE_PERIODE); } catch (e) {} }
+/* Ne garde d'une simulation que les jours et les mouvements de la fenêtre ; soldeOuverture = solde projeté la veille. */
+function fenetreSimulation(sim, debut){
+  if (!sim || !debut || debut <= sim.depart) return sim;
+  const jours = sim.jours.filter(j => j.date >= debut);
+  return Object.assign({}, sim, {jours, evenements: sim.evenements.filter(e => e.date >= debut), debutFenetre: debut,
+    soldeOuverture: jours.length ? jours[0].solde - jours[0].flux : null});
+}
 function simulerTresorerie(options){
   const o = Object.assign({jours: 365, depart: aujourdhui(), supplements: [], perimetre: "courant"}, options);
+  if (o.fin) o.jours = Math.max(1, ecartJours(o.depart, o.fin));
   const compte = obtenir("comptes", LIVRE.parametres.compteTresorerie) || comptesDeType("courant")[0];
   if (!compte) return null;
   const fin = ajouterJours(o.depart, o.jours);
   const soldeDepart = soldeCompte(compte, o.depart);
   const flux = new Map(); const evenements = [];
+  // Flux de capital prélevés au fil des mois sur ce compte (case « à laisser sur le compte courant », ex. avance
+  // d'impôt par le PAS) : hors marche courante, mais à garder sur le compte, donc déduits de l'excédent à placer.
+  const reserves = [];
   const ajouter = (date, montant, libelle, genre, gros, recurrent) => {
     if (date <= o.depart || date > fin) return;
     flux.set(date, (flux.get(date) || 0) + montant);
@@ -116,7 +146,10 @@ function simulerTresorerie(options){
   const lignesLiees = new Set();
   for (const e of vivants("echeances").filter(x => x.active !== false && (!x.compte || x.compte === compte.id))){
     if (e.ligneBudget) lignesLiees.add(e.ligneBudget);
-    if (o.perimetre === "courant" && estCapital(e)) continue;
+    if (o.perimetre === "courant" && estCapital(e)){
+      if (e.resteCourant && !e.projet) for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)){ const m = montantEcheance(e); if (m < 0) reserves.push({date: d, montant: -m, libelle: e.libelle}); }
+      continue;
+    }
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, montantEcheance(e), e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
   }
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
@@ -171,7 +204,7 @@ function simulerTresorerie(options){
     const f = flux.get(d) || 0; solde += f;
     jours.push({date: d, flux: f, solde});
   }
-  return {compte, depart: o.depart, soldeDepart, soldeConnu: soldeDepart !== null, jours, perimetre: o.perimetre, evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
+  return {compte, depart: o.depart, soldeDepart, soldeConnu: soldeDepart !== null, jours, perimetre: o.perimetre, reserves: reserves.sort((a, b) => a.date < b.date ? -1 : 1), evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
 }
 /* Approvisionnements du compte courant par l'épargne : à chaque passage sous le seuil bas de la
    marche courante, le virement qui l'y ramène (arrondi à la centaine supérieure). */
@@ -200,6 +233,7 @@ function produitsEpargne(date){
 }
 function simulerEpargne(options){
   const o = Object.assign({jours: 365, depart: aujourdhui(), rendement: true}, options);
+  if (o.fin) o.jours = Math.max(1, ecartJours(o.depart, o.fin));
   const fin = ajouterJours(o.depart, o.jours);
   const comptes = vivants("comptes").filter(estMobilisable).map(c => ({compte: c, solde: soldeCompte(c, o.depart) || 0, taux: tauxRendement(c)}));
   const soldeDepart = somme(comptes, x => x.solde);
@@ -253,10 +287,22 @@ function analyseTresorerie(sim){
   const hauts = sim.jours.filter(j => j.solde > p.seuilHaut);
   let virement = 0, avant = null;
   if (premierBas){ virement = Math.ceil((p.seuilBas - min.solde + 5000) / 5000) * 5000; avant = ajouterJours(premierBas.date, -1); }
-  // Excédent durable : au-dessus du seuil haut pendant 30 jours consécutifs ou plus
+  // Excédent durable : au-dessus du seuil haut pendant 30 jours consécutifs ou plus. Montant à placer : ce qui peut
+  // quitter le compte sans qu'il repasse sous le seuil haut jusqu'à la fin de la période, compte tenu des flux de
+  // capital à y laisser (cumulés au jour le jour). Arrondi aux 5 000 € inférieurs.
   let serie = 0, excedent = null;
   for (const j of sim.jours){ if (j.solde > p.seuilHaut){ serie++; if (serie >= 30 && !excedent) excedent = {depuis: ajouterJours(j.date, -29), montant: 0}; } else serie = 0; }
-  if (excedent) excedent.montant = Math.floor((Math.min(...sim.jours.filter(j => j.date >= excedent.depuis).slice(0, 90).map(j => j.solde)) - p.seuilHaut) / 5000) * 5000;
+  if (excedent){
+    const reserves = (sim.reserves || []).filter(r => r.date >= excedent.depuis);
+    let k = 0, cumul = 0, plancher = Infinity;
+    for (const j of sim.jours.filter(x => x.date >= excedent.depuis)){
+      while (k < reserves.length && reserves[k].date <= j.date) cumul += reserves[k++].montant;
+      plancher = Math.min(plancher, j.solde - cumul);
+    }
+    excedent.reserve = Math.round(cumul);
+    excedent.montant = Math.max(0, Math.floor((plancher - p.seuilHaut) / 5000) * 5000);
+    excedent.jusquA = sim.jours[sim.jours.length - 1].date;
+  }
   const parMois = new Map();
   for (const j of sim.jours){
     const k = j.date.slice(0, 7);
