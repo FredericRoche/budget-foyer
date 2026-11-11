@@ -15,6 +15,9 @@ function jourPrelevementAmex(compteId){
   return LIVRE.parametres.amexJourPrelevement || (vus.length ? vus[Math.floor(vus.length / 2)] : 27);
 }
 const estCapital = e => !!e.projet || !!e.capital || e.categorie === "Patrimoine";
+/* Flux de capital payé par le compte courant (case de l'échéance, ex. avance d'impôt par le PAS) : vrai débit du
+   compte, donc compté dans sa trésorerie (courbe, découvert, excédent), mais ni dans l'épargne ni dans le résultat courant. */
+const payeParCourant = e => estCapital(e) && !!e.resteCourant && !e.projet;
 /* Épargne mobilisable : livrets, assurances-vie, épargne retraite (le PER sert de réserve d'appoint
    quand les revenus ne suffisent pas) et PEA ; réglable compte par compte (Réglages › Comptes).
    Valeurs brutes : la fiscalité latente n'est pas déduite. */
@@ -134,9 +137,6 @@ function simulerTresorerie(options){
   const fin = ajouterJours(o.depart, o.jours);
   const soldeDepart = soldeCompte(compte, o.depart);
   const flux = new Map(); const evenements = [];
-  // Flux de capital prélevés au fil des mois sur ce compte (case « à laisser sur le compte courant », ex. avance
-  // d'impôt par le PAS) : hors marche courante, mais à garder sur le compte, donc déduits de l'excédent à placer.
-  const reserves = [];
   const ajouter = (date, montant, libelle, genre, gros, recurrent) => {
     if (date <= o.depart || date > fin) return;
     flux.set(date, (flux.get(date) || 0) + montant);
@@ -146,10 +146,7 @@ function simulerTresorerie(options){
   const lignesLiees = new Set();
   for (const e of vivants("echeances").filter(x => x.active !== false && (!x.compte || x.compte === compte.id))){
     if (e.ligneBudget) lignesLiees.add(e.ligneBudget);
-    if (o.perimetre === "courant" && estCapital(e)){
-      if (e.resteCourant && !e.projet) for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)){ const m = montantEcheance(e); if (m < 0) reserves.push({date: d, montant: -m, libelle: e.libelle}); }
-      continue;
-    }
+    if (o.perimetre === "courant" && estCapital(e) && !payeParCourant(e)) continue;
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, montantEcheance(e), e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
   }
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
@@ -204,7 +201,7 @@ function simulerTresorerie(options){
     const f = flux.get(d) || 0; solde += f;
     jours.push({date: d, flux: f, solde});
   }
-  return {compte, depart: o.depart, soldeDepart, soldeConnu: soldeDepart !== null, jours, perimetre: o.perimetre, reserves: reserves.sort((a, b) => a.date < b.date ? -1 : 1), evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
+  return {compte, depart: o.depart, soldeDepart, soldeConnu: soldeDepart !== null, jours, perimetre: o.perimetre, evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
 }
 /* Approvisionnements du compte courant par l'épargne : à chaque passage sous le seuil bas de la
    marche courante, le virement qui l'y ramène (arrondi à la centaine supérieure). */
@@ -242,6 +239,7 @@ function simulerEpargne(options){
   const ajouter = (d, m, libelle, genre, echeance) => { flux.set(d, (flux.get(d) || 0) + m); evenements.push({date: d, montant: m, libelle, genre, echeance}); };
   for (const e of vivants("echeances").filter(x => x.active !== false))
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)){
+      if (payeParCourant(e)) continue;
       if (estCapital(e)) ajouter(d, montantEcheance(e), e.libelle + (e.projet ? " (projet " + e.projet + ")" : ""), e.projet ? "projet" : "capital", e);
       else if (courant && estVirementDepuisEpargne(e, courant.compte)) ajouter(d, -e.montant, e.libelle + " (vers " + courant.compte.nom + ")", "courant", e);
     }
@@ -288,18 +286,11 @@ function analyseTresorerie(sim){
   let virement = 0, avant = null;
   if (premierBas){ virement = Math.ceil((p.seuilBas - min.solde + 5000) / 5000) * 5000; avant = ajouterJours(premierBas.date, -1); }
   // Excédent durable : au-dessus du seuil haut pendant 30 jours consécutifs ou plus. Montant à placer : ce qui peut
-  // quitter le compte sans qu'il repasse sous le seuil haut jusqu'à la fin de la période, compte tenu des flux de
-  // capital à y laisser (cumulés au jour le jour). Arrondi aux 5 000 € inférieurs.
+  // quitter le compte sans qu'il repasse sous le seuil haut jusqu'à la fin de la période. Arrondi aux 5 000 € inférieurs.
   let serie = 0, excedent = null;
   for (const j of sim.jours){ if (j.solde > p.seuilHaut){ serie++; if (serie >= 30 && !excedent) excedent = {depuis: ajouterJours(j.date, -29), montant: 0}; } else serie = 0; }
   if (excedent){
-    const reserves = (sim.reserves || []).filter(r => r.date >= excedent.depuis);
-    let k = 0, cumul = 0, plancher = Infinity;
-    for (const j of sim.jours.filter(x => x.date >= excedent.depuis)){
-      while (k < reserves.length && reserves[k].date <= j.date) cumul += reserves[k++].montant;
-      plancher = Math.min(plancher, j.solde - cumul);
-    }
-    excedent.reserve = Math.round(cumul);
+    const plancher = Math.min(...sim.jours.filter(x => x.date >= excedent.depuis).map(x => x.solde));
     excedent.montant = Math.max(0, Math.floor((plancher - p.seuilHaut) / 5000) * 5000);
     excedent.jusquA = sim.jours[sim.jours.length - 1].date;
   }

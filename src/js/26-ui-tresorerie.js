@@ -27,7 +27,7 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
   gauche.appendChild(tableau([{titre: "Mois"}, {titre: "Début", num: true}, {titre: "Entrées", num: true}, {titre: "Sorties", num: true}, {titre: "Plus bas", num: true}, {titre: "Fin", num: true}], ana.mois, {ligne: m =>
     h("tr", null, h("td", null, moisFr(m.mois)), h("td", {class: "num"}, euros(m.debut, 0)), h("td", {class: "num pos"}, euros(m.entrees, 0)), h("td", {class: "num"}, euros(m.sorties, 0)),
       h("td", {class: "num" + (m.bas < p.seuilBas ? " neg" : "")}, h("strong", null, euros(m.bas, 0))), h("td", {class: "num" + (m.fin < p.seuilBas ? " neg" : "")}, euros(m.fin, 0)))}));
-  const capitaux = vivants("echeances").filter(e => e.active !== false && estCapital(e));
+  const capitaux = vivants("echeances").filter(e => e.active !== false && estCapital(e) && !payeParCourant(e));
   if (capitaux.length) gauche.appendChild(h("p", {class: "note"}, "Marche courante seule : " + capitaux.length + " flux de capital (cessions de titres, projets) sont suivis à part, dans ",
     h("button", {class: "lien", onclick: () => aller("epargne")}, "Épargne"), " et ", h("button", {class: "lien", onclick: () => aller("projets")}, "Projets"), "."));
   /* Mois passés : flux réels du compte, d'après les relevés importés */
@@ -53,9 +53,9 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
   if (sim.debutFenetre && complet.jours.some(j => j.date < sim.debutFenetre && j.solde < p.seuilBas)) droite.appendChild(h("div", {class: "bandeau alerte"}, "Attention : le compte passe sous le seuil bas avant le début de la période choisie. Voir les 12 prochains mois."));
   if (supplements.length) droite.appendChild(h("p", {class: "note"}, supplements.length + " virement(s) simulé(s), non enregistré(s). ", h("button", {class: "lien", onclick: () => { etat.supplements = []; rafraichirEcran(); }}, "Retirer la simulation")));
   if (ana.excedent && ana.excedent.montant > 0) droite.appendChild(h("div", {class: "bandeau info"}, "Excédent durable au-dessus du seuil haut à partir du " + dateFr(ana.excedent.depuis) + " : environ " + euros(ana.excedent.montant, 0)
-    + " à placer, sans repasser sous le seuil haut d'ici le " + dateFr(ana.excedent.jusquA) + (ana.excedent.reserve ? ", une fois laissés sur le compte " + euros(ana.excedent.reserve, 0) + " de flux de capital prélevés au fil des mois (" + [...new Set(sim.reserves.filter(r => r.date >= ana.excedent.depuis).map(r => r.libelle))].join(" ; ") + ")" : "") + "."));
+    + " à placer, sans repasser sous le seuil haut d'ici le " + dateFr(ana.excedent.jusquA) + "."));
   else if (ana.excedent) droite.appendChild(h("p", {class: "note"}, "Seuil haut dépassé durablement à partir du " + dateFr(ana.excedent.depuis) + ", mais le compte y redescend d'ici le " + dateFr(ana.excedent.jusquA)
-    + (ana.excedent.reserve ? " (compte tenu de " + euros(ana.excedent.reserve, 0) + " de flux de capital à y laisser)" : "") + " : rien à placer."));
+    + " : rien à placer."));
   else if (ana.auDessus) droite.appendChild(h("p", {class: "note"}, "Seuil haut dépassé " + ana.auDessus + " jour(s), sans excédent durable (moins de 30 jours de suite) : rien à placer."));
 
   /* Débits différés à venir */
@@ -83,7 +83,7 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
   const ech = vivants("echeances").sort((a, b) => (a.debut || "") < (b.debut || "") ? -1 : 1);
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Échéances (" + ech.length + ")"));
   c.appendChild(tableau([{titre: "Libellé", cle: e => e.libelle}, {titre: "Montant", num: true, cle: e => e.montant}, {titre: "Récurrence"}, {titre: "À partir du", cle: e => e.debut || ""}, {titre: "Jusqu'au"}, {titre: "Statut"}, {titre: ""}], ech, {classe: "serre", vide: "Aucune échéance.", ligne: e =>
-    h("tr", {class: e.aConfirmer ? "choisie" : ""}, h("td", null, e.libelle, estCapital(e) ? h("span", {class: "libbanque"}, e.projet ? "projet " + e.projet : e.resteCourant ? "capital, hors marche courante, laissé sur le compte" : "capital, hors marche courante") : null, e.ligneBudget ? h("span", {class: "libbanque"}, "remplace sa ligne de budget en trésorerie") : null, e.note ? h("div", {class: "petit discret"}, e.note) : null), montantCellule(e.montant),
+    h("tr", {class: e.aConfirmer ? "choisie" : ""}, h("td", null, e.libelle, estCapital(e) ? h("span", {class: "libbanque"}, e.projet ? "projet " + e.projet : payeParCourant(e) ? "capital payé par le compte courant : en trésorerie, hors épargne et hors résultat" : "capital, hors marche courante") : null, e.ligneBudget ? h("span", {class: "libbanque"}, "remplace sa ligne de budget en trésorerie") : null, e.note ? h("div", {class: "petit discret"}, e.note) : null), montantCellule(e.montant),
       h("td", null, e.recurrence || "unique"), h("td", null, dateFr(e.debut)), h("td", null, e.fin ? dateFr(e.fin) : "—"),
       h("td", null, e.active === false ? "inactive" : e.aConfirmer ? h("span", {class: "neg"}, "à confirmer") : "confirmée"),
       h("td", null, e.aConfirmer ? h("button", {class: "mini primaire", onclick: () => { enregistrer("echeances", Object.assign(e, {aConfirmer: false})); rafraichirEcran(); }}, "Confirmer") : null, " ",
@@ -136,7 +136,7 @@ async function editerEcheance(e){
     champ("Catégorie", cat), champ("Nature", nat), champ("Remplace en trésorerie la ligne de budget", lb, "Évite de compter deux fois le loyer, par exemple."),
     champ("Projet (hors marche courante)", h("span", null, proj, listeProj), "Travaux, voiture… : suivis à part, avec leur financement.")),
     h("div", {class: "case"}, capi, h("label", {for: "ech-capital"}, "Flux de capital (cession de titres, placement…) : hors marche courante, suivi dans Projets ; un projet l'est toujours")),
-    h("div", {class: "case"}, resteCourant, h("label", {for: "ech-reste-courant"}, "Flux de capital prélevé au fil des mois sur le compte courant (ex. avance d'impôt par le PAS) : à y laisser, déduit de l'excédent à placer")),
+    h("div", {class: "case"}, resteCourant, h("label", {for: "ech-reste-courant"}, "Flux de capital payé par le compte courant (ex. avance d'impôt par le PAS) : compté dans sa trésorerie, mais ni dans l'épargne ni dans le résultat courant")),
     h("div", {class: "case"}, env, h("label", {for: "ech-enveloppe"}, "Enveloppe du projet : les paiements du projet s'imputent sur ce montant, le reste à payer diminue d'autant")),
     h("div", {class: "case"}, active, h("label", {for: "ech-active"}, "Active"))),
     actions: [e ? {libelle: "Supprimer", classe: "danger", action: () => { supprimer("echeances", e.id); return true; }} : null, {libelle: "Annuler", classe: "discret", valeur: false},

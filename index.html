@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-mwpfTsPeseW7n/Y79WfKBzQqEXxlfHS/3XocQvkU4l0=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-e8tk8AwV2TLjR8Xrf3EJr6oOGwAUpQSSCnlNE07FuUU=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-11.1907";
+const VERSION_APP = "2026-11-11.1920";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4927,6 +4927,9 @@ function jourPrelevementAmex(compteId){
   return LIVRE.parametres.amexJourPrelevement || (vus.length ? vus[Math.floor(vus.length / 2)] : 27);
 }
 const estCapital = e => !!e.projet || !!e.capital || e.categorie === "Patrimoine";
+/* Flux de capital payé par le compte courant (case de l'échéance, ex. avance d'impôt par le PAS) : vrai débit du
+   compte, donc compté dans sa trésorerie (courbe, découvert, excédent), mais ni dans l'épargne ni dans le résultat courant. */
+const payeParCourant = e => estCapital(e) && !!e.resteCourant && !e.projet;
 /* Épargne mobilisable : livrets, assurances-vie, épargne retraite (le PER sert de réserve d'appoint
    quand les revenus ne suffisent pas) et PEA ; réglable compte par compte (Réglages › Comptes).
    Valeurs brutes : la fiscalité latente n'est pas déduite. */
@@ -5046,9 +5049,6 @@ function simulerTresorerie(options){
   const fin = ajouterJours(o.depart, o.jours);
   const soldeDepart = soldeCompte(compte, o.depart);
   const flux = new Map(); const evenements = [];
-  // Flux de capital prélevés au fil des mois sur ce compte (case « à laisser sur le compte courant », ex. avance
-  // d'impôt par le PAS) : hors marche courante, mais à garder sur le compte, donc déduits de l'excédent à placer.
-  const reserves = [];
   const ajouter = (date, montant, libelle, genre, gros, recurrent) => {
     if (date <= o.depart || date > fin) return;
     flux.set(date, (flux.get(date) || 0) + montant);
@@ -5058,10 +5058,7 @@ function simulerTresorerie(options){
   const lignesLiees = new Set();
   for (const e of vivants("echeances").filter(x => x.active !== false && (!x.compte || x.compte === compte.id))){
     if (e.ligneBudget) lignesLiees.add(e.ligneBudget);
-    if (o.perimetre === "courant" && estCapital(e)){
-      if (e.resteCourant && !e.projet) for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)){ const m = montantEcheance(e); if (m < 0) reserves.push({date: d, montant: -m, libelle: e.libelle}); }
-      continue;
-    }
+    if (o.perimetre === "courant" && estCapital(e) && !payeParCourant(e)) continue;
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, montantEcheance(e), e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
   }
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
@@ -5116,7 +5113,7 @@ function simulerTresorerie(options){
     const f = flux.get(d) || 0; solde += f;
     jours.push({date: d, flux: f, solde});
   }
-  return {compte, depart: o.depart, soldeDepart, soldeConnu: soldeDepart !== null, jours, perimetre: o.perimetre, reserves: reserves.sort((a, b) => a.date < b.date ? -1 : 1), evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
+  return {compte, depart: o.depart, soldeDepart, soldeConnu: soldeDepart !== null, jours, perimetre: o.perimetre, evenements: evenements.sort((a, b) => a.date < b.date ? -1 : 1)};
 }
 /* Approvisionnements du compte courant par l'épargne : à chaque passage sous le seuil bas de la
    marche courante, le virement qui l'y ramène (arrondi à la centaine supérieure). */
@@ -5154,6 +5151,7 @@ function simulerEpargne(options){
   const ajouter = (d, m, libelle, genre, echeance) => { flux.set(d, (flux.get(d) || 0) + m); evenements.push({date: d, montant: m, libelle, genre, echeance}); };
   for (const e of vivants("echeances").filter(x => x.active !== false))
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)){
+      if (payeParCourant(e)) continue;
       if (estCapital(e)) ajouter(d, montantEcheance(e), e.libelle + (e.projet ? " (projet " + e.projet + ")" : ""), e.projet ? "projet" : "capital", e);
       else if (courant && estVirementDepuisEpargne(e, courant.compte)) ajouter(d, -e.montant, e.libelle + " (vers " + courant.compte.nom + ")", "courant", e);
     }
@@ -5200,18 +5198,11 @@ function analyseTresorerie(sim){
   let virement = 0, avant = null;
   if (premierBas){ virement = Math.ceil((p.seuilBas - min.solde + 5000) / 5000) * 5000; avant = ajouterJours(premierBas.date, -1); }
   // Excédent durable : au-dessus du seuil haut pendant 30 jours consécutifs ou plus. Montant à placer : ce qui peut
-  // quitter le compte sans qu'il repasse sous le seuil haut jusqu'à la fin de la période, compte tenu des flux de
-  // capital à y laisser (cumulés au jour le jour). Arrondi aux 5 000 € inférieurs.
+  // quitter le compte sans qu'il repasse sous le seuil haut jusqu'à la fin de la période. Arrondi aux 5 000 € inférieurs.
   let serie = 0, excedent = null;
   for (const j of sim.jours){ if (j.solde > p.seuilHaut){ serie++; if (serie >= 30 && !excedent) excedent = {depuis: ajouterJours(j.date, -29), montant: 0}; } else serie = 0; }
   if (excedent){
-    const reserves = (sim.reserves || []).filter(r => r.date >= excedent.depuis);
-    let k = 0, cumul = 0, plancher = Infinity;
-    for (const j of sim.jours.filter(x => x.date >= excedent.depuis)){
-      while (k < reserves.length && reserves[k].date <= j.date) cumul += reserves[k++].montant;
-      plancher = Math.min(plancher, j.solde - cumul);
-    }
-    excedent.reserve = Math.round(cumul);
+    const plancher = Math.min(...sim.jours.filter(x => x.date >= excedent.depuis).map(x => x.solde));
     excedent.montant = Math.max(0, Math.floor((plancher - p.seuilHaut) / 5000) * 5000);
     excedent.jusquA = sim.jours[sim.jours.length - 1].date;
   }
@@ -7862,7 +7853,7 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
   gauche.appendChild(tableau([{titre: "Mois"}, {titre: "Début", num: true}, {titre: "Entrées", num: true}, {titre: "Sorties", num: true}, {titre: "Plus bas", num: true}, {titre: "Fin", num: true}], ana.mois, {ligne: m =>
     h("tr", null, h("td", null, moisFr(m.mois)), h("td", {class: "num"}, euros(m.debut, 0)), h("td", {class: "num pos"}, euros(m.entrees, 0)), h("td", {class: "num"}, euros(m.sorties, 0)),
       h("td", {class: "num" + (m.bas < p.seuilBas ? " neg" : "")}, h("strong", null, euros(m.bas, 0))), h("td", {class: "num" + (m.fin < p.seuilBas ? " neg" : "")}, euros(m.fin, 0)))}));
-  const capitaux = vivants("echeances").filter(e => e.active !== false && estCapital(e));
+  const capitaux = vivants("echeances").filter(e => e.active !== false && estCapital(e) && !payeParCourant(e));
   if (capitaux.length) gauche.appendChild(h("p", {class: "note"}, "Marche courante seule : " + capitaux.length + " flux de capital (cessions de titres, projets) sont suivis à part, dans ",
     h("button", {class: "lien", onclick: () => aller("epargne")}, "Épargne"), " et ", h("button", {class: "lien", onclick: () => aller("projets")}, "Projets"), "."));
   /* Mois passés : flux réels du compte, d'après les relevés importés */
@@ -7888,9 +7879,9 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
   if (sim.debutFenetre && complet.jours.some(j => j.date < sim.debutFenetre && j.solde < p.seuilBas)) droite.appendChild(h("div", {class: "bandeau alerte"}, "Attention : le compte passe sous le seuil bas avant le début de la période choisie. Voir les 12 prochains mois."));
   if (supplements.length) droite.appendChild(h("p", {class: "note"}, supplements.length + " virement(s) simulé(s), non enregistré(s). ", h("button", {class: "lien", onclick: () => { etat.supplements = []; rafraichirEcran(); }}, "Retirer la simulation")));
   if (ana.excedent && ana.excedent.montant > 0) droite.appendChild(h("div", {class: "bandeau info"}, "Excédent durable au-dessus du seuil haut à partir du " + dateFr(ana.excedent.depuis) + " : environ " + euros(ana.excedent.montant, 0)
-    + " à placer, sans repasser sous le seuil haut d'ici le " + dateFr(ana.excedent.jusquA) + (ana.excedent.reserve ? ", une fois laissés sur le compte " + euros(ana.excedent.reserve, 0) + " de flux de capital prélevés au fil des mois (" + [...new Set(sim.reserves.filter(r => r.date >= ana.excedent.depuis).map(r => r.libelle))].join(" ; ") + ")" : "") + "."));
+    + " à placer, sans repasser sous le seuil haut d'ici le " + dateFr(ana.excedent.jusquA) + "."));
   else if (ana.excedent) droite.appendChild(h("p", {class: "note"}, "Seuil haut dépassé durablement à partir du " + dateFr(ana.excedent.depuis) + ", mais le compte y redescend d'ici le " + dateFr(ana.excedent.jusquA)
-    + (ana.excedent.reserve ? " (compte tenu de " + euros(ana.excedent.reserve, 0) + " de flux de capital à y laisser)" : "") + " : rien à placer."));
+    + " : rien à placer."));
   else if (ana.auDessus) droite.appendChild(h("p", {class: "note"}, "Seuil haut dépassé " + ana.auDessus + " jour(s), sans excédent durable (moins de 30 jours de suite) : rien à placer."));
 
   /* Débits différés à venir */
@@ -7918,7 +7909,7 @@ declarerEcran("tresorerie", {titre: "Trésorerie", rendre(c, etat){
   const ech = vivants("echeances").sort((a, b) => (a.debut || "") < (b.debut || "") ? -1 : 1);
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Échéances (" + ech.length + ")"));
   c.appendChild(tableau([{titre: "Libellé", cle: e => e.libelle}, {titre: "Montant", num: true, cle: e => e.montant}, {titre: "Récurrence"}, {titre: "À partir du", cle: e => e.debut || ""}, {titre: "Jusqu'au"}, {titre: "Statut"}, {titre: ""}], ech, {classe: "serre", vide: "Aucune échéance.", ligne: e =>
-    h("tr", {class: e.aConfirmer ? "choisie" : ""}, h("td", null, e.libelle, estCapital(e) ? h("span", {class: "libbanque"}, e.projet ? "projet " + e.projet : e.resteCourant ? "capital, hors marche courante, laissé sur le compte" : "capital, hors marche courante") : null, e.ligneBudget ? h("span", {class: "libbanque"}, "remplace sa ligne de budget en trésorerie") : null, e.note ? h("div", {class: "petit discret"}, e.note) : null), montantCellule(e.montant),
+    h("tr", {class: e.aConfirmer ? "choisie" : ""}, h("td", null, e.libelle, estCapital(e) ? h("span", {class: "libbanque"}, e.projet ? "projet " + e.projet : payeParCourant(e) ? "capital payé par le compte courant : en trésorerie, hors épargne et hors résultat" : "capital, hors marche courante") : null, e.ligneBudget ? h("span", {class: "libbanque"}, "remplace sa ligne de budget en trésorerie") : null, e.note ? h("div", {class: "petit discret"}, e.note) : null), montantCellule(e.montant),
       h("td", null, e.recurrence || "unique"), h("td", null, dateFr(e.debut)), h("td", null, e.fin ? dateFr(e.fin) : "—"),
       h("td", null, e.active === false ? "inactive" : e.aConfirmer ? h("span", {class: "neg"}, "à confirmer") : "confirmée"),
       h("td", null, e.aConfirmer ? h("button", {class: "mini primaire", onclick: () => { enregistrer("echeances", Object.assign(e, {aConfirmer: false})); rafraichirEcran(); }}, "Confirmer") : null, " ",
@@ -7971,7 +7962,7 @@ async function editerEcheance(e){
     champ("Catégorie", cat), champ("Nature", nat), champ("Remplace en trésorerie la ligne de budget", lb, "Évite de compter deux fois le loyer, par exemple."),
     champ("Projet (hors marche courante)", h("span", null, proj, listeProj), "Travaux, voiture… : suivis à part, avec leur financement.")),
     h("div", {class: "case"}, capi, h("label", {for: "ech-capital"}, "Flux de capital (cession de titres, placement…) : hors marche courante, suivi dans Projets ; un projet l'est toujours")),
-    h("div", {class: "case"}, resteCourant, h("label", {for: "ech-reste-courant"}, "Flux de capital prélevé au fil des mois sur le compte courant (ex. avance d'impôt par le PAS) : à y laisser, déduit de l'excédent à placer")),
+    h("div", {class: "case"}, resteCourant, h("label", {for: "ech-reste-courant"}, "Flux de capital payé par le compte courant (ex. avance d'impôt par le PAS) : compté dans sa trésorerie, mais ni dans l'épargne ni dans le résultat courant")),
     h("div", {class: "case"}, env, h("label", {for: "ech-enveloppe"}, "Enveloppe du projet : les paiements du projet s'imputent sur ce montant, le reste à payer diminue d'autant")),
     h("div", {class: "case"}, active, h("label", {for: "ech-active"}, "Active"))),
     actions: [e ? {libelle: "Supprimer", classe: "danger", action: () => { supprimer("echeances", e.id); return true; }} : null, {libelle: "Annuler", classe: "discret", valeur: false},
@@ -9840,15 +9831,16 @@ async function autotest(){
       v("période : année à venir, année en cours entamée, défaut", [normaliserPeriode({choix: "2027", debut: "2027-01-01", fin: "2027-12-31"}, "2026-11-11").libelle,
         normaliserPeriode({choix: "2027", debut: "2027-01-01", fin: "2027-12-31"}, "2027-03-31").debut, normaliserPeriode({choix: "2026", debut: "2026-01-01", fin: "2026-12-31"}, "2027-03-31").choix],
         ["Année 2027", "2027-03-31", "12"]);
-      // Excédent à placer : flux de capital « à laisser sur le compte » déduits, marche courante inchangée
-      const sh = LIVRE.parametres.seuilHaut; LIVRE.parametres.seuilHaut = -1000000;
-      const sansR = simulerTresorerie({depart: "2027-03-31", jours: 120}), a0 = analyseTresorerie(sansR);
+      // Flux de capital payé par le compte courant : débité en trésorerie (4 × 1 000 €), pas en épargne ; sinon l'inverse
+      const fin0 = s => s.jours[s.jours.length - 1].solde;
+      const t0 = simulerTresorerie({depart: "2027-03-31", jours: 120}), e0 = simulerEpargne({depart: "2027-03-31", jours: 120, rendement: false});
       const er = enregistrer("echeances", {libelle: "Avance d'impôt essai", montant: -1000, recurrence: "mensuelle", debut: "2027-04-15", fin: "2027-12-31", compte: cj.id, categorie: "Impôts", capital: true, resteCourant: true});
-      const avecR = simulerTresorerie({depart: "2027-03-31", jours: 120}), a1 = analyseTresorerie(avecR);
-      enregistrer("echeances", Object.assign(er, {resteCourant: false})); const a2 = analyseTresorerie(simulerTresorerie({depart: "2027-03-31", jours: 120}));
-      v("excédent : capital laissé sur le compte déduit (4 × 1 000 €), courant inchangé", [a0.excedent.reserve, a1.excedent.reserve, a2.excedent.reserve, [0, 5000].includes(a0.excedent.montant - a1.excedent.montant), avecR.jours[avecR.jours.length - 1].solde === sansR.jours[sansR.jours.length - 1].solde],
-        [0, 4000, 0, true, true]);
-      supprimer("echeances", er.id); LIVRE.parametres.seuilHaut = sh;
+      const t1 = simulerTresorerie({depart: "2027-03-31", jours: 120}), e1 = simulerEpargne({depart: "2027-03-31", jours: 120, rendement: false});
+      enregistrer("echeances", Object.assign(er, {resteCourant: false}));
+      const t2 = simulerTresorerie({depart: "2027-03-31", jours: 120}), e2 = simulerEpargne({depart: "2027-03-31", jours: 120, rendement: false});
+      v("capital payé par le compte courant : en trésorerie, hors épargne ; sinon en épargne", [Math.round(fin0(t0) - fin0(t1)), Math.round(fin0(e1) - fin0(e0)), Math.round(fin0(t2) - fin0(t0)), Math.round(fin0(e0) - fin0(e2))],
+        [4000, 0, 0, 4000]);
+      supprimer("echeances", er.id);
     }
     enregistrer("operations", {compte: cj.id, date: "2027-03-02", montant: -950, libelle: "VIR ARCHITECTE EXEMPLE", categorie: "Travaux maison", sousCategorie: "Honoraires", nature: "Exceptionnelle"});
     enregistrer("echeances", Object.assign(grosse, {rattache: [{categorie: "Travaux maison"}]}));
