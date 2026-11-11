@@ -15,14 +15,20 @@ function ignorerControle(k){ modifierParametres({controlesIgnores: [...new Set([
    (deux exports qui tronquent différemment le même libellé). Les vrais achats identiques du même jour
    (deux abonnements, deux lignes de téléphone) s'écartent une fois pour toutes. */
 /* Une période clôturée sur relevé PDF a vu chaque ligne appariée à une écriture du relevé : des opérations
-   identiques y sont de vrais achats distincts (plusieurs abonnements le même jour), pas des doublons. */
-function periodeCloturee(compteId, date){
-  return Object.entries(LIVRE.parametres.clotures || {}).some(([k, c]) => k.split("|")[0] === compteId && c && c.debut <= date && date <= c.fin);
+   identiques déjà là à la clôture sont de vrais achats distincts. Une opération importée APRÈS la clôture n'a
+   pas été vérifiée (un même relevé réimporté sous d'autres libellés) : elle reste examinée. */
+function clotureDe(compteId, date){
+  return Object.entries(LIVRE.parametres.clotures || {}).map(([k, c]) => k.split("|")[0] === compteId && c && c.debut <= date && date <= c.fin ? c : null).find(Boolean) || null;
+}
+const dateImport = o => { const i = o.import ? obtenir("imports", o.import) : null; return i && i.date ? String(i.date) : ""; };
+function verifieParCloture(ops){
+  const c = clotureDe(ops[0].compte, ops[0].date);
+  return !!c && !!c.le && ops.every(o => !dateImport(o) || dateImport(o) <= c.le);
 }
 function doublonsOperations(){
   const groupes = new Map();
   for (const o of vivants("operations")){
-    if (!o.empreinte || (o.ventilation || []).length || periodeCloturee(o.compte, o.date)) continue;
+    if (!o.empreinte || (o.ventilation || []).length) continue;
     const k = o.compte + "|" + o.date + "|" + versCentimes(o.montant);
     (groupes.get(k) || groupes.set(k, []).get(k)).push(o);
   }
@@ -30,7 +36,10 @@ function doublonsOperations(){
   for (const [k, ops] of groupes){
     if (ops.length < 2) continue;
     const g = ops.filter(o => ops.some(x => x !== o && libellesCompatibles(x.libelle, o.libelle)));
-    if (g.length >= 2 && !cleIgnoree("doublon|" + k)) r.push({cle: "doublon|" + k, ops: g});
+    if (g.length < 2 || cleIgnoree("doublon|" + k) || verifieParCloture(g)) continue;
+    // Toutes venues du même fichier : le relevé lui-même porte ces lignes en double (deux tickets du même jour)
+    if (g.every(o => o.import && o.import === g[0].import)) continue;
+    r.push({cle: "doublon|" + k, ops: g});
   }
   return r.sort((a, b) => a.ops[0].date < b.ops[0].date ? 1 : -1);
 }

@@ -166,7 +166,7 @@ declarerEcran("controles", {titre: "Contrôles", rendre(c){
 
   // 2. Opérations en double
   c.appendChild(h("h2", null, "Opérations importées en double (" + doublons.length + ")"));
-  c.appendChild(h("p", {class: "note"}, "Même compte, même date, même montant, libellés de même début : souvent une même opération venue de deux exports. Deux achats réellement identiques du même jour (deux abonnements, deux lignes de téléphone) : « Pas une erreur ». Les périodes déjà clôturées sur relevé PDF ne sont pas examinées : le relevé y a vérifié chaque ligne."));
+  c.appendChild(h("p", {class: "note"}, "Même compte, même date, même montant, libellés de même début : souvent une même opération venue de deux exports. Deux achats réellement identiques du même jour (deux abonnements, deux lignes de téléphone) : « Pas une erreur ». Ne sont pas signalées : les lignes d'une période clôturée sur relevé PDF déjà présentes à la clôture (le relevé les a vérifiées), ni les lignes venues ensemble du même fichier (le relevé les porte deux fois)."));
   // Chaque exemplaire est montré avec son classement et le fichier d'où il vient ; celui qui est en trop se supprime ici
   const origine = o => { const i = o.import ? obtenir("imports", o.import) : null; return i ? (i.fichier || "") + (i.date ? " (importé le " + dateFr(String(i.date).slice(0, 10)) + ")" : "") : "saisie"; };
   const exemplaire = o => h("div", {class: "petit", style: {margin: ".2rem 0"}}, o.libelle, " · ", h("span", {class: "discret"}, (o.categorie || "—") + (o.sousCategorie ? " › " + o.sousCategorie : "") + " · " + origine(o)),

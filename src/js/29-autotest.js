@@ -348,7 +348,7 @@ async function autotest(){
             const fc = enregistrer("commercants", {nom: "Caisse Controle Essai", alias: [], stats: {}, natures: {}});
             const ops = [
               enregistrer("operations", {compte: cc.id, date: "2027-03-02", montant: 400, libelle: "VIR CAISSE CONTROLE ESSAI RETRAI", empreinte: "ctl|1", import: "i", commercant: fc.id, categorie: "Revenus", sousCategorie: "Pension", nature: "Revenu"}),
-              enregistrer("operations", {compte: cc.id, date: "2027-03-02", montant: 400, libelle: "VIR CAISSE CONTROLE ESSAI RETR", empreinte: "ctl|2", import: "i", commercant: fc.id, categorie: "Revenus", sousCategorie: "Pension", nature: "Revenu"}),
+              enregistrer("operations", {compte: cc.id, date: "2027-03-02", montant: 400, libelle: "VIR CAISSE CONTROLE ESSAI RETR", empreinte: "ctl|2", import: "i2", commercant: fc.id, categorie: "Revenus", sousCategorie: "Pension", nature: "Revenu"}),
               enregistrer("operations", {compte: cc.id, date: "2027-04-02", montant: 400, libelle: "VIR CAISSE CONTROLE ESSAI RETR", empreinte: "ctl|3", import: "i", commercant: fc.id, categorie: "Revenus", sousCategorie: "Pension", nature: "Revenu"}),
               enregistrer("operations", {compte: cc.id, date: "2027-04-05", montant: 90, libelle: "VIR NOTE ESSAI", empreinte: "ctl|4", categorie: "Transfert", sousCategorie: "Notes de frais", nature: "Revenu"})];
             const ctl = enregistrer("controles", {libelle: "Relevé essai", commercant: fc.id, commercantNom: fc.nom, debut: "2027-03-01", fin: "2027-04-30", montant: 800, sens: "credit"});
@@ -364,6 +364,19 @@ async function autotest(){
             v("contrôles : doublon importé, transfert en revenu, écart d'un total puis accord, trou de clôture", [dbl.length, dbl[0]?.ops.length, inc[0]?.motif, r1.ecart, r1.ok, r2.ok, trou],
               [1, 2, "transfert compté comme revenu", 400, false, true, "2026-02-01>2026-02-28"]);
             for (const o of ops) supprimer("operations", o.id); supprimer("controles", ctl.id); supprimer("commercants", fc.id);
+          }
+          {
+            // Doublons : même fichier = lignes réelles ; période clôturée = vérifiée, sauf import postérieur à la clôture
+            const i1 = enregistrer("imports", {fichier: "a.pdf", date: "2027-05-01T10:00:00Z"}), i2 = enregistrer("imports", {fichier: "b.csv", date: "2027-05-20T10:00:00Z"});
+            const mk = (d, lib, imp) => enregistrer("operations", {compte: cc.id, date: d, montant: -2.1, libelle: lib, empreinte: "dd|" + idAleatoire(6), import: imp.id});
+            const a = [mk("2027-04-03", "METRO ESSAI", i1), mk("2027-04-03", "METRO ESSAI", i1)];
+            const b = [mk("2027-04-04", "PRLV ESSAI LOYER GER", i1), mk("2027-04-04", "PRLV ESSAI LOYER GERANCE", i2)];
+            const avant = LIVRE.parametres.clotures;
+            LIVRE.parametres.clotures = Object.assign({}, avant, {[cc.id + "|2027-04-30"]: {debut: "2027-04-01", fin: "2027-04-30", le: "2027-05-10T00:00:00Z"}});
+            const vus = doublonsOperations().map(d => d.ops[0].date).filter(d => d === "2027-04-03" || d === "2027-04-04");
+            LIVRE.parametres.clotures = avant;
+            v("contrôles : lignes du même relevé non signalées, réimport après clôture signalé", vus, ["2027-04-04"]);
+            for (const o of a.concat(b)) supprimer("operations", o.id); supprimer("imports", i1.id); supprimer("imports", i2.id);
           }
           {
             // Pièces probables : mots du fournisseur, année, dossier de la pièce précédente
