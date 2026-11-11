@@ -366,6 +366,13 @@ async function autotest(){
             for (const o of ops) supprimer("operations", o.id); supprimer("controles", ctl.id); supprimer("commercants", fc.id);
           }
           {
+            // Pièces probables : mots du fournisseur, année, dossier de la pièce précédente
+            const fichiers = ["05 Retraite/Caisse Essai/2026 Caisse Essai - Paiements - 15-02.pdf", "05 Retraite/Caisse Essai/2025 Caisse Essai - Paiements - 14-02.pdf",
+              "05 Retraite/Caisse Essai/2026 Courrier divers - 01-03.pdf", "02 Finances du foyer/2026 Banque - Relevé - 01-01.pdf"];
+            const r = piecesProbables({nom: "Caisse Essai (retraite)", alias: [], dossierPieces: "05 Retraite/Caisse Essai"}, "2026", fichiers).map(x => x.chemin);
+            v("contrôles : pièce probable de l'année en tête, autre fournisseur écarté", [r[0], r.includes(fichiers[3])], [fichiers[0], false]);
+          }
+          {
             // Libellé tronqué autrement par un second export : même opération, pas une nouvelle ; doublon supprimable
             const o1 = enregistrer("operations", {compte: cc.id, date: "2027-02-11", montant: 250.5, libelle: "VIREMENT CAISSE ESSAI PRESTATIONS RETRAI", empreinte: "essai|tronque|1", import: "imp-essai"});
             const p = preparerReleve({genre: "compte", banque: "Essai", periode: {debut: "2027-02-01", fin: "2027-02-28"}, lignes: [{date: "2027-02-11", montant: 250.5, libelle: "VIREMENT CAISSE ESSAI PRESTATIONS RETR"}]}, cc);

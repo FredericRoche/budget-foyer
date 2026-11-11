@@ -37,6 +37,50 @@ async function ouvrirPieceDocuments(chemin){
   } catch (e){ throw new Error("Pièce introuvable : « " + chemin + " » dans « " + racine.name + " » (déplacée ou renommée ?)."); }
 }
 
+/* Recherche des pièces : l'arborescence du dossier des documents (PDF seulement, dossiers « zz… » écartés) est
+   lue une fois par séance ; une pièce est d'autant plus probable que son chemin porte les mots du fournisseur
+   (nom et alias), l'année de la période, et qu'elle est rangée là où la pièce précédente de ce fournisseur l'était. */
+let INDEX_DOCUMENTS = null;
+async function indexDocuments(racine){
+  if (INDEX_DOCUMENTS && INDEX_DOCUMENTS.racine === racine) return INDEX_DOCUMENTS.fichiers;
+  const fichiers = [];
+  const parcourir = async (d, prefixe, niveau) => {
+    for await (const [nom, e] of d.entries()){
+      if (/^(zz|\.|~\$)/i.test(nom)) continue;
+      const c = prefixe ? prefixe + "/" + nom : nom;
+      if (e.kind === "directory"){ if (niveau < 8) await parcourir(e, c, niveau + 1); }
+      else if (/\.pdf$/i.test(nom)) fichiers.push(c);
+    }
+  };
+  await parcourir(racine, "", 1);
+  INDEX_DOCUMENTS = {racine, fichiers};
+  return fichiers;
+}
+function piecesProbables(fiche, annee, fichiers){
+  // Poids d'un mot selon sa rareté dans le dossier ; au-delà d'un vingtième des chemins (« retraite » pour tout
+  // un dossier, « assurance »), il ne distingue rien et compte pour zéro
+  const seuil = Math.max(5, fichiers.length / 20);
+  const chemins = fichiers.map(norm);
+  const mots = [...new Set([fiche.nom, ...(fiche.alias || [])].flatMap(motsSignificatifs))].slice(0, 12)
+    .map(m => ({m, k: chemins.reduce((k, c) => k + (c.includes(m) ? 1 : 0), 0)})).filter(x => x.k && x.k <= seuil)
+    .map(x => ({m: x.m, poids: Math.log(fichiers.length / x.k)}));
+  const dossier = fiche.dossierPieces || "";
+  return fichiers.map((chemin, i) => {
+    const n = chemins[i], nomF = norm(chemin.split("/").pop());
+    let s = 0;
+    for (const {m, poids} of mots) if (nomF.includes(m)) s += 1.5 * poids; else if (n.includes(m)) s += poids;
+    const memeDossier = dossier && chemin.slice(0, chemin.lastIndexOf("/")) === dossier;
+    if (!s && !memeDossier) return null;
+    if (memeDossier) s += 3;
+    if (/paiement|attestation|releve|bulletin|decompte|echeancier|recapitulatif|avis/.test(nomF)) s += 1.5;
+    if (annee){
+      if (nomF.includes(annee)) s += 2; else if (n.includes(annee)) s += 1;
+      else if (/(19|20)\d\d/.test(nomF)) s -= 2;
+    }
+    return {chemin, score: s};
+  }).filter(x => x && x.score > 0).sort((a, b) => b.score - a.score || a.chemin.localeCompare(b.chemin, "fr")).slice(0, 8);
+}
+
 async function dialogueControle(c){
   const x = c || {sens: "credit", debut: (Number(aujourdhui().slice(0, 4)) - 1) + "-01-01", fin: (Number(aujourdhui().slice(0, 4)) - 1) + "-12-31"};
   const libelle = h("input", {type: "text", value: x.libelle || "", placeholder: "ex. Relevé annuel des paiements de la caisse"});
@@ -52,11 +96,30 @@ async function dialogueControle(c){
     try { chemin = await choisirPieceDocuments(); zoneChemin.textContent = chemin; zoneChemin.className = ""; }
     catch (e){ if (e.name !== "AbortError") message(e.message, true); }
   }}, "Choisir dans le dossier des documents…");
+  const propositions = h("div", {class: "petit"});
+  const chercher = async interactif => {
+    vider(propositions);
+    const f = obtenir("commercants", fiche.value); if (!f) return;
+    let racine = null;
+    try { racine = await dossierDocuments(interactif); } catch (e){ if (e.name !== "AbortError") message(e.message, true); return; }
+    if (!racine){ if (interactif) message("Dossier des documents non accessible.", true); return; }
+    propositions.appendChild(h("span", {class: "discret"}, "Recherche dans « " + racine.name + " »…"));
+    const liste = piecesProbables(f, (au.value || du.value || "").slice(0, 4), await indexDocuments(racine));
+    vider(propositions);
+    if (!liste.length){ propositions.appendChild(h("span", {class: "discret"}, "Aucune pièce trouvée à ce nom : « Choisir dans le dossier des documents… »")); return; }
+    propositions.appendChild(h("div", {class: "discret"}, "Pièces probables (cliquer pour retenir) :"));
+    for (const p of liste) propositions.appendChild(h("div", null, h("a", {href: "#", onclick: e => {
+      e.preventDefault(); chemin = p.chemin; zoneChemin.textContent = chemin; zoneChemin.className = "";
+      if (!libelle.value.trim()) libelle.value = p.chemin.split("/").pop().replace(/\.pdf$/i, "");
+    }}, p.chemin)));
+  };
+  fiche.addEventListener("change", () => chercher(false));
+  const boutonChercher = h("button", {class: "mini discret", type: "button", onclick: () => chercher(true)}, "Chercher dans mes documents");
   const ok = await dialogue({titre: c ? "Modifier le contrôle" : "Nouveau contrôle par total", large: true, corps: h("div", null,
       h("p", {class: "note"}, "Le total d'une pièce qui fait foi est comparé à la somme des opérations du fournisseur sur la période. Prenez le montant réellement versé ou payé (net versé, après prélèvement à la source), pas le net imposable."),
       champ("Pièce", libelle), champ("Fournisseur", fiche), h("div", {style: {display: "flex", gap: "1rem", flexWrap: "wrap"}}, champ("Du", du), champ("Au", au)),
       champ("Total de la pièce (€)", montant), champ("Sens", sens),
-      champ("Pièce dans vos documents (conseillé)", h("div", null, lier, " ", zoneChemin), "Le fichier reste où il est classé : l'application garde seulement son chemin, sans copie."),
+      champ("Pièce dans vos documents (conseillé)", h("div", null, boutonChercher, " ", lier, h("div", null, "Retenue : ", zoneChemin), propositions), "Le fichier reste où il est classé : l'application garde seulement son chemin, sans copie. Les pièces probables se proposent dès le choix du fournisseur."),
       champ("Ou joindre une copie (si le fichier n'est pas classé)", fichier, c ? "Laisser vide pour garder la copie déjà jointe." : null)),
     actions: [{libelle: "Annuler", classe: "discret", valeur: false}, {libelle: "Enregistrer", classe: "primaire", action: () => {
       if (!fiche.value || !du.value || !au.value || !lireMontant(montant.value)){ message("Indiquez le fournisseur, la période et le total.", true); return false; }
@@ -67,6 +130,8 @@ async function dialogueControle(c){
   const f = obtenir("commercants", fiche.value);
   const r = enregistrer("controles", Object.assign(x, {libelle: libelle.value.trim() || "Pièce sans titre", commercant: f.id, commercantNom: f.nom,
     debut: du.value, fin: au.value, montant: Math.abs(lireMontant(montant.value)), sens: sens.value, chemin}));
+  // Le dossier de la pièce est retenu sur la fiche : la pièce de l'année suivante y sera cherchée en premier
+  if (chemin && chemin.includes("/")){ f.dossierPieces = chemin.slice(0, chemin.lastIndexOf("/")); enregistrer("commercants", f); }
   const fi = fichier.files && fichier.files[0];
   if (fi){
     try { await enregistrerPiece(r.id, new Uint8Array(await fi.arrayBuffer()), fi.type || "application/pdf"); r.piece = true; enregistrer("controles", r); }
