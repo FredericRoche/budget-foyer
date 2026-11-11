@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-GT4lJg/ZoQD9p8LrKROGsTXVvvDoUnVoZPFv+wv4K8o=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-rKwhCwDff892BS92vZRQlxao2tfJBBMvKA8xVPE6ftE=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-11.1756";
+const VERSION_APP = "2026-11-11.1803";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -6183,6 +6183,10 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
   const grille = h("div", {class: "large-etroit"});
   const gauche = h("section");
   if (FICHIERS_EN_COURS.length){
+    // Ordre chronologique (fin de période, sinon date) : les clôtures s'enchaînent du plus ancien relevé au plus récent,
+    // chacune repartant du solde enregistré par la précédente ; « Tout enregistrer » suit cet ordre
+    const cleTri = f => String(f.lu?.periode?.fin || f.lu?.date || f.lu?.arrete || "9999");
+    FICHIERS_EN_COURS.sort((a, b) => cleTri(a) < cleTri(b) ? -1 : cleTri(a) > cleTri(b) ? 1 : 0);
     gauche.appendChild(h("h2", null, "Fichiers reconnus (" + FICHIERS_EN_COURS.length + ")"));
     const avecDepot = FICHIERS_EN_COURS.some(f => f.source);
     gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {

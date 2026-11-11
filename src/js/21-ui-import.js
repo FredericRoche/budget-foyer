@@ -17,6 +17,10 @@ declarerEcran("import", {titre: "Importer", rendre(c, etat){
   const grille = h("div", {class: "large-etroit"});
   const gauche = h("section");
   if (FICHIERS_EN_COURS.length){
+    // Ordre chronologique (fin de période, sinon date) : les clôtures s'enchaînent du plus ancien relevé au plus récent,
+    // chacune repartant du solde enregistré par la précédente ; « Tout enregistrer » suit cet ordre
+    const cleTri = f => String(f.lu?.periode?.fin || f.lu?.date || f.lu?.arrete || "9999");
+    FICHIERS_EN_COURS.sort((a, b) => cleTri(a) < cleTri(b) ? -1 : cleTri(a) > cleTri(b) ? 1 : 0);
     gauche.appendChild(h("h2", null, "Fichiers reconnus (" + FICHIERS_EN_COURS.length + ")"));
     const avecDepot = FICHIERS_EN_COURS.some(f => f.source);
     gauche.appendChild(tableau([{titre: "Fichier"}, {titre: "Reconnu comme"}, {titre: "Période ou date"}, {titre: "Nouvelles", num: true}, {titre: "Contrôle"}, {titre: ""}, avecDepot ? {titre: "Rangement"} : null].filter(Boolean), FICHIERS_EN_COURS, {classe: "serre", ligne: f => {
