@@ -77,7 +77,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
   }
 
   /* 3 bis. Échéances à confirmer (reprise du classeur, plans) : elles comptent déjà dans les projections */
-  const aConfirmer = vivants("echeances").filter(e => e.aConfirmer).sort((a, b) => (a.debut || "") < (b.debut || "") ? -1 : 1);
+  const aConfirmer = vivants("echeances").filter(echeanceAConfirmer).sort((a, b) => (a.debut || "") < (b.debut || "") ? -1 : 1);
   if (aConfirmer.length){
     const s5 = h("section", {style: {marginTop: "1rem"}});
     s5.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".4rem"}}, h("h2", {style: {margin: 0}}, "Échéances à confirmer (" + aConfirmer.length + ")"),

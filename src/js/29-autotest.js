@@ -804,6 +804,9 @@ async function autotest(){
     v("projet : dépenses déjà faites rattachées par catégorie", etatProjet("Travaux").paye, 950);
     const rp = appliquerPlan({comptes: [{nom: "Titres essai", type: "titres", banque: "Essai", valorisations: [{date: "2027-03-01", valeur: 1000}, {date: "2027-05-01", valeur: 0}]}]});
     const ct = vivants("comptes").find(x => x.nom === "Titres essai");
+    const avantConf = compteATraiter().echeances;
+    enregistrer("echeances", {libelle: "Essai remplacée", montant: 10, recurrence: "unique", debut: "2027-05-02", compte: cj.id, aConfirmer: true, active: false});
+    v("à traiter : échéance désactivée non comptée", compteATraiter().echeances - avantConf, 0);
     v("plan : compte-titres et valorisations, hors épargne", [rp.comptes, soldeCompte(ct, "2027-04-01"), soldeCompte(ct, "2027-06-01"), estMobilisable(ct)], [1, 1000, 0, false]);
     v("projet : prochain paiement net de la reprise du même jour", prochainPaiement([{date: "2027-06-15", montant: -61092}, {date: "2027-06-15", montant: 20000}, {date: "2027-07-01", montant: -5}]), {date: "2027-06-15", montant: -41092});
     enregistrer("operations", {compte: cj.id, date: "2027-03-05", montant: 1234.56, libelle: "VIREMENT EMPLOYEUR EXEMPLE", categorie: "Revenus", sousCategorie: "Salaire", nature: "Revenu", verrou: true});

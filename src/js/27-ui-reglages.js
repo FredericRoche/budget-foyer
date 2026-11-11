@@ -18,7 +18,7 @@ function reglagesDemarrage(c){
     ["Importer les relevés du mois (compte, cartes, Amex, facture des cartes)", vivants("imports").some(i => i.genre !== "reprise_v7"), "import"],
     ["Vérifier les comptes, titulaires et le compte de trésorerie", !!LIVRE.parametres.compteTresorerie, "reglages"],
     ["Importer les relevés de placements (livrets, PEA, assurances-vie, retraite)", vivants("valorisations").length > 0, "import"],
-    ["Confirmer les échéances proposées (pensions, loyer, travaux, voiture, cessions)", !vivants("echeances").some(e => e.aConfirmer) && vivants("echeances").length > 0, "tresorerie"],
+    ["Confirmer les échéances proposées (pensions, loyer, travaux, voiture, cessions)", !vivants("echeances").some(echeanceAConfirmer) && vivants("echeances").length > 0, "tresorerie"],
     ["Appairer le téléphone en saisie seule (onglet « Téléphones »)", !!LIVRE.parametres.appairageFait, "reglages"]];
   c.appendChild(h("section", {class: "carte"}, h("h2", null, "Mise en route"), h("ul", {class: "liste-traiter"},
     etapes.map(([t, ok, ecran]) => h("li", null, h("span", null, t), h("span", null, fait(ok), " ", h("button", {class: "mini discret", onclick: () => ecran === "reglages" ? null : aller(ecran)}, "Aller")))))));

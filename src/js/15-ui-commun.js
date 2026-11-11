@@ -215,11 +215,13 @@ function entete(titre, contexte, outils){
   return h("div", {class: "entete"}, h("div", null, h("h1", null, titre), contexte ? h("div", {class: "contexte"}, contexte) : null),
     outils ? h("div", {class: "outils"}, outils) : null);
 }
+/* Une échéance désactivée (remplacée par une autre) n'a plus rien à confirmer. */
+function echeanceAConfirmer(e){ return !!e.aConfirmer && e.active !== false; }
 function compteATraiter(){
   const ops = vivants("operations").filter(o => (o.statut === "a_preciser" || o.statut === "propose") && o.date >= debutAnomalies()).length;
   const js = vivants("justificatifs").filter(pieceOuverte).length;
   const factures = vivants("factures").filter(f => Math.abs(f.ecart || 0) >= 0.01 && !f.ecartVu).length;
-  const echeances = vivants("echeances").filter(e => e.aConfirmer).length;
+  const echeances = vivants("echeances").filter(echeanceAConfirmer).length;
   return {ops, js, factures, echeances, total: ops + js + factures + echeances};
 }
 function construireNavigation(){

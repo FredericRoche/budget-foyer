@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-rabsL/5V7pfnNkTR6RELhhfcqUju9OSj7zP4CUnCHr4=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-e0DEYbh+LiYj9BQj3yjD6Q4ZnL/6J4r/Odikxy7X5bg=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-10.2237";
+const VERSION_APP = "2026-11-11.1206";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -5270,11 +5270,13 @@ function entete(titre, contexte, outils){
   return h("div", {class: "entete"}, h("div", null, h("h1", null, titre), contexte ? h("div", {class: "contexte"}, contexte) : null),
     outils ? h("div", {class: "outils"}, outils) : null);
 }
+/* Une échéance désactivée (remplacée par une autre) n'a plus rien à confirmer. */
+function echeanceAConfirmer(e){ return !!e.aConfirmer && e.active !== false; }
 function compteATraiter(){
   const ops = vivants("operations").filter(o => (o.statut === "a_preciser" || o.statut === "propose") && o.date >= debutAnomalies()).length;
   const js = vivants("justificatifs").filter(pieceOuverte).length;
   const factures = vivants("factures").filter(f => Math.abs(f.ecart || 0) >= 0.01 && !f.ecartVu).length;
-  const echeances = vivants("echeances").filter(e => e.aConfirmer).length;
+  const echeances = vivants("echeances").filter(echeanceAConfirmer).length;
   return {ops, js, factures, echeances, total: ops + js + factures + echeances};
 }
 function construireNavigation(){
@@ -5815,7 +5817,7 @@ declarerEcran("traiter", {titre: "À traiter", rendre(c, etat){
   }
 
   /* 3 bis. Échéances à confirmer (reprise du classeur, plans) : elles comptent déjà dans les projections */
-  const aConfirmer = vivants("echeances").filter(e => e.aConfirmer).sort((a, b) => (a.debut || "") < (b.debut || "") ? -1 : 1);
+  const aConfirmer = vivants("echeances").filter(echeanceAConfirmer).sort((a, b) => (a.debut || "") < (b.debut || "") ? -1 : 1);
   if (aConfirmer.length){
     const s5 = h("section", {style: {marginTop: "1rem"}});
     s5.appendChild(h("div", {class: "outils", style: {justifyContent: "space-between", marginBottom: ".4rem"}}, h("h2", {style: {margin: 0}}, "Échéances à confirmer (" + aConfirmer.length + ")"),
@@ -7784,7 +7786,7 @@ function reglagesDemarrage(c){
     ["Importer les relevés du mois (compte, cartes, Amex, facture des cartes)", vivants("imports").some(i => i.genre !== "reprise_v7"), "import"],
     ["Vérifier les comptes, titulaires et le compte de trésorerie", !!LIVRE.parametres.compteTresorerie, "reglages"],
     ["Importer les relevés de placements (livrets, PEA, assurances-vie, retraite)", vivants("valorisations").length > 0, "import"],
-    ["Confirmer les échéances proposées (pensions, loyer, travaux, voiture, cessions)", !vivants("echeances").some(e => e.aConfirmer) && vivants("echeances").length > 0, "tresorerie"],
+    ["Confirmer les échéances proposées (pensions, loyer, travaux, voiture, cessions)", !vivants("echeances").some(echeanceAConfirmer) && vivants("echeances").length > 0, "tresorerie"],
     ["Appairer le téléphone en saisie seule (onglet « Téléphones »)", !!LIVRE.parametres.appairageFait, "reglages"]];
   c.appendChild(h("section", {class: "carte"}, h("h2", null, "Mise en route"), h("ul", {class: "liste-traiter"},
     etapes.map(([t, ok, ecran]) => h("li", null, h("span", null, t), h("span", null, fait(ok), " ", h("button", {class: "mini discret", onclick: () => ecran === "reglages" ? null : aller(ecran)}, "Aller")))))));
@@ -9340,6 +9342,9 @@ async function autotest(){
     v("projet : dépenses déjà faites rattachées par catégorie", etatProjet("Travaux").paye, 950);
     const rp = appliquerPlan({comptes: [{nom: "Titres essai", type: "titres", banque: "Essai", valorisations: [{date: "2027-03-01", valeur: 1000}, {date: "2027-05-01", valeur: 0}]}]});
     const ct = vivants("comptes").find(x => x.nom === "Titres essai");
+    const avantConf = compteATraiter().echeances;
+    enregistrer("echeances", {libelle: "Essai remplacée", montant: 10, recurrence: "unique", debut: "2027-05-02", compte: cj.id, aConfirmer: true, active: false});
+    v("à traiter : échéance désactivée non comptée", compteATraiter().echeances - avantConf, 0);
     v("plan : compte-titres et valorisations, hors épargne", [rp.comptes, soldeCompte(ct, "2027-04-01"), soldeCompte(ct, "2027-06-01"), estMobilisable(ct)], [1, 1000, 0, false]);
     v("projet : prochain paiement net de la reprise du même jour", prochainPaiement([{date: "2027-06-15", montant: -61092}, {date: "2027-06-15", montant: 20000}, {date: "2027-07-01", montant: -5}]), {date: "2027-06-15", montant: -41092});
     enregistrer("operations", {compte: cj.id, date: "2027-03-05", montant: 1234.56, libelle: "VIREMENT EMPLOYEUR EXEMPLE", categorie: "Revenus", sousCategorie: "Salaire", nature: "Revenu", verrou: true});
