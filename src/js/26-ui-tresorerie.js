@@ -125,6 +125,8 @@ async function editerEcheance(e){
   const budget = budgetActif(+(x.debut || aujourdhui()).slice(0, 4));
   const lb = selection([["", "—"], ...(budget?.lignes || []).map(l => [l.id, l.categorie + " › " + l.sousCategorie])], x.ligneBudget || "");
   const active = h("input", {type: "checkbox", checked: x.active !== false, id: "ech-active"});
+  // Une modification (date, montant) ne confirme rien d'office : l'échéance reste en suspens tant que la case l'est
+  const aConf = h("input", {type: "checkbox", checked: !!x.aConfirmer, id: "ech-a-confirmer"});
   const projets = [...new Set(vivants("echeances").map(y => y.projet).filter(Boolean))];
   const proj = h("input", {type: "text", value: x.projet || "", list: "ech-projets", placeholder: "vide : marche courante du foyer"});
   const listeProj = h("datalist", {id: "ech-projets"}, ...projets.map(n => h("option", {value: n})));
@@ -138,14 +140,15 @@ async function editerEcheance(e){
     h("div", {class: "case"}, capi, h("label", {for: "ech-capital"}, "Flux de capital (cession de titres, placement…) : hors marche courante, suivi dans Projets ; un projet l'est toujours")),
     h("div", {class: "case"}, resteCourant, h("label", {for: "ech-reste-courant"}, "Flux de capital payé par le compte courant (ex. avance d'impôt par le PAS) : compté dans sa trésorerie, mais ni dans l'épargne ni dans le résultat courant")),
     h("div", {class: "case"}, env, h("label", {for: "ech-enveloppe"}, "Enveloppe du projet : les paiements du projet s'imputent sur ce montant, le reste à payer diminue d'autant")),
-    h("div", {class: "case"}, active, h("label", {for: "ech-active"}, "Active"))),
+    h("div", {class: "case"}, active, h("label", {for: "ech-active"}, "Active")),
+    h("div", {class: "case"}, aConf, h("label", {for: "ech-a-confirmer"}, "À confirmer : en attente d'une information (tiers, échéancier…), reste dans la liste des suspens"))),
     actions: [e ? {libelle: "Supprimer", classe: "danger", action: () => { supprimer("echeances", e.id); return true; }} : null, {libelle: "Annuler", classe: "discret", valeur: false},
       {libelle: "Enregistrer", classe: "primaire", action: () => {
         const m = lireMontant(mt.value); if (isNaN(m) || !lib.value.trim()){ message("Libellé et montant requis.", true); return false; }
         const v = valeurCategorie(cat);
         if (!dateSaisieOk(d1, "Date") || !dateSaisieOk(d2, "Jusqu'au", true)) return false;
         enregistrer("echeances", Object.assign(x, {libelle: lib.value.trim(), montant: m, recurrence: rec.value, debut: d1.value, fin: d2.value || null, ligneBudget: lb.value || null,
-          active: active.checked, aConfirmer: false, nature: nat.value, projet: proj.value.trim() || null, capital: capi.checked, resteCourant: capi.checked && resteCourant.checked, enveloppe: env.checked && !!proj.value.trim()}, v.categorie === "À préciser" ? {} : v));
+          active: active.checked, aConfirmer: aConf.checked, nature: nat.value, projet: proj.value.trim() || null, capital: capi.checked, resteCourant: capi.checked && resteCourant.checked, enveloppe: env.checked && !!proj.value.trim()}, v.categorie === "À préciser" ? {} : v));
         return true;
       }}].filter(Boolean)});
   if (ok) rafraichirEcran();
