@@ -24,13 +24,18 @@ const payeParCourant = e => estCapital(e) && !!e.resteCourant && !e.projet;
 const estMobilisable = c => c.actif !== false && (c.mobilisable ?? ["livret", "assurance_vie", "retraite", "pea"].includes(c.type));
 
 /* Échéance « enveloppe » d'un projet (travaux…) : son montant est un plafond global. Reste à payer =
-   enveloppe − paiements déjà faits sur le projet − autres paiements prévus du projet (jamais négatif). */
+   enveloppe − paiements déjà faits sur le projet − factures saisies pas encore au relevé (débitées à part, à leur date)
+   − autres paiements prévus du projet (jamais négatif). */
 function montantEcheance(e){
   if (!e.enveloppe || !e.projet || !(e.montant < 0)) return e.montant;
   const ech = vivants("echeances").filter(x => x.projet === e.projet && x.active !== false);
-  const paye = -somme(operationsDuProjet(e.projet, ech), o => o.montant);
+  const paye = -somme(operationsDuProjet(e.projet, ech), o => o.montant) + somme(facturesEnAttente(e.projet), j => j.montant || 0);
   const autres = -somme(ech.filter(x => x !== e && x.id !== e.id && !x.enveloppe), x => somme(occurrences(x, ajouterJours(aujourdhui(), 1), "2100-12-31"), () => x.montant));
   return -Math.max(0, -e.montant - paye - Math.max(0, autres));
+}
+function libelleFacture(j, nom){
+  const f = (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || "fournisseur";
+  return "Facture " + f + (j.numero ? " n° " + j.numero : "") + (j.datePaiement ? " (payée le " + dateCourte(j.datePaiement) + ", attend le relevé)" : " (à payer)") + " · projet " + nom;
 }
 function occurrences(e, debut, fin){
   const r = []; const d0 = e.debut || debut;
@@ -149,6 +154,9 @@ function simulerTresorerie(options){
     if (o.perimetre === "courant" && estCapital(e) && !payeParCourant(e)) continue;
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, montantEcheance(e), e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
   }
+  // Factures de projet pas encore au relevé : hors marche courante, comme les échéances de projet
+  if (o.perimetre !== "courant") for (const nom of nomsProjets()) for (const j of facturesEnAttente(nom))
+    ajouter(dateDebitFacture(j, o.depart), -(j.montant || 0), libelleFacture(j, nom), "echeance", true);
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
   // Intérêts des livrets de l'année écoulée, virés au compte courant en janvier
   const interetsLivrets = produitsEpargne(o.depart).livrets;
@@ -243,6 +251,9 @@ function simulerEpargne(options){
       if (estCapital(e)) ajouter(d, montantEcheance(e), e.libelle + (e.projet ? " (projet " + e.projet + ")" : ""), e.projet ? "projet" : "capital", e);
       else if (courant && estVirementDepuisEpargne(e, courant.compte)) ajouter(d, -e.montant, e.libelle + " (vers " + courant.compte.nom + ")", "courant", e);
     }
+  for (const nom of nomsProjets()) for (const j of facturesEnAttente(nom)){
+    const d = dateDebitFacture(j, o.depart); if (d <= fin) ajouter(d, -(j.montant || 0), libelleFacture(j, nom), "projet", null);
+  }
   const interetsLivrets = produitsEpargne(o.depart).livrets;
   if (interetsLivrets && courant) for (let an = +o.depart.slice(0, 4) + 1; an <= +fin.slice(0, 4); an++){
     const d = an + "-01-" + pad2(JOUR_VIREMENT_LIVRETS); if (d > o.depart && d <= fin) ajouter(d, -interetsLivrets, "Intérêts " + (an - 1) + " des livrets, virés vers " + courant.compte.nom, "courant", null);

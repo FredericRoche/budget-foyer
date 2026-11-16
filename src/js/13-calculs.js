@@ -33,6 +33,37 @@ function estDepenseProjet(o, regles, parCategorie){
   const cat = (regles || reglesProjets()).some(r => r.categorie === o.categorie && (!r.sousCategorie || r.sousCategorie === o.sousCategorie));
   return cat && (parCategorie || o.nature === "Exceptionnelle");
 }
+/* Facture d'un projet : pièce (hors note de frais et saisie à valider) qui porte le nom du projet, ou la catégorie
+   (et la sous-catégorie si elle est précisée) d'une échéance du projet ou de sa liste « rattache ». */
+function projetDePiece(j){
+  if (!j || j.aValider || estNoteFrais(j)) return null;
+  if (j.projet) return j.projet;
+  for (const e of vivants("echeances").filter(x => x.projet && x.active !== false))
+    for (const r of [...(e.rattache || []), e.categorie ? {categorie: e.categorie, sousCategorie: e.sousCategorie} : null].filter(Boolean))
+      if (r.categorie === j.categorie && (!r.sousCategorie || r.sousCategorie === j.sousCategorie)) return e.projet;
+  return null;
+}
+function facturesDuProjet(nom){ return vivants("justificatifs").filter(j => projetDePiece(j) === nom); }
+/* Trois états d'une facture : à payer ; payée (virement émis ou chèque remis à la date saisie), en attente du relevé ;
+   rapprochée (son paiement est au relevé). Une pièce antérieure au début du contrôle, jamais rapprochée, est close (réglée). */
+function statutFacture(j){
+  if (j.statut === "rapproche") return "rapprochee";
+  if (j.datePaiement) return "payee";
+  return pieceClose(j) ? "close" : "a_payer";
+}
+/* Délai de paiement lu sur la facture (« délai de paiement est de 1 mois », « à 30 jours », « à réception »), en jours ; 30 à défaut. */
+function delaiPaiement(j){
+  const t = norm(j.texteOCR || "").toLowerCase();
+  if (/payable (des|a) (la )?reception|a reception de (la )?facture/.test(t)) return 0;
+  const m = t.match(/delai de (?:paiement|reglement)[^.]{0,30}?(\d{1,3}) (jours|mois)/) || t.match(/(?:paiement|reglement|payable) a (\d{1,3}) (jours|mois)/);
+  return m ? (m[2] === "mois" ? 30 * +m[1] : +m[1]) : 30;
+}
+function echeancePaiement(j){ return ajouterJours(j.date || aujourdhui(), delaiPaiement(j)); }
+/* Factures de projet pas encore au relevé (à payer ou payées) : débits à venir, déduits de l'enveloppe du projet. */
+function facturesEnAttente(nom){ return facturesDuProjet(nom).filter(j => ["a_payer", "payee"].includes(statutFacture(j))); }
+/* Date du débit attendu : celle du paiement saisi, sinon l'échéance ; au plus tôt le lendemain du départ d'une simulation. */
+function dateDebitFacture(j, depart){ const d = j.datePaiement || echeancePaiement(j); return d > depart ? d : ajouterJours(depart, 1); }
+
 /* Dépenses de projets d'une période (montant positif), hors « Hors budget » et revenus. */
 function depensesProjets(debut, fin, regles){
   return -somme(partsPeriode(debut, fin, p => !horsResultat(p) && p.nature !== "Revenu" && estDepenseProjet(p, regles)), p => p.montant);

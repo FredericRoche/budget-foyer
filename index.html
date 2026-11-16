@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-7gmxAYvimTSzCFhv6WL3JTz/J1QqC3MM+VQmfdg5uhM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-IN1ImhwKgY64S6GmlbvuJuk6L2I82+O/xNO/bFJ32Q8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-16.1935";
+const VERSION_APP = "2026-11-16.1947";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3440,13 +3440,15 @@ function apprendreChiffresCarte(carte4, carte){
 function candidats(js){
   const j = Object.assign({}, js[0]); const cents = montantJustif(js);
   if (!j.carte && j.carte4) j.carte = carteDesChiffres(j.carte4);
-  const [avant, apres] = fenetre(j);
+  // Facture marquée payée : on cherche le débit autour de la date du paiement (−2 / +10 jours), pas de la facture
+  const ref = j.datePaiement || j.date;
+  const [avant, apres] = j.datePaiement ? [2, 10] : fenetre(j);
   const nomJ = js.map(x => [x.commercantNom, x.raisonSociale].filter(Boolean).join(" ")).join(" ");
   const credit = estNoteFrais(j);   // remboursement attendu : on cherche un crédit
   const r = [];
   for (const op of vivants("operations")){
     if ((credit ? op.montant <= 0 : op.montant >= 0) || Math.abs(versCentimes(op.montant)) !== cents) continue;
-    const dj = ecartJours(j.date, op.date);
+    const dj = ecartJours(ref, op.date);
     if (dj < -avant || dj > apres) continue;
     const compte = obtenir("comptes", op.compte); if (!compte || !compteCompatible(j, compte)) continue;
     // Numéro de chèque exigé quand l'opération en porte un ; un chèque importé sans son numéro (avant le 05/11/2026) se rapproche au montant
@@ -3726,7 +3728,8 @@ function libelleMoyen(carte){
 }
 function encoursSaisis(){
   const m = new Map();
-  for (const j of vivants("justificatifs").filter(x => pieceOuverte(x) && x.carte !== "ESPECES" && !estNoteFrais(x))){
+  // Facture de projet encore à payer : rien n'est émis, elle n'est pas un en-cours (le moyen choisi n'est qu'une intention)
+  for (const j of vivants("justificatifs").filter(x => pieceOuverte(x) && x.carte !== "ESPECES" && !estNoteFrais(x) && !(projetDePiece(x) && statutFacture(x) === "a_payer"))){
     const k = libelleMoyen(j.carte); const g = m.get(k) || m.set(k, {moyen: k, n: 0, montant: 0, depuis: j.date}).get(k);
     g.n++; g.montant += j.montant || 0; if (j.date && j.date < g.depuis) g.depuis = j.date;
   }
@@ -4648,6 +4651,37 @@ function estDepenseProjet(o, regles, parCategorie){
   const cat = (regles || reglesProjets()).some(r => r.categorie === o.categorie && (!r.sousCategorie || r.sousCategorie === o.sousCategorie));
   return cat && (parCategorie || o.nature === "Exceptionnelle");
 }
+/* Facture d'un projet : pièce (hors note de frais et saisie à valider) qui porte le nom du projet, ou la catégorie
+   (et la sous-catégorie si elle est précisée) d'une échéance du projet ou de sa liste « rattache ». */
+function projetDePiece(j){
+  if (!j || j.aValider || estNoteFrais(j)) return null;
+  if (j.projet) return j.projet;
+  for (const e of vivants("echeances").filter(x => x.projet && x.active !== false))
+    for (const r of [...(e.rattache || []), e.categorie ? {categorie: e.categorie, sousCategorie: e.sousCategorie} : null].filter(Boolean))
+      if (r.categorie === j.categorie && (!r.sousCategorie || r.sousCategorie === j.sousCategorie)) return e.projet;
+  return null;
+}
+function facturesDuProjet(nom){ return vivants("justificatifs").filter(j => projetDePiece(j) === nom); }
+/* Trois états d'une facture : à payer ; payée (virement émis ou chèque remis à la date saisie), en attente du relevé ;
+   rapprochée (son paiement est au relevé). Une pièce antérieure au début du contrôle, jamais rapprochée, est close (réglée). */
+function statutFacture(j){
+  if (j.statut === "rapproche") return "rapprochee";
+  if (j.datePaiement) return "payee";
+  return pieceClose(j) ? "close" : "a_payer";
+}
+/* Délai de paiement lu sur la facture (« délai de paiement est de 1 mois », « à 30 jours », « à réception »), en jours ; 30 à défaut. */
+function delaiPaiement(j){
+  const t = norm(j.texteOCR || "").toLowerCase();
+  if (/payable (des|a) (la )?reception|a reception de (la )?facture/.test(t)) return 0;
+  const m = t.match(/delai de (?:paiement|reglement)[^.]{0,30}?(\d{1,3}) (jours|mois)/) || t.match(/(?:paiement|reglement|payable) a (\d{1,3}) (jours|mois)/);
+  return m ? (m[2] === "mois" ? 30 * +m[1] : +m[1]) : 30;
+}
+function echeancePaiement(j){ return ajouterJours(j.date || aujourdhui(), delaiPaiement(j)); }
+/* Factures de projet pas encore au relevé (à payer ou payées) : débits à venir, déduits de l'enveloppe du projet. */
+function facturesEnAttente(nom){ return facturesDuProjet(nom).filter(j => ["a_payer", "payee"].includes(statutFacture(j))); }
+/* Date du débit attendu : celle du paiement saisi, sinon l'échéance ; au plus tôt le lendemain du départ d'une simulation. */
+function dateDebitFacture(j, depart){ const d = j.datePaiement || echeancePaiement(j); return d > depart ? d : ajouterJours(depart, 1); }
+
 /* Dépenses de projets d'une période (montant positif), hors « Hors budget » et revenus. */
 function depensesProjets(debut, fin, regles){
   return -somme(partsPeriode(debut, fin, p => !horsResultat(p) && p.nature !== "Revenu" && estDepenseProjet(p, regles)), p => p.montant);
@@ -4949,13 +4983,18 @@ const payeParCourant = e => estCapital(e) && !!e.resteCourant && !e.projet;
 const estMobilisable = c => c.actif !== false && (c.mobilisable ?? ["livret", "assurance_vie", "retraite", "pea"].includes(c.type));
 
 /* Échéance « enveloppe » d'un projet (travaux…) : son montant est un plafond global. Reste à payer =
-   enveloppe − paiements déjà faits sur le projet − autres paiements prévus du projet (jamais négatif). */
+   enveloppe − paiements déjà faits sur le projet − factures saisies pas encore au relevé (débitées à part, à leur date)
+   − autres paiements prévus du projet (jamais négatif). */
 function montantEcheance(e){
   if (!e.enveloppe || !e.projet || !(e.montant < 0)) return e.montant;
   const ech = vivants("echeances").filter(x => x.projet === e.projet && x.active !== false);
-  const paye = -somme(operationsDuProjet(e.projet, ech), o => o.montant);
+  const paye = -somme(operationsDuProjet(e.projet, ech), o => o.montant) + somme(facturesEnAttente(e.projet), j => j.montant || 0);
   const autres = -somme(ech.filter(x => x !== e && x.id !== e.id && !x.enveloppe), x => somme(occurrences(x, ajouterJours(aujourdhui(), 1), "2100-12-31"), () => x.montant));
   return -Math.max(0, -e.montant - paye - Math.max(0, autres));
+}
+function libelleFacture(j, nom){
+  const f = (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || "fournisseur";
+  return "Facture " + f + (j.numero ? " n° " + j.numero : "") + (j.datePaiement ? " (payée le " + dateCourte(j.datePaiement) + ", attend le relevé)" : " (à payer)") + " · projet " + nom;
 }
 function occurrences(e, debut, fin){
   const r = []; const d0 = e.debut || debut;
@@ -5074,6 +5113,9 @@ function simulerTresorerie(options){
     if (o.perimetre === "courant" && estCapital(e) && !payeParCourant(e)) continue;
     for (const d of occurrences(e, ajouterJours(o.depart, 1), fin)) ajouter(d, montantEcheance(e), e.libelle, "echeance", Math.abs(e.montant) >= 1000 || e.recurrence === "unique", e.recurrence && e.recurrence !== "unique");
   }
+  // Factures de projet pas encore au relevé : hors marche courante, comme les échéances de projet
+  if (o.perimetre !== "courant") for (const nom of nomsProjets()) for (const j of facturesEnAttente(nom))
+    ajouter(dateDebitFacture(j, o.depart), -(j.montant || 0), libelleFacture(j, nom), "echeance", true);
   for (const s of o.supplements) ajouter(s.date, s.montant, s.libelle, "simulation", true);
   // Intérêts des livrets de l'année écoulée, virés au compte courant en janvier
   const interetsLivrets = produitsEpargne(o.depart).livrets;
@@ -5168,6 +5210,9 @@ function simulerEpargne(options){
       if (estCapital(e)) ajouter(d, montantEcheance(e), e.libelle + (e.projet ? " (projet " + e.projet + ")" : ""), e.projet ? "projet" : "capital", e);
       else if (courant && estVirementDepuisEpargne(e, courant.compte)) ajouter(d, -e.montant, e.libelle + " (vers " + courant.compte.nom + ")", "courant", e);
     }
+  for (const nom of nomsProjets()) for (const j of facturesEnAttente(nom)){
+    const d = dateDebitFacture(j, o.depart); if (d <= fin) ajouter(d, -(j.montant || 0), libelleFacture(j, nom), "projet", null);
+  }
   const interetsLivrets = produitsEpargne(o.depart).livrets;
   if (interetsLivrets && courant) for (let an = +o.depart.slice(0, 4) + 1; an <= +fin.slice(0, 4); an++){
     const d = an + "-01-" + pad2(JOUR_VIREMENT_LIVRETS); if (d > o.depart && d <= fin) ajouter(d, -interetsLivrets, "Intérêts " + (an - 1) + " des livrets, virés vers " + courant.compte.nom, "courant", null);
@@ -6898,7 +6943,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); window.scrollTo(0, 0); }},
       h("td", null, dateFr(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : x.datePaiement ? "payée le " + dateCourte(x.datePaiement) + ", attend le relevé" : projetDePiece(x) ? "à payer" : "attend le relevé")))}));
 }});
 
 /* Validation en lot des rapprochements sûrs : chaque ligne montre la pièce, l'opération et ce qui changerait ;
@@ -6992,7 +7037,11 @@ function ecranRapprochement(j, etat, attente){
       ...comptesDeType("courant").flatMap(c => [["CPT:" + c.id, "Virement ou prélèvement · " + c.nom], ["CHQ:" + c.id, "Chèque · " + c.nom]]), ["ESPECES", "Espèces"]], x.carte || "");
     const cheque = h("input", {type: "text", inputmode: "numeric", value: x.cheque || "", placeholder: "n° du chèque", style: {width: "9rem"}});
     const ligneCheque = h("div", {class: "champ-ocr", hidden: !String(x.carte || "").startsWith("CHQ:")}, h("label", null, "N° de chèque"), cheque, h("span", {class: "confiance"}, "pour le rapprochement"));
-    carte.addEventListener("change", () => { ligneCheque.hidden = !carte.value.startsWith("CHQ:"); });
+    // Virement émis ou chèque remis : date du paiement (la facture n'est plus « à payer » ; le relevé confirmera)
+    const payeeLe = champDate({value: x.datePaiement || ""});
+    const direct = v => /^(CPT|CHQ):/.test(v || "");
+    const lignePayee = h("div", {class: "champ-ocr", hidden: !direct(x.carte) || estNoteFrais(x)}, h("label", null, "Payée le"), payeeLe, h("span", {class: "confiance"}, "vide = à payer ; sinon virement émis ou chèque remis ce jour-là"));
+    carte.addEventListener("change", () => { ligneCheque.hidden = !carte.value.startsWith("CHQ:"); lignePayee.hidden = !direct(carte.value) || estNoteFrais({type: type.value}); });
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     // Note de frais : le moyen de paiement devient le compte sur lequel le remboursement est attendu
     const libPaye = () => estNoteFrais({type: type.value}) ? "Remboursé sur" : "Payé avec";
@@ -7001,16 +7050,17 @@ function ecranRapprochement(j, etat, attente){
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier") : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque);
-    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num});
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque, lignePayee);
+    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num, payeeLe});
   });
   const enregistrerSaisie = () => {
     const aliasAProposer = [];
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
+      if (/^(CPT|CHQ):/.test(f.carte.value) && !dateSaisieOk(f.payeeLe, "Payée le", true)) return false;
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
-        lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
+        lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : "", datePaiement: /^(CPT|CHQ):/.test(f.carte.value) ? f.payeeLe.value || "" : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
       // Le fournisseur est créé (ou rattaché) à la validation, y compris un nom resté provisoire
       // Fiche choisie dans la liste : prise telle quelle. « Nouveau fournisseur… » : fiche de ce nom, sinon une
@@ -8328,8 +8378,34 @@ function etatProjet(nom){
   const ech = vivants("echeances").filter(e => e.projet === nom && e.active !== false);
   const prevu = ech.flatMap(e => occurrences(e, ajouterJours(aujourdhui(), 1), "2100-12-31").map(d => ({date: d, montant: montantEcheance(e), echeance: e}))).sort((a, b) => a.date < b.date ? -1 : 1);
   const ops = operationsDuProjet(nom, ech);
+  const factures = facturesDuProjet(nom);
+  const aPayer = factures.filter(j => statutFacture(j) === "a_payer"), payees = factures.filter(j => statutFacture(j) === "payee");
   const paye = -somme(ops, o => o.montant), reste = -somme(prevu, x => x.montant);
-  return {nom, ech, prevu, ops, paye, reste, total: paye + reste};
+  const emis = somme(payees, j => j.montant || 0), du = somme(aPayer, j => j.montant || 0);
+  return {nom, ech, prevu, ops, factures, aPayer, payees, paye, emis, du, reste, total: paye + emis + du + reste};
+}
+/* « Marquer comme payée… » : date du paiement, moyen (virement ou chèque) et compte ; le relevé confirmera. */
+async function marquerFacturePayee(j){
+  const date = champDate({value: j.datePaiement || aujourdhui()});
+  const choix = comptesDeType("courant").flatMap(c => [["CPT:" + c.id, "Virement · " + c.nom], ["CHQ:" + c.id, "Chèque · " + c.nom]]);
+  const defaut = /^(CPT|CHQ):/.test(j.carte || "") ? j.carte : "CPT:" + (LIVRE.parametres.compteTresorerie || comptesDeType("courant")[0]?.id || "");
+  const moyen = selection(choix, defaut);
+  const cheque = h("input", {type: "text", inputmode: "numeric", value: j.cheque || "", placeholder: "n° du chèque"});
+  const ligneChq = champ("N° de chèque", cheque); ligneChq.hidden = !moyen.value.startsWith("CHQ:");
+  moyen.addEventListener("change", () => { ligneChq.hidden = !moyen.value.startsWith("CHQ:"); });
+  const f = (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || "fournisseur";
+  const ok = await dialogue({titre: "Marquer comme payée", corps: h("div", null,
+    h("p", {class: "note", style: {marginTop: 0}}, f + (j.numero ? ", facture n° " + j.numero : "") + " du " + dateFr(j.date) + " : " + euros(j.montant) + "."),
+    champ("Payée le", date), champ("Moyen et compte", moyen), ligneChq,
+    h("p", {class: "note"}, "Elle quitte les factures à payer et attend le relevé ; le rapprochement cherchera ce débit sur ce compte, quelques jours après cette date.")),
+    actions: [j.datePaiement ? {libelle: "Remettre à payer", classe: "discret", action: () => { enregistrer("justificatifs", Object.assign(j, {datePaiement: ""})); return true; }} : null,
+      {libelle: "Annuler", classe: "discret", valeur: false},
+      {libelle: "Enregistrer", classe: "primaire", action: () => {
+        if (!dateSaisieOk(date, "Payée le")) return false;
+        enregistrer("justificatifs", Object.assign(j, {datePaiement: date.value, carte: moyen.value, cheque: moyen.value.startsWith("CHQ:") ? cheque.value.replace(/\D/g, "") : ""}));
+        return true;
+      }}].filter(Boolean)});
+  if (ok){ rapprocherTout(); rafraichirEcran(); }
 }
 
 // Case d'indicateur ; avec « clic », elle devient un bouton qui ouvre ou referme son détail.
@@ -8486,15 +8562,16 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
   const etats = noms.map(etatProjet);
   const proch = etats.map(x => Object.assign({projet: x.nom}, prochainPaiement(x.prevu) || {date: "9999"})).filter(x => x.montant).sort((a, b) => a.date < b.date ? -1 : 1)[0];
   const ind = h("div", {class: "indicateurs"});
+  const emisT = somme(etats, x => x.emis), duT = somme(etats, x => x.du);
   ind.append(carteInd("Coût total des projets", euros(somme(etats, x => x.total), 0), noms.length + " projet(s)"),
-    carteInd("Déjà payé", euros(somme(etats, x => x.paye), 0), somme(etats, x => x.ops.length) + " opération(s)"),
-    carteInd("Reste à payer", euros(somme(etats, x => x.reste), 0), "selon les échéances"),
+    carteInd("Déjà payé", euros(somme(etats, x => x.paye) + emisT, 0), somme(etats, x => x.ops.length) + " opération(s)" + (emisT > 0.5 ? " · dont " + euros(emisT, 0) + " pas encore au relevé" : "")),
+    carteInd("Reste à payer", euros(somme(etats, x => x.reste) + duT, 0), duT > 0.5 ? "dont " + euros(duT, 0) + " de factures reçues" : "selon les échéances", somme(etats, x => x.aPayer.filter(j => echeancePaiement(j) < aujourdhui()).length) > 0),
     carteInd("Prochain paiement", proch ? euros(-proch.montant, 0) : "—", proch ? dateFr(proch.date) + " · " + proch.projet : ""));
   c.appendChild(ind);
   c.appendChild(tableau([{titre: "Projet"}, {titre: "Coût total", num: true}, {titre: "Payé", num: true}, {titre: "Reste", num: true}, {titre: "Avancement"}, {titre: "Prochain paiement"}], etats, {ligne: x => {
-    const pr = prochainPaiement(x.prevu); const pct = x.total ? Math.round(x.paye / x.total * 100) : 0;
+    const pr = prochainPaiement(x.prevu); const pct = x.total ? Math.round((x.paye + x.emis) / x.total * 100) : 0;
     return h("tr", {class: "cliquable" + (etat.projet === x.nom ? " choisie" : ""), onclick: () => { etat.projet = x.nom; rafraichirEcran(); }},
-      h("td", null, h("strong", null, x.nom)), h("td", {class: "num"}, euros(x.total, 0)), h("td", {class: "num"}, euros(x.paye, 0)), h("td", {class: "num"}, euros(x.reste, 0)),
+      h("td", null, h("strong", null, x.nom)), h("td", {class: "num"}, euros(x.total, 0)), h("td", {class: "num"}, euros(x.paye + x.emis, 0)), h("td", {class: "num"}, euros(x.reste + x.du, 0)),
       h("td", null, h("div", {class: "jauge"}, h("span", {style: {width: Math.min(100, pct) + "%"}})), h("span", {class: "petit discret"}, pct + " %")),
       h("td", null, pr ? dateFr(pr.date) + " · " + euros(-pr.montant, 0) : "—"));
   }}));
@@ -8510,15 +8587,37 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
       h("tr", {class: "cliquable", onclick: () => aller("operations", {choisie: o.id, mois: ""})}, h("td", null, dateFr(o.date)), h("td", null, obtenir("commercants", o.commercant)?.nom || o.libelle), h("td", null, libelleCompte(o.compte)), montantCellule(o.montant))}),
     h("p", {class: "note"}, "Rattachement : champ « Projet » du détail d'une opération, ou d'office pour une dépense « Exceptionnelle » de la catégorie d'une échéance du projet (ou des catégories qui lui sont rattachées).")));
   c.appendChild(g);
-  // Par poste : sous-catégorie des échéances (prévu) et des paiements (payé)
-  const postes = new Map(), poste = k => postes.get(k) || postes.set(k, {poste: k, prevu: 0, paye: 0, n: 0}).get(k);
+  // Factures reçues pas encore au relevé : à payer (échéance, retard) puis payées (virement émis, chèque remis)
+  const auj = aujourdhui();
+  const enAttente = [...x.aPayer.sort((a, b) => echeancePaiement(a) < echeancePaiement(b) ? -1 : 1), ...x.payees.sort((a, b) => a.datePaiement < b.datePaiement ? -1 : 1)];
+  const nomF = j => (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || j.raisonSociale || "—";
+  c.appendChild(h("section", null, h("h2", null, "Factures pas encore au relevé : " + x.nom),
+    tableau([{titre: "Facture du"}, {titre: "Fournisseur"}, {titre: "N°"}, {titre: "Montant", num: true}, {titre: "État"}, {titre: ""}], enAttente, {classe: "serre", vide: "Aucune facture en attente : toutes les factures saisies sont au relevé.", ligne: j => {
+      const ech = echeancePaiement(j), retard = !j.datePaiement && ech < auj ? ecartJours(ech, auj) : 0;
+      return h("tr", {class: j.datePaiement ? "" : "choisie"}, h("td", null, dateFr(j.date)), h("td", null, nomF(j), j.natureExacte ? h("div", {class: "petit discret"}, j.natureExacte) : null), h("td", null, j.numero || ""),
+        montantCellule(-(j.montant || 0)),
+        h("td", null, j.datePaiement ? h("span", {class: "pos"}, "payée le " + dateFr(j.datePaiement) + " (" + libelleMoyen(j.carte).replace(/^Virements/, "virement").replace(/^Chèques/, "chèque") + "), attend le relevé")
+          : h("span", {class: retard ? "neg" : ""}, "à payer avant le " + dateFr(ech) + (retard ? " — en retard de " + retard + " j" : ""))),
+        h("td", null, h("button", {class: "mini" + (j.datePaiement ? " discret" : ""), onclick: () => marquerFacturePayee(j)}, j.datePaiement ? "Modifier…" : "Marquer comme payée…"), " ",
+          h("button", {class: "mini discret", onclick: () => aller("justificatifs", {choisi: j.id})}, "Ouvrir")));
+    }}),
+    h("p", {class: "note"}, "Factures saisies dans Justificatifs et rattachées au projet (catégorie d'une de ses échéances). Une facture payée attend son débit au relevé, qui la rapproche ; d'ici là elle est déduite de l'enveloppe et comptée en trésorerie à la date du paiement. "
+      + "Échéance : date de la facture plus le délai lu sur la pièce (30 jours à défaut).")));
+  // Par poste : sous-catégorie des échéances (prévu), des paiements (payé) et des factures reçues pas encore au relevé
+  const postes = new Map(), poste = k => postes.get(k) || postes.set(k, {poste: k, prevu: 0, paye: 0, emis: 0, du: 0, n: 0}).get(k);
   for (const pv of x.prevu) poste(pv.echeance.sousCategorie || "Enveloppe non ventilée").prevu -= pv.montant;
   for (const o of x.ops){ const q = poste(o.sousCategorie || "Sans poste"); q.paye -= o.montant; q.n++; }
-  const lp = [...postes.values()].sort((a, b) => (b.paye + b.prevu) - (a.paye + a.prevu));
+  for (const j of x.payees) poste(j.sousCategorie || "Sans poste").emis += j.montant || 0;
+  for (const j of x.aPayer) poste(j.sousCategorie || "Sans poste").du += j.montant || 0;
+  const tot = q => q.paye + q.emis + q.du + q.prevu;
+  const lp = [...postes.values()].sort((a, b) => tot(b) - tot(a));
+  const vide0 = v => v > 0.5 || v < -0.5 ? euros(v, 0) : "";
   c.appendChild(h("section", null, h("h2", null, "Par poste : " + x.nom),
-    tableau([{titre: "Poste"}, {titre: "Payé", num: true}, {titre: "Paiements", num: true}, {titre: "Reste prévu", num: true}, {titre: "Total", num: true}], lp, {classe: "serre", vide: "Aucun poste.", ligne: q =>
-      h("tr", null, h("td", null, q.poste), h("td", {class: "num"}, euros(q.paye, 0)), h("td", {class: "num"}, String(q.n || "")), h("td", {class: "num"}, q.prevu ? euros(q.prevu, 0) : ""), h("td", {class: "num"}, euros(q.paye + q.prevu, 0)))}),
-    h("p", {class: "note"}, "Poste = sous-catégorie des paiements et des échéances. Pour suivre un budget par poste, saisissez une échéance par lot (même projet, sous-catégorie du lot) et réduisez d'autant l'enveloppe non ventilée.")));
+    tableau([{titre: "Poste"}, {titre: "Payé (relevé)", num: true}, {titre: "Paiements", num: true}, {titre: "Payé, pas au relevé", num: true}, {titre: "Factures à payer", num: true}, {titre: "Reste prévu", num: true}, {titre: "Total", num: true}], lp, {classe: "serre", vide: "Aucun poste.", ligne: q =>
+      h("tr", null, h("td", null, q.poste), h("td", {class: "num"}, euros(q.paye, 0)), h("td", {class: "num"}, String(q.n || "")), h("td", {class: "num"}, vide0(q.emis)), h("td", {class: "num"}, vide0(q.du)),
+        h("td", {class: "num"}, vide0(q.prevu)), h("td", {class: "num"}, euros(tot(q), 0)))}),
+    h("p", {class: "note"}, "Poste = sous-catégorie des paiements, des factures et des échéances. L'enveloppe du projet est diminuée des paiements et des factures reçues ; une échéance datée (lot, appel de fonds) ne l'est pas : saisir la facture d'un lot déjà prévu par une échéance le compterait deux fois, réduisez alors l'échéance. "
+      + "Pour suivre un budget par poste, saisissez une échéance par lot (même projet, sous-catégorie du lot) et réduisez d'autant l'enveloppe non ventilée.")));
 }});
 
 /* ===== 27c-ui-controles.js ===== */
@@ -9581,6 +9680,21 @@ async function autotest(){
           const jd = enregistrer("justificatifs", {type: "facture", date: "2031-04-02", montant: 2880, commercant: "cm-essai-doublon", numero: "2611103", statut: "a_rapprocher", operations: []});
           v("doublon : même fournisseur, montant et jour signalés quand le numéro manque d'un côté", [justificatifDejaLa({montant: 2880, date: "2031-04-02", commercant: "cm-essai-doublon"})?.id, justificatifDejaLa({montant: 2880, date: "2031-04-02", commercant: "cm-essai-doublon", numero: "999"})], [jd.id, null]);
           supprimer("justificatifs", jd.id);
+        }
+        {
+          const cpt = comptesDeType("courant")[0];
+          const ep = enregistrer("echeances", {libelle: "Enveloppe essai", projet: "Chantier essai", categorie: "Travaux essai", sousCategorie: "", montant: -10000, recurrence: "unique", debut: ajouterJours(aujourdhui(), 200), enveloppe: true, active: true});
+          const jf = enregistrer("justificatifs", {type: "facture", date: aujourdhui(), montant: 1000, categorie: "Travaux essai", sousCategorie: "Études", carte: "CPT:" + cpt.id, statut: "a_rapprocher", operations: [], texteOCR: "Le délai de paiement est de 1 mois à compter de la date d'émission"});
+          const etat1 = [projetDePiece(jf), statutFacture(jf), delaiPaiement(jf), montantEcheance(ep), encoursSaisis().lignes.some(l => /^Virements/.test(l.moyen) && l.montant >= 1000)];
+          const dp = ajouterJours(aujourdhui(), -3);
+          enregistrer("justificatifs", Object.assign(jf, {datePaiement: dp}));
+          const etat2a = [statutFacture(jf), montantEcheance(ep), encoursSaisis().lignes.some(l => /^Virements/.test(l.moyen) && l.montant >= 1000)];
+          const sim = simulerEpargne({jours: 30});
+          const op = enregistrer("operations", {compte: cpt.id, date: ajouterJours(dp, 2), montant: -1000, libelle: "VIR ESSAI PROJET", categorie: "Travaux essai", sousCategorie: "Études", nature: "Exceptionnelle"});
+          const etat2 = [...etat2a, candidats([jf]).some(c => c.op.id === op.id)];
+          v("projet : facture à payer puis payée (enveloppe nette, en-cours, rapprochement autour de la date du paiement)", [etat1, etat2, sim.evenements.some(e => e.genre === "projet" && /Facture/.test(e.libelle))],
+            [["Chantier essai", "a_payer", 30, -9000, false], ["payee", -9000, true, true], true]);
+          supprimer("operations", op.id); supprimer("justificatifs", jf.id); supprimer("echeances", ep.id);
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);

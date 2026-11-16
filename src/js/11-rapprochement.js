@@ -54,13 +54,15 @@ function apprendreChiffresCarte(carte4, carte){
 function candidats(js){
   const j = Object.assign({}, js[0]); const cents = montantJustif(js);
   if (!j.carte && j.carte4) j.carte = carteDesChiffres(j.carte4);
-  const [avant, apres] = fenetre(j);
+  // Facture marquée payée : on cherche le débit autour de la date du paiement (−2 / +10 jours), pas de la facture
+  const ref = j.datePaiement || j.date;
+  const [avant, apres] = j.datePaiement ? [2, 10] : fenetre(j);
   const nomJ = js.map(x => [x.commercantNom, x.raisonSociale].filter(Boolean).join(" ")).join(" ");
   const credit = estNoteFrais(j);   // remboursement attendu : on cherche un crédit
   const r = [];
   for (const op of vivants("operations")){
     if ((credit ? op.montant <= 0 : op.montant >= 0) || Math.abs(versCentimes(op.montant)) !== cents) continue;
-    const dj = ecartJours(j.date, op.date);
+    const dj = ecartJours(ref, op.date);
     if (dj < -avant || dj > apres) continue;
     const compte = obtenir("comptes", op.compte); if (!compte || !compteCompatible(j, compte)) continue;
     // Numéro de chèque exigé quand l'opération en porte un ; un chèque importé sans son numéro (avant le 05/11/2026) se rapproche au montant
@@ -340,7 +342,8 @@ function libelleMoyen(carte){
 }
 function encoursSaisis(){
   const m = new Map();
-  for (const j of vivants("justificatifs").filter(x => pieceOuverte(x) && x.carte !== "ESPECES" && !estNoteFrais(x))){
+  // Facture de projet encore à payer : rien n'est émis, elle n'est pas un en-cours (le moyen choisi n'est qu'une intention)
+  for (const j of vivants("justificatifs").filter(x => pieceOuverte(x) && x.carte !== "ESPECES" && !estNoteFrais(x) && !(projetDePiece(x) && statutFacture(x) === "a_payer"))){
     const k = libelleMoyen(j.carte); const g = m.get(k) || m.set(k, {moyen: k, n: 0, montant: 0, depuis: j.date}).get(k);
     g.n++; g.montant += j.montant || 0; if (j.date && j.date < g.depuis) g.depuis = j.date;
   }

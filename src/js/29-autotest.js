@@ -600,6 +600,21 @@ async function autotest(){
           v("doublon : même fournisseur, montant et jour signalés quand le numéro manque d'un côté", [justificatifDejaLa({montant: 2880, date: "2031-04-02", commercant: "cm-essai-doublon"})?.id, justificatifDejaLa({montant: 2880, date: "2031-04-02", commercant: "cm-essai-doublon", numero: "999"})], [jd.id, null]);
           supprimer("justificatifs", jd.id);
         }
+        {
+          const cpt = comptesDeType("courant")[0];
+          const ep = enregistrer("echeances", {libelle: "Enveloppe essai", projet: "Chantier essai", categorie: "Travaux essai", sousCategorie: "", montant: -10000, recurrence: "unique", debut: ajouterJours(aujourdhui(), 200), enveloppe: true, active: true});
+          const jf = enregistrer("justificatifs", {type: "facture", date: aujourdhui(), montant: 1000, categorie: "Travaux essai", sousCategorie: "Études", carte: "CPT:" + cpt.id, statut: "a_rapprocher", operations: [], texteOCR: "Le délai de paiement est de 1 mois à compter de la date d'émission"});
+          const etat1 = [projetDePiece(jf), statutFacture(jf), delaiPaiement(jf), montantEcheance(ep), encoursSaisis().lignes.some(l => /^Virements/.test(l.moyen) && l.montant >= 1000)];
+          const dp = ajouterJours(aujourdhui(), -3);
+          enregistrer("justificatifs", Object.assign(jf, {datePaiement: dp}));
+          const etat2a = [statutFacture(jf), montantEcheance(ep), encoursSaisis().lignes.some(l => /^Virements/.test(l.moyen) && l.montant >= 1000)];
+          const sim = simulerEpargne({jours: 30});
+          const op = enregistrer("operations", {compte: cpt.id, date: ajouterJours(dp, 2), montant: -1000, libelle: "VIR ESSAI PROJET", categorie: "Travaux essai", sousCategorie: "Études", nature: "Exceptionnelle"});
+          const etat2 = [...etat2a, candidats([jf]).some(c => c.op.id === op.id)];
+          v("projet : facture à payer puis payée (enveloppe nette, en-cours, rapprochement autour de la date du paiement)", [etat1, etat2, sim.evenements.some(e => e.genre === "projet" && /Facture/.test(e.libelle))],
+            [["Chantier essai", "a_payer", 30, -9000, false], ["payee", -9000, true, true], true]);
+          supprimer("operations", op.id); supprimer("justificatifs", jf.id); supprimer("echeances", ep.id);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

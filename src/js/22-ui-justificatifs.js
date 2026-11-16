@@ -45,7 +45,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); window.scrollTo(0, 0); }},
       h("td", null, dateFr(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : x.datePaiement ? "payée le " + dateCourte(x.datePaiement) + ", attend le relevé" : projetDePiece(x) ? "à payer" : "attend le relevé")))}));
 }});
 
 /* Validation en lot des rapprochements sûrs : chaque ligne montre la pièce, l'opération et ce qui changerait ;
@@ -139,7 +139,11 @@ function ecranRapprochement(j, etat, attente){
       ...comptesDeType("courant").flatMap(c => [["CPT:" + c.id, "Virement ou prélèvement · " + c.nom], ["CHQ:" + c.id, "Chèque · " + c.nom]]), ["ESPECES", "Espèces"]], x.carte || "");
     const cheque = h("input", {type: "text", inputmode: "numeric", value: x.cheque || "", placeholder: "n° du chèque", style: {width: "9rem"}});
     const ligneCheque = h("div", {class: "champ-ocr", hidden: !String(x.carte || "").startsWith("CHQ:")}, h("label", null, "N° de chèque"), cheque, h("span", {class: "confiance"}, "pour le rapprochement"));
-    carte.addEventListener("change", () => { ligneCheque.hidden = !carte.value.startsWith("CHQ:"); });
+    // Virement émis ou chèque remis : date du paiement (la facture n'est plus « à payer » ; le relevé confirmera)
+    const payeeLe = champDate({value: x.datePaiement || ""});
+    const direct = v => /^(CPT|CHQ):/.test(v || "");
+    const lignePayee = h("div", {class: "champ-ocr", hidden: !direct(x.carte) || estNoteFrais(x)}, h("label", null, "Payée le"), payeeLe, h("span", {class: "confiance"}, "vide = à payer ; sinon virement émis ou chèque remis ce jour-là"));
+    carte.addEventListener("change", () => { ligneCheque.hidden = !carte.value.startsWith("CHQ:"); lignePayee.hidden = !direct(carte.value) || estNoteFrais({type: type.value}); });
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     // Note de frais : le moyen de paiement devient le compte sur lequel le remboursement est attendu
     const libPaye = () => estNoteFrais({type: type.value}) ? "Remboursé sur" : "Payé avec";
@@ -148,16 +152,17 @@ function ecranRapprochement(j, etat, attente){
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier") : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque);
-    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num});
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque, lignePayee);
+    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num, payeeLe});
   });
   const enregistrerSaisie = () => {
     const aliasAProposer = [];
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
+      if (/^(CPT|CHQ):/.test(f.carte.value) && !dateSaisieOk(f.payeeLe, "Payée le", true)) return false;
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
-        lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : ""}, valeurCategorie(f.cat));
+        lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : "", datePaiement: /^(CPT|CHQ):/.test(f.carte.value) ? f.payeeLe.value || "" : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
       // Le fournisseur est créé (ou rattaché) à la validation, y compris un nom resté provisoire
       // Fiche choisie dans la liste : prise telle quelle. « Nouveau fournisseur… » : fiche de ce nom, sinon une
