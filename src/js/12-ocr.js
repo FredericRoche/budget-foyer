@@ -182,9 +182,6 @@ function extraireTicket(texte){
     }
   }
 
-  /* Numéro de facture : « Facture n° X », « N°D26-011 », ou le n° posé sur la ligne suivante (les dates en sont retirées) */
-  res.numero = numeroFacture(lignes);
-
   /* Date et heure */
   const dates = [], datesHeure = [];
   for (const l of lignes){
@@ -199,8 +196,13 @@ function extraireTicket(texte){
     // Date imprimée avec l'heure (« 18:00:16 7/11/2026 ») : c'est celle de l'achat ; elle passe avant toute autre suite de chiffres
     if (h && dates.length > n0){ datesHeure.push(...dates.slice(n0)); res.heure = pad2(h[1]) + ":" + h[2]; }
   }
-  const auj = aujourdhui();
+  // Date émiettée par le PDF (« 10 3 11 / 1 1 /202 6 ») : relue sur la ligne sans espaces, année en quatre chiffres
   if (!dates.length) for (const l of lignes){
+    for (const m of l.replace(/\s+/g, "").matchAll(/(\d{1,2})\/(\d{1,2})\/(20\d{2})(?!\d)/g)){ const d = lireDate(m[0]); if (d) dates.push(d); }
+  }
+  const auj = aujourdhui();
+  // Date sans année (« LE 17/10 ») : propre aux tickets et facturettes ; une facture porte toujours son année
+  if (!dates.length && res.type !== "facture") for (const l of lignes){
     const m = l.match(/(?<![\d\/.])(\d{1,2}) ?[\/.] ?(\d{1,2})(?![\d\/.]| ?[\/.] ?\d)/);
     if (!m || +m[1] < 1 || +m[1] > 31 || +m[2] < 1 || +m[2] > 12) continue;
     let d = auj.slice(0, 4) + "-" + pad2(+m[2]) + "-" + pad2(+m[1]);
@@ -209,6 +211,9 @@ function extraireTicket(texte){
   }
   const plausibles = [...datesHeure, ...dates].filter(d => d <= ajouterJours(auj, 1) && d >= ajouterJours(auj, -400));
   if (plausibles.length){ res.date = plausibles[0]; res.confiance.date = "sûr"; }
+
+  /* Numéro de facture : « Facture n° X », « N°D26-011 », ou le n° posé sur la ligne suivante (les dates en sont retirées) */
+  res.numero = numeroFacture(lignes, res.date);
 
   /* Carte (4 derniers chiffres), SIRET, TVA */
   for (const l of N){
@@ -237,14 +242,18 @@ function extraireTicket(texte){
   return res;
 }
 const RE_DATE_LIGNE = /\b\d{1,2} ?[\/.\-] ?\d{1,2} ?[\/.\-] ?(?:\d ?\d ?\d ?\d|\d{2})(?!\d)/g;
-function numeroFacture(lignes){
+function numeroFacture(lignes, date){
+  // Date de la pièce collée au numéro par le PDF (« 26 – 11 – 103 11/11/2026 ») : retirée de la fin de la clé
+  const d = date ? [date.slice(8, 10), date.slice(5, 7), date.slice(0, 4)] : null;
+  const finsDate = d ? [d[0] + d[1] + d[2], d[0] + d[1] + d[2].slice(2), (+d[0]) + "" + (+d[1]) + d[2]] : [];
+  const sansDate = c => { for (const f of finsDate) if (c.length > f.length + 2 && c.endsWith(f)) return c.slice(0, -f.length); return c; };
   const propre = s => s.replace(RE_DATE_LIGNE, " ").replace(/\b(DATE|DU|LE|FACTURE|N°|NO|NUMERO|DE|:)\b/gi, " ").trim();
   for (let i = 0; i < lignes.length; i++){
     const l = norm(lignes[i]).toUpperCase();
     const m = l.match(/(?:FACTURE|INVOICE)?\s*(?:N°|NO\b|NUMERO|N\s?O\b)\s*:?\s*([A-Z]{0,4}[\s\-]?\d[\w\s\-–\/.]{1,20})/) || (/FACTURE/.test(l) && l.match(/FACTURE\s*:?\s*([A-Z]{0,4}\d[\w\-–\/.]{2,20})/));
     let brut = m ? propre(m[1]) : "";
     if (!/\d/.test(brut) && /(?:^|\s)(N°|NO|NUMERO)(\s|$)/.test(l) && i + 1 < lignes.length) brut = propre(norm(lignes[i + 1]).toUpperCase());
-    const cle = cleNumero(brut);
+    const cle = sansDate(cleNumero(brut));
     if (cle.length >= 3 && /\d/.test(cle)) return cle;
   }
   return "";

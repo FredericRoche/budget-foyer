@@ -351,9 +351,10 @@ function encoursSaisis(){
 function justificatifDejaLa(x){
   const memeFournisseur = j => (x.commercant && j.commercant === x.commercant) || (x.raisonSociale && norm(j.raisonSociale || "") === norm(x.raisonSociale));
   // Le numéro de facture fait foi : même numéro et même fournisseur = même pièce ; numéros différents = pièces distinctes
-  if (x.numero) return vivants("justificatifs").find(j => j.numero && j.numero === x.numero && memeFournisseur(j)) || null;
-  if (!x.montant || !x.date) return null;
-  return vivants("justificatifs").find(j => !j.numero && Math.abs((j.montant || 0) - x.montant) < 0.005 && j.date === x.date && memeFournisseur(j)) || null;
+  const parNumero = x.numero ? vivants("justificatifs").find(j => j.numero && j.numero === x.numero && memeFournisseur(j)) : null;
+  if (parNumero || !x.montant || !x.date) return parNumero || null;
+  // Numéro absent d'un côté (pièce saisie sans numéro, ou numéro non lu) : même fournisseur, même montant, même jour
+  return vivants("justificatifs").find(j => (!x.numero || !j.numero) && Math.abs((j.montant || 0) - x.montant) < 0.005 && j.date === x.date && memeFournisseur(j)) || null;
 }
 /* ---------- Création d'un justificatif (PC ou boîte) ---------- */
 async function creerJustificatif(donnees, piece){

@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ljNBEJIUXO5umwPmkPgVISkxrPmQUnhON5gdx/uWQfU=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-7gmxAYvimTSzCFhv6WL3JTz/J1QqC3MM+VQmfdg5uhM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-12.2251";
+const VERSION_APP = "2026-11-16.1935";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3737,9 +3737,10 @@ function encoursSaisis(){
 function justificatifDejaLa(x){
   const memeFournisseur = j => (x.commercant && j.commercant === x.commercant) || (x.raisonSociale && norm(j.raisonSociale || "") === norm(x.raisonSociale));
   // Le numéro de facture fait foi : même numéro et même fournisseur = même pièce ; numéros différents = pièces distinctes
-  if (x.numero) return vivants("justificatifs").find(j => j.numero && j.numero === x.numero && memeFournisseur(j)) || null;
-  if (!x.montant || !x.date) return null;
-  return vivants("justificatifs").find(j => !j.numero && Math.abs((j.montant || 0) - x.montant) < 0.005 && j.date === x.date && memeFournisseur(j)) || null;
+  const parNumero = x.numero ? vivants("justificatifs").find(j => j.numero && j.numero === x.numero && memeFournisseur(j)) : null;
+  if (parNumero || !x.montant || !x.date) return parNumero || null;
+  // Numéro absent d'un côté (pièce saisie sans numéro, ou numéro non lu) : même fournisseur, même montant, même jour
+  return vivants("justificatifs").find(j => (!x.numero || !j.numero) && Math.abs((j.montant || 0) - x.montant) < 0.005 && j.date === x.date && memeFournisseur(j)) || null;
 }
 /* ---------- Création d'un justificatif (PC ou boîte) ---------- */
 async function creerJustificatif(donnees, piece){
@@ -4422,9 +4423,6 @@ function extraireTicket(texte){
     }
   }
 
-  /* Numéro de facture : « Facture n° X », « N°D26-011 », ou le n° posé sur la ligne suivante (les dates en sont retirées) */
-  res.numero = numeroFacture(lignes);
-
   /* Date et heure */
   const dates = [], datesHeure = [];
   for (const l of lignes){
@@ -4439,8 +4437,13 @@ function extraireTicket(texte){
     // Date imprimée avec l'heure (« 18:00:16 7/11/2026 ») : c'est celle de l'achat ; elle passe avant toute autre suite de chiffres
     if (h && dates.length > n0){ datesHeure.push(...dates.slice(n0)); res.heure = pad2(h[1]) + ":" + h[2]; }
   }
-  const auj = aujourdhui();
+  // Date émiettée par le PDF (« 10 3 11 / 1 1 /202 6 ») : relue sur la ligne sans espaces, année en quatre chiffres
   if (!dates.length) for (const l of lignes){
+    for (const m of l.replace(/\s+/g, "").matchAll(/(\d{1,2})\/(\d{1,2})\/(20\d{2})(?!\d)/g)){ const d = lireDate(m[0]); if (d) dates.push(d); }
+  }
+  const auj = aujourdhui();
+  // Date sans année (« LE 17/10 ») : propre aux tickets et facturettes ; une facture porte toujours son année
+  if (!dates.length && res.type !== "facture") for (const l of lignes){
     const m = l.match(/(?<![\d\/.])(\d{1,2}) ?[\/.] ?(\d{1,2})(?![\d\/.]| ?[\/.] ?\d)/);
     if (!m || +m[1] < 1 || +m[1] > 31 || +m[2] < 1 || +m[2] > 12) continue;
     let d = auj.slice(0, 4) + "-" + pad2(+m[2]) + "-" + pad2(+m[1]);
@@ -4449,6 +4452,9 @@ function extraireTicket(texte){
   }
   const plausibles = [...datesHeure, ...dates].filter(d => d <= ajouterJours(auj, 1) && d >= ajouterJours(auj, -400));
   if (plausibles.length){ res.date = plausibles[0]; res.confiance.date = "sûr"; }
+
+  /* Numéro de facture : « Facture n° X », « N°D26-011 », ou le n° posé sur la ligne suivante (les dates en sont retirées) */
+  res.numero = numeroFacture(lignes, res.date);
 
   /* Carte (4 derniers chiffres), SIRET, TVA */
   for (const l of N){
@@ -4477,14 +4483,18 @@ function extraireTicket(texte){
   return res;
 }
 const RE_DATE_LIGNE = /\b\d{1,2} ?[\/.\-] ?\d{1,2} ?[\/.\-] ?(?:\d ?\d ?\d ?\d|\d{2})(?!\d)/g;
-function numeroFacture(lignes){
+function numeroFacture(lignes, date){
+  // Date de la pièce collée au numéro par le PDF (« 26 – 11 – 103 11/11/2026 ») : retirée de la fin de la clé
+  const d = date ? [date.slice(8, 10), date.slice(5, 7), date.slice(0, 4)] : null;
+  const finsDate = d ? [d[0] + d[1] + d[2], d[0] + d[1] + d[2].slice(2), (+d[0]) + "" + (+d[1]) + d[2]] : [];
+  const sansDate = c => { for (const f of finsDate) if (c.length > f.length + 2 && c.endsWith(f)) return c.slice(0, -f.length); return c; };
   const propre = s => s.replace(RE_DATE_LIGNE, " ").replace(/\b(DATE|DU|LE|FACTURE|N°|NO|NUMERO|DE|:)\b/gi, " ").trim();
   for (let i = 0; i < lignes.length; i++){
     const l = norm(lignes[i]).toUpperCase();
     const m = l.match(/(?:FACTURE|INVOICE)?\s*(?:N°|NO\b|NUMERO|N\s?O\b)\s*:?\s*([A-Z]{0,4}[\s\-]?\d[\w\s\-–\/.]{1,20})/) || (/FACTURE/.test(l) && l.match(/FACTURE\s*:?\s*([A-Z]{0,4}\d[\w\-–\/.]{2,20})/));
     let brut = m ? propre(m[1]) : "";
     if (!/\d/.test(brut) && /(?:^|\s)(N°|NO|NUMERO)(\s|$)/.test(l) && i + 1 < lignes.length) brut = propre(norm(lignes[i + 1]).toUpperCase());
-    const cle = cleNumero(brut);
+    const cle = sansDate(cleNumero(brut));
     if (cle.length >= 3 && /\d/.test(cle)) return cle;
   }
   return "";
@@ -6867,7 +6877,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
     h("p", {class: "note"}, (anomalies.length ? [...parGenre].map(([g, l]) => l.length + " " + g).join(" · ") + ". " : "Aucune. ") + "Contrôle à partir du ", champDepuis,
       " (avant, les pièces n'étaient pas saisies au fil de l'eau). Les pièces dont le relevé n'est pas encore importé n'y figurent pas."),
     ouvert && anomalies.length ? tableau([{titre: "Date"}, {titre: "Anomalie"}, {titre: "Fournisseur ou libellé"}, {titre: "Montant", num: true}, {titre: "Piste"}, {titre: ""}], anomalies, {classe: "serre", limite: 60, ligne: a =>
-      h("tr", {class: "cliquable" + (a.j && a.j === j ? " choisie" : ""), onclick: () => { if (a.j){ etat.choisi = a.j.id; rafraichirEcran(); } else aller("operations", {compte: a.op.compte, mois: a.op.date.slice(0, 7), choisie: a.op.id}); }},
+      h("tr", {class: "cliquable" + (a.j && a.j === j ? " choisie" : ""), onclick: () => { if (a.j){ etat.choisi = a.j.id; rafraichirEcran(); window.scrollTo(0, 0); } else aller("operations", {compte: a.op.compte, mois: a.op.date.slice(0, 7), choisie: a.op.id}); }},
         h("td", null, dateFr(a.date)), h("td", null, a.genre), h("td", null, a.nom), h("td", {class: "num"}, euros(a.montant)), h("td", {class: "petit"}, a.raison),
         h("td", null, a.piece ? h("button", {class: "mini primaire", title: "Rattacher cette pièce à ce débit malgré l'écart de montant", onclick: async e => { e.stopPropagation();
             const ecart = Math.abs(a.op.montant) - a.piece.montant;
@@ -6886,7 +6896,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(blocAnomalies);
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Tous les justificatifs"));
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
-    {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
+    {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); window.scrollTo(0, 0); }},
       h("td", null, dateFr(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
       h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
 }});
@@ -6988,7 +6998,7 @@ function ecranRapprochement(j, etat, attente){
     const libPaye = () => estNoteFrais({type: type.value}) ? "Remboursé sur" : "Payé avec";
     const ligneCarte = ligneOcr(libPaye(), carte, x.carte4 ? "carte ****" + x.carte4 : "");
     type.addEventListener("change", () => { ligneCarte.querySelector("label").textContent = libPaye(); });
-    saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
+    saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier") : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
       ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque);
@@ -9563,6 +9573,14 @@ async function autotest(){
             await conflitDossiers("archives", poignee("Documents", "C/Documents"), poignee("02 Finances", "C/Documents/02 Finances")), await conflitDossiers("depot", depotT, archivesT)];
           v("dossiers d'import : dépôt et archives jamais confondus ni imbriqués", r.map(x => x ? x.split(" : ")[0].replace(/«[^»]*»/g, "«»") : ""),
             ["«» est déjà le dossier des archives", "«» est à l'intérieur du dossier des archives («»)", "«» contient le dossier de dépôt («»)", ""]);
+        }
+        {
+          const an = aujourdhui().slice(0, 4), j = aujourdhui().slice(8, 10), m = aujourdhui().slice(5, 7);
+          const fe = extraireTicket("Facture\nn° Date\n2 6 – 11 – 10 3 " + (+j) + " / " + m[0] + " " + m[1] + " /" + an.slice(0, 3) + " " + an[3] + "\nMontant à régler TTC 2 880 €");
+          v("facture : date émiettée par le PDF lue en entier, numéro sans la date collée", [fe.date, fe.numero], [aujourdhui(), "2611103"]);
+          const jd = enregistrer("justificatifs", {type: "facture", date: "2031-04-02", montant: 2880, commercant: "cm-essai-doublon", numero: "2611103", statut: "a_rapprocher", operations: []});
+          v("doublon : même fournisseur, montant et jour signalés quand le numéro manque d'un côté", [justificatifDejaLa({montant: 2880, date: "2031-04-02", commercant: "cm-essai-doublon"})?.id, justificatifDejaLa({montant: 2880, date: "2031-04-02", commercant: "cm-essai-doublon", numero: "999"})], [jd.id, null]);
+          supprimer("justificatifs", jd.id);
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);

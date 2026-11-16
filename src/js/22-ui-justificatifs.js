@@ -24,7 +24,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
     h("p", {class: "note"}, (anomalies.length ? [...parGenre].map(([g, l]) => l.length + " " + g).join(" · ") + ". " : "Aucune. ") + "Contrôle à partir du ", champDepuis,
       " (avant, les pièces n'étaient pas saisies au fil de l'eau). Les pièces dont le relevé n'est pas encore importé n'y figurent pas."),
     ouvert && anomalies.length ? tableau([{titre: "Date"}, {titre: "Anomalie"}, {titre: "Fournisseur ou libellé"}, {titre: "Montant", num: true}, {titre: "Piste"}, {titre: ""}], anomalies, {classe: "serre", limite: 60, ligne: a =>
-      h("tr", {class: "cliquable" + (a.j && a.j === j ? " choisie" : ""), onclick: () => { if (a.j){ etat.choisi = a.j.id; rafraichirEcran(); } else aller("operations", {compte: a.op.compte, mois: a.op.date.slice(0, 7), choisie: a.op.id}); }},
+      h("tr", {class: "cliquable" + (a.j && a.j === j ? " choisie" : ""), onclick: () => { if (a.j){ etat.choisi = a.j.id; rafraichirEcran(); window.scrollTo(0, 0); } else aller("operations", {compte: a.op.compte, mois: a.op.date.slice(0, 7), choisie: a.op.id}); }},
         h("td", null, dateFr(a.date)), h("td", null, a.genre), h("td", null, a.nom), h("td", {class: "num"}, euros(a.montant)), h("td", {class: "petit"}, a.raison),
         h("td", null, a.piece ? h("button", {class: "mini primaire", title: "Rattacher cette pièce à ce débit malgré l'écart de montant", onclick: async e => { e.stopPropagation();
             const ecart = Math.abs(a.op.montant) - a.piece.montant;
@@ -43,7 +43,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(blocAnomalies);
   c.appendChild(h("h2", {style: {marginTop: "1rem"}}, "Tous les justificatifs"));
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
-    {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); }},
+    {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); window.scrollTo(0, 0); }},
       h("td", null, dateFr(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
       h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : "attend le relevé")))}));
 }});
@@ -145,7 +145,7 @@ function ecranRapprochement(j, etat, attente){
     const libPaye = () => estNoteFrais({type: type.value}) ? "Remboursé sur" : "Payé avec";
     const ligneCarte = ligneOcr(libPaye(), carte, x.carte4 ? "carte ****" + x.carte4 : "");
     type.addEventListener("change", () => { ligneCarte.querySelector("label").textContent = libPaye(); });
-    saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
+    saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier") : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
       ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque);

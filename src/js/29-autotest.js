@@ -592,6 +592,14 @@ async function autotest(){
           v("dossiers d'import : dépôt et archives jamais confondus ni imbriqués", r.map(x => x ? x.split(" : ")[0].replace(/«[^»]*»/g, "«»") : ""),
             ["«» est déjà le dossier des archives", "«» est à l'intérieur du dossier des archives («»)", "«» contient le dossier de dépôt («»)", ""]);
         }
+        {
+          const an = aujourdhui().slice(0, 4), j = aujourdhui().slice(8, 10), m = aujourdhui().slice(5, 7);
+          const fe = extraireTicket("Facture\nn° Date\n2 6 – 11 – 10 3 " + (+j) + " / " + m[0] + " " + m[1] + " /" + an.slice(0, 3) + " " + an[3] + "\nMontant à régler TTC 2 880 €");
+          v("facture : date émiettée par le PDF lue en entier, numéro sans la date collée", [fe.date, fe.numero], [aujourdhui(), "2611103"]);
+          const jd = enregistrer("justificatifs", {type: "facture", date: "2031-04-02", montant: 2880, commercant: "cm-essai-doublon", numero: "2611103", statut: "a_rapprocher", operations: []});
+          v("doublon : même fournisseur, montant et jour signalés quand le numéro manque d'un côté", [justificatifDejaLa({montant: 2880, date: "2031-04-02", commercant: "cm-essai-doublon"})?.id, justificatifDejaLa({montant: 2880, date: "2031-04-02", commercant: "cm-essai-doublon", numero: "999"})], [jd.id, null]);
+          supprimer("justificatifs", jd.id);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }
