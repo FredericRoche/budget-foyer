@@ -249,7 +249,7 @@ async function enregistrerFichier(f, enLot){
 async function importerJustificatifPc(lu, depuisDepot){
   let t;
   if (lu.genre === "image"){ message("Lecture du ticket « " + lu.nom + " »…"); t = await lireTicket(new Blob([lu.octets], {type: lu.mime})); }
-  else { t = Object.assign(extraireTicket(lu.texte), {photo: {mime: "application/pdf", octets: lu.octets}}); if (!/facturette|notefrais/.test(t.type)) t.type = "facture"; }
+  else { t = Object.assign(extraireTicket(lu.texte), {photo: {mime: "application/pdf", octets: lu.octets}}); if (!/facturette|notefrais|engagement/.test(t.type)) t.type = "facture"; }
   // Note de frais détaillée : montant, date de déclaration, numéro et créancier lus sur la note ; classement repris de la note précédente
   const ndf = lu.noteFrais;
   if (ndf) Object.assign(t, {type: "notefrais", montant: ndf.total, date: ndf.declaree, numero: "NDF " + ndf.numero, raisonSociale: ndf.entite || t.raisonSociale, enseigne: ndf.entite || t.enseigne});
@@ -265,7 +265,7 @@ async function importerJustificatifPc(lu, depuisDepot){
     commercant: c ? c.id : null, carte4: t.carte4, carte: ndf ? (precedente?.carte || "") : carteDesChiffres(t.carte4) || (/AMERICAN EXPRESS|\bAMEX\b/i.test(t.texte || "") && vivants("comptes").some(c => c.carte === "AMEX") ? "AMEX" : ""), siret: t.siret, numero: t.numero || "", texteOCR: t.texte, origine: depuisDepot ? "depot" : "pc",
     categorie: precedente?.categorie || c?.categorie || "", sousCategorie: precedente ? precedente.sousCategorie || "" : c?.sousCategorie || "", lieu: precedente?.lieu || c?.lieu || "", aVerifier: true,
     fournisseurDevine: devine, natureExacte: ndf ? "Note de frais n° " + ndf.numero + " (" + ndf.periode.toLowerCase() + ")" : "", lignesNdf: ndf ? ndf.lignes : undefined,
-    aValider: !!depuisDepot}, t.photo);
+    aValider: !!depuisDepot, statut: t.type === "engagement" ? "engagement" : "a_rapprocher"}, t.photo);
   rapprocherTout();
   ETAT_ECRAN.justificatifs = Object.assign(ETAT_ECRAN.justificatifs || {}, {choisi: j.id});
 }

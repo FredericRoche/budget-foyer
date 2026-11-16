@@ -626,6 +626,20 @@ async function autotest(){
             [[[[false, 0]], 0], 4200, 2940, 1260, 1, -18740, false]);
           supprimer("justificatifs", fa.id); supprimer("justificatifs", dv.id); supprimer("echeances", ep.id);
         }
+        v("devis reconnu à la lecture, facture inchangée", [extraireTicket("ENTREPRISE ESSAI\nDEVIS CONTRAT n° 38084\nCONDITIONS DE PAIEMENT : arrhes 30 %\nPRIX TTC 4 200,00").type, extraireTicket("Etude de sol\nN° devis : D004722 du 06/10/2026\nTOTAL T.V.A 20% 439,60 €\nMONTANT DE L'OFFRE 2198,00 € HT soit 2637,60 € TTC\nAcompte de 50% (1 318,80 € TTC)").montant,
+          extraireTicket("Réf. Devis : CL27-0013\nD E V I S\nNet à payer (Euro) 334,30\nLa TVA appliquée sera celle en vigueur à date de facture.\nFacture, il sera appliqué des pénalités").type, extraireTicket("DEVIS CONTRAT n° 1\nNOTRE PRIX 3 500,00 700,00 4 200,00\nPrévoir 3800€ TTC en sus pour la relivraison.").montant,
+          extraireTicket("Facture\nn° 26-11-103\nSuite au devis du 20/05\nMontant TTC 2 880 €").type, extraireTicket("FACTURE D'ACOMPTE\nSelon devis n° 12\nTotal 500,00").type], ["engagement", 2637.6, "engagement", 4200, "facture", "facture"]);
+        {
+          const fo = enregistrer("commercants", {nom: "Chauffagiste essai", alias: [], stats: {}, natures: {}});
+          const ep = enregistrer("echeances", {libelle: "Enveloppe essai acompte", projet: "Chantier acompte essai", categorie: "Travaux acompte essai", sousCategorie: "", montant: -20000, recurrence: "unique", debut: ajouterJours(aujourdhui(), 200), enveloppe: true, active: true});
+          const dv = enregistrer("justificatifs", {type: "engagement", statut: "engagement", date: aujourdhui(), dateSignature: aujourdhui(), montant: 6000, categorie: "Travaux acompte essai", sousCategorie: "Chaudière", commercant: fo.id, commercantNom: fo.nom, operations: []});
+          const op = enregistrer("operations", {compte: comptesDeType("courant")[0].id, date: aujourdhui(), montant: -1800, libelle: "VIR ACOMPTE ESSAI", commercant: fo.id, categorie: "Travaux acompte essai", sousCategorie: "Chaudière", nature: "Exceptionnelle"});
+          const s1 = suiviDevis("Chantier acompte essai")[0];
+          const fa = enregistrer("justificatifs", {type: "facture", statut: "a_rapprocher", date: aujourdhui(), montant: 6000, categorie: "Travaux acompte essai", sousCategorie: "Chaudière", commercant: fo.id, commercantNom: fo.nom, operations: []});
+          const s2 = suiviDevis("Chantier acompte essai")[0];
+          v("devis : acompte payé sur devis déduit avant la facture, puis facture finale", [[s1.paye, s1.facture, s1.reste], [s2.paye, s2.facture, s2.reste]], [[1800, 0, 4200], [1800, 6000, 0]]);
+          supprimer("justificatifs", fa.id); supprimer("operations", op.id); supprimer("justificatifs", dv.id); supprimer("echeances", ep.id); supprimer("commercants", fo.id);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

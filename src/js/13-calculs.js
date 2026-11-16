@@ -45,15 +45,30 @@ function projetDePiece(j){
 }
 function facturesDuProjet(nom){ return vivants("justificatifs").filter(j => j.type !== "engagement" && projetDePiece(j) === nom); }
 /* Devis d'un projet (type « engagement ») : à l'étude, puis signé (date de signature) ; un devis signé est un engagement.
-   Le facturé d'un devis = factures du projet du même fournisseur ; reste à facturer = devis signé − facturé (jamais négatif). */
+   Pour son fournisseur : facturé = factures du projet ; payé = paiements du projet (relevé) et factures payées en attente du relevé.
+   Reste sur devis = devis signé − le plus grand des deux (un acompte réglé sur devis, sans facture, vient en déduction). */
 function devisDuProjet(nom){ return vivants("justificatifs").filter(j => j.type === "engagement" && projetDePiece(j) === nom); }
 const cleFournisseur = j => j.commercant || norm(j.commercantNom || j.raisonSociale || "").toLowerCase();
 function suiviDevis(nom){
   const factures = facturesDuProjet(nom);
-  return devisDuProjet(nom).map(d => {
-    const facture = somme(factures.filter(f => cleFournisseur(f) && cleFournisseur(f) === cleFournisseur(d)), f => f.montant || 0);
-    return {devis: d, signe: !!d.dateSignature, facture, reste: d.dateSignature ? Math.max(0, (d.montant || 0) - facture) : 0};
-  });
+  const ech = vivants("echeances").filter(e => e.projet === nom && e.active !== false);
+  const ops = typeof operationsDuProjet === "function" ? operationsDuProjet(nom, ech) : [];
+  const devis = devisDuProjet(nom);
+  // Un fournisseur à plusieurs devis : ses paiements et factures s'imputent aux devis signés dans l'ordre des dates
+  const parF = regrouper(devis, cleFournisseur);
+  const r = [];
+  for (const [cle, ds] of parF){
+    const memeF = x => cle && cleFournisseur(x) === cle;
+    const opF = o => (o.commercant && devis.some(d => d.commercant === o.commercant && cleFournisseur(d) === cle)) || (o.justificatifs || []).some(id => { const j = obtenir("justificatifs", id); return j && memeF(j); });
+    const facture = somme(factures.filter(memeF), f => f.montant || 0);
+    const paye = -somme(ops.filter(opF), o => o.montant) + somme(factures.filter(f => memeF(f) && statutFacture(f) === "payee"), f => f.montant || 0);
+    let impute = Math.max(facture, paye);
+    for (const d of ds.sort((a, b) => (a.dateSignature || "9") < (b.dateSignature || "9") ? -1 : a.date < b.date ? -1 : 1)){
+      const part = d.dateSignature ? Math.min(d.montant || 0, impute) : 0; impute -= part;
+      r.push({devis: d, signe: !!d.dateSignature, facture: ds.length === 1 ? facture : null, paye: ds.length === 1 ? paye : null, impute: part, reste: d.dateSignature ? Math.max(0, (d.montant || 0) - part) : 0});
+    }
+  }
+  return r;
 }
 /* Trois états d'une facture : à payer ; payée (virement émis ou chèque remis à la date saisie), en attente du relevé ;
    rapprochée (son paiement est au relevé). Une pièce antérieure au début du contrôle, jamais rapprochée, est close (réglée). */

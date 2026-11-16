@@ -131,16 +131,21 @@ function extraireTicket(texte){
     && N.length < 40 && !N.some(l => /TVA \d|QTE|QUANTITE/.test(l));
   const facture = N.some(l => /^FACTURE|FACTURE N|N° DE FACTURE|DATE DE FACTURE|ECHEANCE|CONDITIONS DE PAIEMENT/.test(l));
   const noteFrais = N.some(l => /NOTE DE FRAIS|NOTES DE FRAIS|NOTE DE DEPENSES|EXPENSE REPORT|EXPENSE CLAIM|^NDF ?# ?\d/.test(l));
-  res.type = noteFrais ? "notefrais" : facture ? "facture" : facturette ? "facturette" : "ticket";
+  // Devis : titre de devis et aucun en-tête de facture (ses « conditions de paiement » ne font pas une facture)
+  const devis = N.some(l => /^DEVIS\b|\bDEVIS (N|NO|N°|CONTRAT|ESTIMATIF|DESCRIPTIF)\b|\bN.{0,2} DEVIS\b|NUMERO DE DEVIS|REF\.? DEVIS|OBJET DU DEVIS|^PROPOSITION (COMMERCIALE|DE PRIX|TARIFAIRE)/.test(l) || l.replace(/\s+/g, "") === "DEVIS")
+    // En-tête de facture : titre seul (« Facture », « Facture d'acompte », « Facture n° … ») ; les conditions générales d'un devis parlent aussi de facture
+    && !N.some(l => /^FACTURE( D.ACOMPTE| DE SOLDE)?\s*$|^FACTURE( D.ACOMPTE| DE SOLDE)? N\S{0,2}\s*:?\s*[A-Z0-9]|^FACTURE D.ACOMPTE|^N\S{0,2} DE FACTURE|^DATE DE FACTURE/.test(l));
+  res.type = noteFrais ? "notefrais" : devis ? "engagement" : facture ? "facture" : facturette ? "facturette" : "ticket";
 
   /* Montant. Mesuré le 07/11/2026 sur 67 pièces réelles : les erreurs venaient de « 20,60 EUR » délaissé pour
      un montant d'article, de « Total: 104 44 » (virgule non lue), de « Total Avantages » ou « Total TTC (tva incl.) »
      mal triés, de « Z0.40 » (2 lu Z). Ordre : facturette (montant suivi de « EUR ») ; ligne de total ; total HT + TVA
      s'il contredit le total lu ; sinon le plus grand montant (à vérifier). */
   const L = lignes.map(reparerMontantsOcr);
-  const motsTotal = /(TOTAL TTC|NET A PAYER|A PAYER|TOTAL|MONTANT( TTC)?|SOMME|TTC|PAYE|CB )/;
-  const horsTotal = l => /SOUS.?TOTAL|RENDU|REMISE|ECONOMIE|AVANTAGE|FIDELITE|POINTS|ELIGIBLE/.test(l)
-    || (/TVA|\bHT\b/.test(l) && !/TVA INCL/.test(l));
+  const motsTotal = /(TOTAL TTC|NET A PAYER|A PAYER|TOTAL|MONTANT( TTC)?|SOMME|TTC|PAYE|CB |NOTRE PRIX)/;
+  // Hors total : sous-totaux, remises, lignes de TVA ou HT seules (« HT soit … TTC » reste un total), options et acomptes d'un devis
+  const horsTotal = l => /SOUS.?TOTAL|RENDU|REMISE|ECONOMIE|AVANTAGE|FIDELITE|POINTS|ELIGIBLE|PREVOIR|EN SUS|EN OPTION|\bOPTIONS?\b|PAR MOIS|SUPPLEMENT|ACOMPTE|ARRHES/.test(l)
+    || (/TVA|T\.V\.A|\bHT\b/.test(l) && !/TVA INCL/.test(l) && !/\bHT\b.*\bTTC\b/.test(l));
   // Montant d'une ligne de total : avec centimes, ou « 104 44 » (virgule perdue) en fin de ligne
   const montantsTotal = s => { const m = montantsDe(s); if (m.length) return m; const x = s.match(/(\d{1,5}) (\d{2})\s*[€E]?\s*$/); return x ? [+(x[1] + "." + x[2])] : []; };
   let candidat = null;
@@ -202,7 +207,7 @@ function extraireTicket(texte){
   }
   const auj = aujourdhui();
   // Date sans année (« LE 17/10 ») : propre aux tickets et facturettes ; une facture porte toujours son année
-  if (!dates.length && res.type !== "facture") for (const l of lignes){
+  if (!dates.length && !["facture", "engagement"].includes(res.type)) for (const l of lignes){
     const m = l.match(/(?<![\d\/.])(\d{1,2}) ?[\/.] ?(\d{1,2})(?![\d\/.]| ?[\/.] ?\d)/);
     if (!m || +m[1] < 1 || +m[1] > 31 || +m[2] < 1 || +m[2] > 12) continue;
     let d = auj.slice(0, 4) + "-" + pad2(+m[2]) + "-" + pad2(+m[1]);
