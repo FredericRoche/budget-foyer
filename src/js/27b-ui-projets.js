@@ -27,7 +27,20 @@ function etatProjet(nom){
   const aPayer = factures.filter(j => statutFacture(j) === "a_payer"), payees = factures.filter(j => statutFacture(j) === "payee");
   const paye = -somme(ops, o => o.montant), reste = -somme(prevu, x => x.montant);
   const emis = somme(payees, j => j.montant || 0), du = somme(aPayer, j => j.montant || 0);
-  return {nom, ech, prevu, ops, factures, aPayer, payees, paye, emis, du, reste, total: paye + emis + du + reste};
+  const devis = suiviDevis(nom);
+  return {nom, ech, prevu, ops, factures, aPayer, payees, paye, emis, du, reste, total: paye + emis + du + reste, devis,
+    engage: somme(devis.filter(d => d.signe), d => d.devis.montant || 0), aFacturer: somme(devis, d => d.reste)};
+}
+async function marquerDevisSigne(j){
+  const date = champDate({value: j.dateSignature || aujourdhui()});
+  const f = (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || "fournisseur";
+  const ok = await dialogue({titre: "Devis signé", corps: h("div", null,
+    h("p", {class: "note", style: {marginTop: 0}}, f + (j.numero ? ", devis n° " + j.numero : "") + " du " + dateFr(j.date) + " : " + euros(j.montant) + "."),
+    champ("Signé le", date), h("p", {class: "note"}, "Le devis devient un engagement : ses factures (même fournisseur) viendront en déduction de son reste à facturer.")),
+    actions: [j.dateSignature ? {libelle: "Remettre à l'étude", classe: "discret", action: () => { enregistrer("justificatifs", Object.assign(j, {dateSignature: ""})); return true; }} : null,
+      {libelle: "Annuler", classe: "discret", valeur: false},
+      {libelle: "Enregistrer", classe: "primaire", action: () => { if (!dateSaisieOk(date, "Signé le")) return false; enregistrer("justificatifs", Object.assign(j, {dateSignature: date.value})); return true; }}].filter(Boolean)});
+  if (ok) rafraichirEcran();
 }
 /* « Marquer comme payée… » : date du paiement, moyen (virement ou chèque) et compte ; le relevé confirmera. */
 async function marquerFacturePayee(j){
@@ -248,8 +261,20 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
     }}),
     h("p", {class: "note"}, "Factures saisies dans Justificatifs et rattachées au projet (catégorie d'une de ses échéances). Une facture payée attend son débit au relevé, qui la rapproche ; d'ici là elle est déduite de l'enveloppe et comptée en trésorerie à la date du paiement. "
       + "Échéance : date de la facture plus le délai lu sur la pièce (30 jours à défaut).")));
-  // Par poste : sous-catégorie des échéances (prévu), des paiements (payé) et des factures reçues pas encore au relevé
-  const postes = new Map(), poste = k => postes.get(k) || postes.set(k, {poste: k, prevu: 0, paye: 0, emis: 0, du: 0, n: 0}).get(k);
+  // Devis du projet : à l'étude, puis signés (engagements), avec leur facturé et leur reste à facturer
+  if (x.devis.length) c.appendChild(h("section", null, h("h2", null, "Devis : " + x.nom),
+    tableau([{titre: "Devis du"}, {titre: "Fournisseur"}, {titre: "N°"}, {titre: "Montant", num: true}, {titre: "État"}, {titre: "Facturé", num: true}, {titre: "Reste à facturer", num: true}, {titre: ""}],
+      x.devis.sort((a, b) => (a.signe - b.signe) || (a.devis.date < b.devis.date ? -1 : 1)), {classe: "serre", ligne: s => h("tr", {class: s.signe ? "" : "choisie"},
+        h("td", null, dateFr(s.devis.date)), h("td", null, nomF(s.devis), s.devis.natureExacte ? h("div", {class: "petit discret"}, s.devis.natureExacte) : null), h("td", null, s.devis.numero || ""),
+        h("td", {class: "num"}, euros(s.devis.montant || 0, 0)), h("td", null, s.signe ? h("span", {class: "pos"}, "signé le " + dateFr(s.devis.dateSignature)) : "à l'étude"),
+        h("td", {class: "num"}, s.facture ? euros(s.facture, 0) : ""), h("td", {class: "num"}, s.signe ? euros(s.reste, 0) : ""),
+        h("td", null, h("button", {class: "mini" + (s.signe ? " discret" : ""), onclick: () => marquerDevisSigne(s.devis)}, s.signe ? "Modifier…" : "Marquer comme signé…"), " ",
+          h("button", {class: "mini discret", onclick: () => aller("justificatifs", {choisi: s.devis.id})}, "Ouvrir")))}),
+    h("p", {class: "note"}, "Devis saisis dans Justificatifs avec le type « Devis (engagement) » et la catégorie du projet. Signé, il compte comme engagé ; ses factures (même fournisseur) réduisent son reste à facturer. "
+      + "Les options d'un devis (garde-meubles au mois, relivraison…) s'ajoutent à son montant si elles sont retenues. Un devis ne change pas la trésorerie : l'enveloppe du projet le couvre déjà.")));
+  // Par poste : sous-catégorie des échéances (prévu), des paiements (payé), des factures reçues pas encore au relevé et des devis
+  const postes = new Map(), poste = k => postes.get(k) || postes.set(k, {poste: k, prevu: 0, paye: 0, emis: 0, du: 0, n: 0, engage: 0, aFacturer: 0}).get(k);
+  for (const s of x.devis.filter(s => s.signe)){ const q = poste(s.devis.sousCategorie || "Sans poste"); q.engage += s.devis.montant || 0; q.aFacturer += s.reste; }
   for (const pv of x.prevu) poste(pv.echeance.sousCategorie || "Enveloppe non ventilée").prevu -= pv.montant;
   for (const o of x.ops){ const q = poste(o.sousCategorie || "Sans poste"); q.paye -= o.montant; q.n++; }
   for (const j of x.payees) poste(j.sousCategorie || "Sans poste").emis += j.montant || 0;
@@ -258,9 +283,9 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
   const lp = [...postes.values()].sort((a, b) => tot(b) - tot(a));
   const vide0 = v => v > 0.5 || v < -0.5 ? euros(v, 0) : "";
   c.appendChild(h("section", null, h("h2", null, "Par poste : " + x.nom),
-    tableau([{titre: "Poste"}, {titre: "Payé (relevé)", num: true}, {titre: "Paiements", num: true}, {titre: "Payé, pas au relevé", num: true}, {titre: "Factures à payer", num: true}, {titre: "Reste prévu", num: true}, {titre: "Total", num: true}], lp, {classe: "serre", vide: "Aucun poste.", ligne: q =>
-      h("tr", null, h("td", null, q.poste), h("td", {class: "num"}, euros(q.paye, 0)), h("td", {class: "num"}, String(q.n || "")), h("td", {class: "num"}, vide0(q.emis)), h("td", {class: "num"}, vide0(q.du)),
-        h("td", {class: "num"}, vide0(q.prevu)), h("td", {class: "num"}, euros(tot(q), 0)))}),
-    h("p", {class: "note"}, "Poste = sous-catégorie des paiements, des factures et des échéances. L'enveloppe du projet est diminuée des paiements et des factures reçues ; une échéance datée (lot, appel de fonds) ne l'est pas : saisir la facture d'un lot déjà prévu par une échéance le compterait deux fois, réduisez alors l'échéance. "
+    tableau([{titre: "Poste"}, {titre: "Devis signés", num: true}, {titre: "Payé (relevé)", num: true}, {titre: "Payé, pas au relevé", num: true}, {titre: "Factures à payer", num: true}, {titre: "Reste à facturer sur devis", num: true}, {titre: "Reste prévu", num: true}, {titre: "Total", num: true}], lp, {classe: "serre", vide: "Aucun poste.", ligne: q =>
+      h("tr", null, h("td", null, q.poste), h("td", {class: "num"}, vide0(q.engage)), h("td", {class: "num", title: q.n ? q.n + " paiement(s)" : ""}, euros(q.paye, 0)), h("td", {class: "num"}, vide0(q.emis)), h("td", {class: "num"}, vide0(q.du)),
+        h("td", {class: "num"}, vide0(q.aFacturer)), h("td", {class: "num"}, vide0(q.prevu)), h("td", {class: "num"}, euros(tot(q), 0)))}),
+    h("p", {class: "note"}, "Poste = sous-catégorie des paiements, des factures, des devis et des échéances. Total = payé + factures reçues + reste prévu ; le reste à facturer sur devis est déjà compris dans le reste prévu de l'enveloppe. L'enveloppe du projet est diminuée des paiements et des factures reçues ; une échéance datée (lot, appel de fonds) ne l'est pas : saisir la facture d'un lot déjà prévu par une échéance le compterait deux fois, réduisez alors l'échéance. "
       + "Pour suivre un budget par poste, saisissez une échéance par lot (même projet, sous-catégorie du lot) et réduisez d'autant l'enveloppe non ventilée.")));
 }});

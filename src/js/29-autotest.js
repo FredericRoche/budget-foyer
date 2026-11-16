@@ -615,6 +615,17 @@ async function autotest(){
             [["Chantier essai", "a_payer", 30, -9000, false], ["payee", -9000, true, true], true]);
           supprimer("operations", op.id); supprimer("justificatifs", jf.id); supprimer("echeances", ep.id);
         }
+        {
+          const ep = enregistrer("echeances", {libelle: "Enveloppe essai devis", projet: "Chantier devis essai", categorie: "Travaux devis essai", sousCategorie: "", montant: -20000, recurrence: "unique", debut: ajouterJours(aujourdhui(), 200), enveloppe: true, active: true});
+          const dv = enregistrer("justificatifs", {type: "engagement", statut: "engagement", date: aujourdhui(), montant: 4200, categorie: "Travaux devis essai", sousCategorie: "Déménagement", commercantNom: "Déménageur essai", operations: []});
+          const avant = [suiviDevis("Chantier devis essai").map(s => [s.signe, s.reste]), etatProjet("Chantier devis essai").engage];
+          enregistrer("justificatifs", Object.assign(dv, {dateSignature: aujourdhui()}));
+          const fa = enregistrer("justificatifs", {type: "facture", statut: "a_rapprocher", date: aujourdhui(), montant: 1260, categorie: "Travaux devis essai", sousCategorie: "Déménagement", commercantNom: "Déménageur essai", operations: []});
+          const ap = etatProjet("Chantier devis essai");
+          v("projet : devis à l'étude puis signé, facture en déduction, devis hors paiements", [avant, ap.engage, ap.aFacturer, ap.du, facturesDuProjet("Chantier devis essai").length, montantEcheance(ep), encoursSaisis().lignes.some(l => l.montant === 4200 || l.montant === 5460)],
+            [[[[false, 0]], 0], 4200, 2940, 1260, 1, -18740, false]);
+          supprimer("justificatifs", fa.id); supprimer("justificatifs", dv.id); supprimer("echeances", ep.id);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

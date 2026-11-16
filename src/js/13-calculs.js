@@ -43,7 +43,18 @@ function projetDePiece(j){
       if (r.categorie === j.categorie && (!r.sousCategorie || r.sousCategorie === j.sousCategorie)) return e.projet;
   return null;
 }
-function facturesDuProjet(nom){ return vivants("justificatifs").filter(j => projetDePiece(j) === nom); }
+function facturesDuProjet(nom){ return vivants("justificatifs").filter(j => j.type !== "engagement" && projetDePiece(j) === nom); }
+/* Devis d'un projet (type « engagement ») : à l'étude, puis signé (date de signature) ; un devis signé est un engagement.
+   Le facturé d'un devis = factures du projet du même fournisseur ; reste à facturer = devis signé − facturé (jamais négatif). */
+function devisDuProjet(nom){ return vivants("justificatifs").filter(j => j.type === "engagement" && projetDePiece(j) === nom); }
+const cleFournisseur = j => j.commercant || norm(j.commercantNom || j.raisonSociale || "").toLowerCase();
+function suiviDevis(nom){
+  const factures = facturesDuProjet(nom);
+  return devisDuProjet(nom).map(d => {
+    const facture = somme(factures.filter(f => cleFournisseur(f) && cleFournisseur(f) === cleFournisseur(d)), f => f.montant || 0);
+    return {devis: d, signe: !!d.dateSignature, facture, reste: d.dateSignature ? Math.max(0, (d.montant || 0) - facture) : 0};
+  });
+}
 /* Trois états d'une facture : à payer ; payée (virement émis ou chèque remis à la date saisie), en attente du relevé ;
    rapprochée (son paiement est au relevé). Une pièce antérieure au début du contrôle, jamais rapprochée, est close (réglée). */
 function statutFacture(j){

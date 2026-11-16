@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-IN1ImhwKgY64S6GmlbvuJuk6L2I82+O/xNO/bFJ32Q8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-st7YQO5sEBJtGho+Orxz5+5zwhuqFfWdi7GIY8KIu+A=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-16.1947";
+const VERSION_APP = "2026-11-16.2000";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3396,7 +3396,7 @@ function appliquerReprise(prep, options){
    même montant), pas d'un débit, et n'entre ni dans les dépenses en attente ni dans
    les en-cours de cartes. */
 
-const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", facturette: "Facturette CB", notefrais: "Note de frais (à rembourser)", autre: "Autre"};
+const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", engagement: "Devis (engagement, pas un paiement)", facturette: "Facturette CB", notefrais: "Note de frais (à rembourser)", autre: "Autre"};
 const estNoteFrais = j => j && j.type === "notefrais";
 /* Note de frais : remboursement attendu de quelques jours avant (date de la dernière dépense) à 120 jours après. */
 const FENETRE_NOTE_FRAIS = [7, 120];
@@ -4661,7 +4661,18 @@ function projetDePiece(j){
       if (r.categorie === j.categorie && (!r.sousCategorie || r.sousCategorie === j.sousCategorie)) return e.projet;
   return null;
 }
-function facturesDuProjet(nom){ return vivants("justificatifs").filter(j => projetDePiece(j) === nom); }
+function facturesDuProjet(nom){ return vivants("justificatifs").filter(j => j.type !== "engagement" && projetDePiece(j) === nom); }
+/* Devis d'un projet (type « engagement ») : à l'étude, puis signé (date de signature) ; un devis signé est un engagement.
+   Le facturé d'un devis = factures du projet du même fournisseur ; reste à facturer = devis signé − facturé (jamais négatif). */
+function devisDuProjet(nom){ return vivants("justificatifs").filter(j => j.type === "engagement" && projetDePiece(j) === nom); }
+const cleFournisseur = j => j.commercant || norm(j.commercantNom || j.raisonSociale || "").toLowerCase();
+function suiviDevis(nom){
+  const factures = facturesDuProjet(nom);
+  return devisDuProjet(nom).map(d => {
+    const facture = somme(factures.filter(f => cleFournisseur(f) && cleFournisseur(f) === cleFournisseur(d)), f => f.montant || 0);
+    return {devis: d, signe: !!d.dateSignature, facture, reste: d.dateSignature ? Math.max(0, (d.montant || 0) - facture) : 0};
+  });
+}
 /* Trois états d'une facture : à payer ; payée (virement émis ou chèque remis à la date saisie), en attente du relevé ;
    rapprochée (son paiement est au relevé). Une pièce antérieure au début du contrôle, jamais rapprochée, est close (réglée). */
 function statutFacture(j){
@@ -6943,7 +6954,7 @@ declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   c.appendChild(tableau([{titre: "Date", cle: x => x.date}, {titre: "Type"}, {titre: "Fournisseur", cle: x => x.commercantNom || ""}, {titre: "Nature exacte"}, {titre: "Montant", num: true, cle: x => x.montant},
     {titre: "Origine"}, {titre: "Statut", cle: x => x.statut}], tous, {classe: "serre", limite: 200, ligne: x => h("tr", {class: "cliquable" + (x === j ? " choisie" : ""), onclick: () => { etat.choisi = x.id; rafraichirEcran(); window.scrollTo(0, 0); }},
       h("td", null, dateFr(x.date)), h("td", null, TYPES_JUSTIF[x.type] || ""), h("td", null, (x.commercant && obtenir("commercants", x.commercant)?.nom) || x.commercantNom || x.raisonSociale || "—"), h("td", null, x.natureExacte || ""), h("td", {class: "num"}, euros(x.montant)),
-      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : x.datePaiement ? "payée le " + dateCourte(x.datePaiement) + ", attend le relevé" : projetDePiece(x) ? "à payer" : "attend le relevé")))}));
+      h("td", null, x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "PC, sans pièce" : "PC"), h("td", null, x.statut === "engagement" ? h("span", {class: "discret"}, x.dateSignature ? "devis signé le " + dateCourte(x.dateSignature) : "devis à l'étude") : x.statut === "rapproche" ? h("span", {class: "pos"}, "rapproché") : pieceClose(x) ? h("span", {class: "discret", title: "Antérieure au début du contrôle des anomalies : considérée comme réglée"}, "close") : h("span", {class: "neg"}, x.aValider ? "à valider" : estNoteFrais(x) ? "remboursement attendu" : raisonDe.has(x.id) ? "anomalie" : x.datePaiement ? "payée le " + dateCourte(x.datePaiement) + ", attend le relevé" : projetDePiece(x) ? "à payer" : "attend le relevé")))}));
 }});
 
 /* Validation en lot des rapprochements sûrs : chaque ligne montre la pièce, l'opération et ce qui changerait ;
@@ -7038,6 +7049,9 @@ function ecranRapprochement(j, etat, attente){
     const cheque = h("input", {type: "text", inputmode: "numeric", value: x.cheque || "", placeholder: "n° du chèque", style: {width: "9rem"}});
     const ligneCheque = h("div", {class: "champ-ocr", hidden: !String(x.carte || "").startsWith("CHQ:")}, h("label", null, "N° de chèque"), cheque, h("span", {class: "confiance"}, "pour le rapprochement"));
     // Virement émis ou chèque remis : date du paiement (la facture n'est plus « à payer » ; le relevé confirmera)
+    const signeLe = champDate({value: x.dateSignature || ""});
+    const ligneSigne = h("div", {class: "champ-ocr", hidden: x.type !== "engagement"}, h("label", null, "Signé le"), signeLe, h("span", {class: "confiance"}, "vide = devis à l'étude ; signé = engagement suivi dans Projets"));
+    type.addEventListener("change", () => { ligneSigne.hidden = type.value !== "engagement"; });
     const payeeLe = champDate({value: x.datePaiement || ""});
     const direct = v => /^(CPT|CHQ):/.test(v || "");
     const lignePayee = h("div", {class: "champ-ocr", hidden: !direct(x.carte) || estNoteFrais(x)}, h("label", null, "Payée le"), payeeLe, h("span", {class: "confiance"}, "vide = à payer ; sinon virement émis ou chèque remis ce jour-là"));
@@ -7050,8 +7064,8 @@ function ecranRapprochement(j, etat, attente){
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier") : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque, lignePayee);
-    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num, payeeLe});
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque, lignePayee, ligneSigne);
+    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num, payeeLe, signeLe});
   });
   const enregistrerSaisie = () => {
     const aliasAProposer = [];
@@ -7059,6 +7073,10 @@ function ecranRapprochement(j, etat, attente){
       const ancienNom = f.x.commercantNom;
       if (!dateSaisieOk(f.date, "Date")) return false;
       if (/^(CPT|CHQ):/.test(f.carte.value) && !dateSaisieOk(f.payeeLe, "Payée le", true)) return false;
+      if (f.type.value === "engagement" && !dateSaisieOk(f.signeLe, "Signé le", true)) return false;
+      // Devis : un engagement, jamais un paiement ; il quitte le rapprochement (et le retrouve s'il redevient une pièce de paiement)
+      if (f.type.value === "engagement"){ if ((f.x.operations || []).length) delier(f.x); Object.assign(f.x, {statut: "engagement", operations: [], dateSignature: f.signeLe.value || ""}); }
+      else if (f.x.statut === "engagement") Object.assign(f.x, {statut: "a_rapprocher", dateSignature: ""});
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
         lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : "", datePaiement: /^(CPT|CHQ):/.test(f.carte.value) ? f.payeeLe.value || "" : ""}, valeurCategorie(f.cat));
       if (f.x.categorie === "À préciser") f.x.categorie = "";
@@ -8382,7 +8400,20 @@ function etatProjet(nom){
   const aPayer = factures.filter(j => statutFacture(j) === "a_payer"), payees = factures.filter(j => statutFacture(j) === "payee");
   const paye = -somme(ops, o => o.montant), reste = -somme(prevu, x => x.montant);
   const emis = somme(payees, j => j.montant || 0), du = somme(aPayer, j => j.montant || 0);
-  return {nom, ech, prevu, ops, factures, aPayer, payees, paye, emis, du, reste, total: paye + emis + du + reste};
+  const devis = suiviDevis(nom);
+  return {nom, ech, prevu, ops, factures, aPayer, payees, paye, emis, du, reste, total: paye + emis + du + reste, devis,
+    engage: somme(devis.filter(d => d.signe), d => d.devis.montant || 0), aFacturer: somme(devis, d => d.reste)};
+}
+async function marquerDevisSigne(j){
+  const date = champDate({value: j.dateSignature || aujourdhui()});
+  const f = (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || "fournisseur";
+  const ok = await dialogue({titre: "Devis signé", corps: h("div", null,
+    h("p", {class: "note", style: {marginTop: 0}}, f + (j.numero ? ", devis n° " + j.numero : "") + " du " + dateFr(j.date) + " : " + euros(j.montant) + "."),
+    champ("Signé le", date), h("p", {class: "note"}, "Le devis devient un engagement : ses factures (même fournisseur) viendront en déduction de son reste à facturer.")),
+    actions: [j.dateSignature ? {libelle: "Remettre à l'étude", classe: "discret", action: () => { enregistrer("justificatifs", Object.assign(j, {dateSignature: ""})); return true; }} : null,
+      {libelle: "Annuler", classe: "discret", valeur: false},
+      {libelle: "Enregistrer", classe: "primaire", action: () => { if (!dateSaisieOk(date, "Signé le")) return false; enregistrer("justificatifs", Object.assign(j, {dateSignature: date.value})); return true; }}].filter(Boolean)});
+  if (ok) rafraichirEcran();
 }
 /* « Marquer comme payée… » : date du paiement, moyen (virement ou chèque) et compte ; le relevé confirmera. */
 async function marquerFacturePayee(j){
@@ -8603,8 +8634,20 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
     }}),
     h("p", {class: "note"}, "Factures saisies dans Justificatifs et rattachées au projet (catégorie d'une de ses échéances). Une facture payée attend son débit au relevé, qui la rapproche ; d'ici là elle est déduite de l'enveloppe et comptée en trésorerie à la date du paiement. "
       + "Échéance : date de la facture plus le délai lu sur la pièce (30 jours à défaut).")));
-  // Par poste : sous-catégorie des échéances (prévu), des paiements (payé) et des factures reçues pas encore au relevé
-  const postes = new Map(), poste = k => postes.get(k) || postes.set(k, {poste: k, prevu: 0, paye: 0, emis: 0, du: 0, n: 0}).get(k);
+  // Devis du projet : à l'étude, puis signés (engagements), avec leur facturé et leur reste à facturer
+  if (x.devis.length) c.appendChild(h("section", null, h("h2", null, "Devis : " + x.nom),
+    tableau([{titre: "Devis du"}, {titre: "Fournisseur"}, {titre: "N°"}, {titre: "Montant", num: true}, {titre: "État"}, {titre: "Facturé", num: true}, {titre: "Reste à facturer", num: true}, {titre: ""}],
+      x.devis.sort((a, b) => (a.signe - b.signe) || (a.devis.date < b.devis.date ? -1 : 1)), {classe: "serre", ligne: s => h("tr", {class: s.signe ? "" : "choisie"},
+        h("td", null, dateFr(s.devis.date)), h("td", null, nomF(s.devis), s.devis.natureExacte ? h("div", {class: "petit discret"}, s.devis.natureExacte) : null), h("td", null, s.devis.numero || ""),
+        h("td", {class: "num"}, euros(s.devis.montant || 0, 0)), h("td", null, s.signe ? h("span", {class: "pos"}, "signé le " + dateFr(s.devis.dateSignature)) : "à l'étude"),
+        h("td", {class: "num"}, s.facture ? euros(s.facture, 0) : ""), h("td", {class: "num"}, s.signe ? euros(s.reste, 0) : ""),
+        h("td", null, h("button", {class: "mini" + (s.signe ? " discret" : ""), onclick: () => marquerDevisSigne(s.devis)}, s.signe ? "Modifier…" : "Marquer comme signé…"), " ",
+          h("button", {class: "mini discret", onclick: () => aller("justificatifs", {choisi: s.devis.id})}, "Ouvrir")))}),
+    h("p", {class: "note"}, "Devis saisis dans Justificatifs avec le type « Devis (engagement) » et la catégorie du projet. Signé, il compte comme engagé ; ses factures (même fournisseur) réduisent son reste à facturer. "
+      + "Les options d'un devis (garde-meubles au mois, relivraison…) s'ajoutent à son montant si elles sont retenues. Un devis ne change pas la trésorerie : l'enveloppe du projet le couvre déjà.")));
+  // Par poste : sous-catégorie des échéances (prévu), des paiements (payé), des factures reçues pas encore au relevé et des devis
+  const postes = new Map(), poste = k => postes.get(k) || postes.set(k, {poste: k, prevu: 0, paye: 0, emis: 0, du: 0, n: 0, engage: 0, aFacturer: 0}).get(k);
+  for (const s of x.devis.filter(s => s.signe)){ const q = poste(s.devis.sousCategorie || "Sans poste"); q.engage += s.devis.montant || 0; q.aFacturer += s.reste; }
   for (const pv of x.prevu) poste(pv.echeance.sousCategorie || "Enveloppe non ventilée").prevu -= pv.montant;
   for (const o of x.ops){ const q = poste(o.sousCategorie || "Sans poste"); q.paye -= o.montant; q.n++; }
   for (const j of x.payees) poste(j.sousCategorie || "Sans poste").emis += j.montant || 0;
@@ -8613,10 +8656,10 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
   const lp = [...postes.values()].sort((a, b) => tot(b) - tot(a));
   const vide0 = v => v > 0.5 || v < -0.5 ? euros(v, 0) : "";
   c.appendChild(h("section", null, h("h2", null, "Par poste : " + x.nom),
-    tableau([{titre: "Poste"}, {titre: "Payé (relevé)", num: true}, {titre: "Paiements", num: true}, {titre: "Payé, pas au relevé", num: true}, {titre: "Factures à payer", num: true}, {titre: "Reste prévu", num: true}, {titre: "Total", num: true}], lp, {classe: "serre", vide: "Aucun poste.", ligne: q =>
-      h("tr", null, h("td", null, q.poste), h("td", {class: "num"}, euros(q.paye, 0)), h("td", {class: "num"}, String(q.n || "")), h("td", {class: "num"}, vide0(q.emis)), h("td", {class: "num"}, vide0(q.du)),
-        h("td", {class: "num"}, vide0(q.prevu)), h("td", {class: "num"}, euros(tot(q), 0)))}),
-    h("p", {class: "note"}, "Poste = sous-catégorie des paiements, des factures et des échéances. L'enveloppe du projet est diminuée des paiements et des factures reçues ; une échéance datée (lot, appel de fonds) ne l'est pas : saisir la facture d'un lot déjà prévu par une échéance le compterait deux fois, réduisez alors l'échéance. "
+    tableau([{titre: "Poste"}, {titre: "Devis signés", num: true}, {titre: "Payé (relevé)", num: true}, {titre: "Payé, pas au relevé", num: true}, {titre: "Factures à payer", num: true}, {titre: "Reste à facturer sur devis", num: true}, {titre: "Reste prévu", num: true}, {titre: "Total", num: true}], lp, {classe: "serre", vide: "Aucun poste.", ligne: q =>
+      h("tr", null, h("td", null, q.poste), h("td", {class: "num"}, vide0(q.engage)), h("td", {class: "num", title: q.n ? q.n + " paiement(s)" : ""}, euros(q.paye, 0)), h("td", {class: "num"}, vide0(q.emis)), h("td", {class: "num"}, vide0(q.du)),
+        h("td", {class: "num"}, vide0(q.aFacturer)), h("td", {class: "num"}, vide0(q.prevu)), h("td", {class: "num"}, euros(tot(q), 0)))}),
+    h("p", {class: "note"}, "Poste = sous-catégorie des paiements, des factures, des devis et des échéances. Total = payé + factures reçues + reste prévu ; le reste à facturer sur devis est déjà compris dans le reste prévu de l'enveloppe. L'enveloppe du projet est diminuée des paiements et des factures reçues ; une échéance datée (lot, appel de fonds) ne l'est pas : saisir la facture d'un lot déjà prévu par une échéance le compterait deux fois, réduisez alors l'échéance. "
       + "Pour suivre un budget par poste, saisissez une échéance par lot (même projet, sous-catégorie du lot) et réduisez d'autant l'enveloppe non ventilée.")));
 }});
 
@@ -9695,6 +9738,17 @@ async function autotest(){
           v("projet : facture à payer puis payée (enveloppe nette, en-cours, rapprochement autour de la date du paiement)", [etat1, etat2, sim.evenements.some(e => e.genre === "projet" && /Facture/.test(e.libelle))],
             [["Chantier essai", "a_payer", 30, -9000, false], ["payee", -9000, true, true], true]);
           supprimer("operations", op.id); supprimer("justificatifs", jf.id); supprimer("echeances", ep.id);
+        }
+        {
+          const ep = enregistrer("echeances", {libelle: "Enveloppe essai devis", projet: "Chantier devis essai", categorie: "Travaux devis essai", sousCategorie: "", montant: -20000, recurrence: "unique", debut: ajouterJours(aujourdhui(), 200), enveloppe: true, active: true});
+          const dv = enregistrer("justificatifs", {type: "engagement", statut: "engagement", date: aujourdhui(), montant: 4200, categorie: "Travaux devis essai", sousCategorie: "Déménagement", commercantNom: "Déménageur essai", operations: []});
+          const avant = [suiviDevis("Chantier devis essai").map(s => [s.signe, s.reste]), etatProjet("Chantier devis essai").engage];
+          enregistrer("justificatifs", Object.assign(dv, {dateSignature: aujourdhui()}));
+          const fa = enregistrer("justificatifs", {type: "facture", statut: "a_rapprocher", date: aujourdhui(), montant: 1260, categorie: "Travaux devis essai", sousCategorie: "Déménagement", commercantNom: "Déménageur essai", operations: []});
+          const ap = etatProjet("Chantier devis essai");
+          v("projet : devis à l'étude puis signé, facture en déduction, devis hors paiements", [avant, ap.engage, ap.aFacturer, ap.du, facturesDuProjet("Chantier devis essai").length, montantEcheance(ep), encoursSaisis().lignes.some(l => l.montant === 4200 || l.montant === 5460)],
+            [[[[false, 0]], 0], 4200, 2940, 1260, 1, -18740, false]);
+          supprimer("justificatifs", fa.id); supprimer("justificatifs", dv.id); supprimer("echeances", ep.id);
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);

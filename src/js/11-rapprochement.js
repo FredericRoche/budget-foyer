@@ -10,7 +10,7 @@
    même montant), pas d'un débit, et n'entre ni dans les dépenses en attente ni dans
    les en-cours de cartes. */
 
-const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", facturette: "Facturette CB", notefrais: "Note de frais (à rembourser)", autre: "Autre"};
+const TYPES_JUSTIF = {ticket: "Ticket de caisse", facture: "Facture", devis: "Devis, acompte", engagement: "Devis (engagement, pas un paiement)", facturette: "Facturette CB", notefrais: "Note de frais (à rembourser)", autre: "Autre"};
 const estNoteFrais = j => j && j.type === "notefrais";
 /* Note de frais : remboursement attendu de quelques jours avant (date de la dernière dépense) à 120 jours après. */
 const FENETRE_NOTE_FRAIS = [7, 120];
