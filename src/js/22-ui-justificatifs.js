@@ -142,7 +142,16 @@ function ecranRapprochement(j, etat, attente){
     // Virement émis ou chèque remis : date du paiement (la facture n'est plus « à payer » ; le relevé confirmera)
     const signeLe = champDate({value: x.dateSignature || ""});
     const ligneSigne = h("div", {class: "champ-ocr", hidden: x.type !== "engagement"}, h("label", null, "Signé le"), signeLe, h("span", {class: "confiance"}, "vide = devis à l'étude ; signé = engagement suivi dans Projets"));
-    type.addEventListener("change", () => { ligneSigne.hidden = type.value !== "engagement"; });
+    // Fournisseurs associés : cotraitants d'une même mission (architecte associé…) dont les factures et paiements s'imputent au devis
+    const associes = new Set(x.fournisseursAssocies || []);
+    const pastilles = h("span", {class: "pile"});
+    const ajoutAssocie = selection([["", "Ajouter un fournisseur associé…"], ...vivants("commercants").filter(c => c.id !== x.commercant).sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr")).map(c => [c.id, c.nom])], "");
+    const dessinerAssocies = () => { vider(pastilles); for (const id of associes) pastilles.appendChild(h("span", {class: "petit", style: {marginRight: ".6rem"}}, obtenir("commercants", id)?.nom || "?", " ",
+      h("button", {class: "mini discret", title: "Retirer", onclick: () => { associes.delete(id); dessinerAssocies(); }}, "×"))); pastilles.appendChild(ajoutAssocie); };
+    ajoutAssocie.addEventListener("change", () => { if (ajoutAssocie.value){ associes.add(ajoutAssocie.value); ajoutAssocie.value = ""; dessinerAssocies(); } });
+    dessinerAssocies();
+    const ligneAssocies = h("div", {class: "champ-ocr", hidden: x.type !== "engagement"}, h("label", null, "Fournisseurs associés"), pastilles, h("span", {class: "confiance"}, "leurs factures et paiements, depuis la date du devis, s'imputent à ce devis"));
+    type.addEventListener("change", () => { ligneSigne.hidden = type.value !== "engagement"; ligneAssocies.hidden = type.value !== "engagement"; });
     const payeeLe = champDate({value: x.datePaiement || ""});
     const direct = v => /^(CPT|CHQ):/.test(v || "");
     const lignePayee = h("div", {class: "champ-ocr", hidden: !direct(x.carte) || estNoteFrais(x)}, h("label", null, "Payée le"), payeeLe, h("span", {class: "confiance"}, "vide = à payer ; sinon virement émis ou chèque remis ce jour-là"));
@@ -155,8 +164,8 @@ function ecranRapprochement(j, etat, attente){
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier") : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque, lignePayee, ligneSigne);
-    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num, payeeLe, signeLe});
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque, lignePayee, ligneSigne, ligneAssocies);
+    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num, payeeLe, signeLe, associes});
   });
   const enregistrerSaisie = () => {
     const aliasAProposer = [];
@@ -166,7 +175,7 @@ function ecranRapprochement(j, etat, attente){
       if (/^(CPT|CHQ):/.test(f.carte.value) && !dateSaisieOk(f.payeeLe, "Payée le", true)) return false;
       if (f.type.value === "engagement" && !dateSaisieOk(f.signeLe, "Signé le", true)) return false;
       // Devis : un engagement, jamais un paiement ; il quitte le rapprochement (et le retrouve s'il redevient une pièce de paiement)
-      if (f.type.value === "engagement"){ if ((f.x.operations || []).length) delier(f.x); Object.assign(f.x, {statut: "engagement", operations: [], dateSignature: f.signeLe.value || ""}); }
+      if (f.type.value === "engagement"){ if ((f.x.operations || []).length) delier(f.x); Object.assign(f.x, {statut: "engagement", operations: [], dateSignature: f.signeLe.value || "", fournisseursAssocies: [...f.associes]}); }
       else if (f.x.statut === "engagement") Object.assign(f.x, {statut: "a_rapprocher", dateSignature: ""});
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
         lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : "", datePaiement: /^(CPT|CHQ):/.test(f.carte.value) ? f.payeeLe.value || "" : ""}, valeurCategorie(f.cat));
@@ -210,8 +219,13 @@ function ecranRapprochement(j, etat, attente){
   if (j.texteOCR) saisie.appendChild(h("details", {style: {marginTop: ".5rem"}}, h("summary", {class: "petit"}, "Texte lu sur la pièce"), h("div", {class: "texte-brut"}, j.texteOCR)));
   grille.appendChild(saisie);
   // 3. Candidats
-  const cand = h("section", null, h("h2", null, "Opérations candidates"));
-  if (j.statut === "rapproche"){
+  const cand = h("section", null, h("h2", null, j.statut === "engagement" ? "Suivi du devis" : "Opérations candidates"));
+  if (j.statut === "engagement"){
+    const p = projetDePiece(j); const s = p ? suiviDevis(p).find(x => x.devis.id === j.id) : null;
+    cand.append(h("p", null, j.dateSignature ? "Devis signé le " + dateFr(j.dateSignature) + " : un engagement, pas un paiement." : "Devis à l'étude : ni engagement, ni paiement."),
+      s && s.signe ? h("p", null, "Facturé " + euros(s.facture || 0, 0) + " · payé " + euros(s.paye || 0, 0) + " · reste " + euros(s.reste, 0) + " (Projets › " + p + ")") : null,
+      p ? h("button", {class: "discret", onclick: () => aller("projets", {projet: p})}, "Voir le projet") : h("p", {class: "note"}, "Aucun projet ne porte sa catégorie : choisissez la catégorie du projet pour le suivre dans Projets."));
+  } else if (j.statut === "rapproche"){
     const op = obtenir("operations", (j.operations || [])[0]);
     cand.append(h("p", null, "Rapproché de : ", op ? libelleCompte(op.compte) + " · " + dateFr(op.date) + " · " + op.libelle + " · " + euros(op.montant) : "—"),
       j.auto ? h("p", {class: "note"}, "Rapprochement fait d'office" + (j.rapprocheLe ? " le " + dateFr(j.rapprocheLe.slice(0, 10)) : "") + " : à défaire s'il ne correspond pas au relevé.") : null,

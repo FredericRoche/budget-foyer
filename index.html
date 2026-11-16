@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-1mMcxQ6gELjHyL2SWpcUL6OXfprvwN72eY3/Wru8VEM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-2tcRMwM3O8WASi3SnerX0voKZXhAQKTcr/oM2AUadpw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-16.2011";
+const VERSION_APP = "2026-11-16.2155";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4677,12 +4677,17 @@ function suiviDevis(nom){
   const ech = vivants("echeances").filter(e => e.projet === nom && e.active !== false);
   const ops = typeof operationsDuProjet === "function" ? operationsDuProjet(nom, ech) : [];
   const devis = devisDuProjet(nom);
-  // Un fournisseur à plusieurs devis : ses paiements et factures s'imputent aux devis signés dans l'ordre des dates
+  // Un fournisseur à plusieurs devis : ses paiements et factures s'imputent aux devis signés dans l'ordre des dates.
+  // Fournisseurs associés (cotraitants d'une même mission) : leurs flux comptent aussi, à partir de la date du plus ancien devis du groupe.
   const parF = regrouper(devis, cleFournisseur);
   const r = [];
   for (const [cle, ds] of parF){
-    const memeF = x => cle && cleFournisseur(x) === cle;
-    const opF = o => (o.commercant && devis.some(d => d.commercant === o.commercant && cleFournisseur(d) === cle)) || (o.justificatifs || []).some(id => { const j = obtenir("justificatifs", id); return j && memeF(j); });
+    const associes = new Set(ds.flatMap(d => d.fournisseursAssocies || []));
+    const depuis = ds.reduce((m, d) => !m || d.date < m ? d.date : m, "");
+    const cleOp = o => o.commercant || "";
+    const memeF = x => (cle && cleFournisseur(x) === cle) || (associes.has(x.commercant) && (x.date || "") >= depuis);
+    const opF = o => (o.commercant && devis.some(d => d.commercant === o.commercant && cleFournisseur(d) === cle)) || (associes.has(cleOp(o)) && o.date >= depuis)
+      || (o.justificatifs || []).some(id => { const j = obtenir("justificatifs", id); return j && memeF(j); });
     const facture = somme(factures.filter(memeF), f => f.montant || 0);
     const paye = -somme(ops.filter(opF), o => o.montant) + somme(factures.filter(f => memeF(f) && statutFacture(f) === "payee"), f => f.montant || 0);
     let impute = Math.max(facture, paye);
@@ -7071,7 +7076,16 @@ function ecranRapprochement(j, etat, attente){
     // Virement émis ou chèque remis : date du paiement (la facture n'est plus « à payer » ; le relevé confirmera)
     const signeLe = champDate({value: x.dateSignature || ""});
     const ligneSigne = h("div", {class: "champ-ocr", hidden: x.type !== "engagement"}, h("label", null, "Signé le"), signeLe, h("span", {class: "confiance"}, "vide = devis à l'étude ; signé = engagement suivi dans Projets"));
-    type.addEventListener("change", () => { ligneSigne.hidden = type.value !== "engagement"; });
+    // Fournisseurs associés : cotraitants d'une même mission (architecte associé…) dont les factures et paiements s'imputent au devis
+    const associes = new Set(x.fournisseursAssocies || []);
+    const pastilles = h("span", {class: "pile"});
+    const ajoutAssocie = selection([["", "Ajouter un fournisseur associé…"], ...vivants("commercants").filter(c => c.id !== x.commercant).sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr")).map(c => [c.id, c.nom])], "");
+    const dessinerAssocies = () => { vider(pastilles); for (const id of associes) pastilles.appendChild(h("span", {class: "petit", style: {marginRight: ".6rem"}}, obtenir("commercants", id)?.nom || "?", " ",
+      h("button", {class: "mini discret", title: "Retirer", onclick: () => { associes.delete(id); dessinerAssocies(); }}, "×"))); pastilles.appendChild(ajoutAssocie); };
+    ajoutAssocie.addEventListener("change", () => { if (ajoutAssocie.value){ associes.add(ajoutAssocie.value); ajoutAssocie.value = ""; dessinerAssocies(); } });
+    dessinerAssocies();
+    const ligneAssocies = h("div", {class: "champ-ocr", hidden: x.type !== "engagement"}, h("label", null, "Fournisseurs associés"), pastilles, h("span", {class: "confiance"}, "leurs factures et paiements, depuis la date du devis, s'imputent à ce devis"));
+    type.addEventListener("change", () => { ligneSigne.hidden = type.value !== "engagement"; ligneAssocies.hidden = type.value !== "engagement"; });
     const payeeLe = champDate({value: x.datePaiement || ""});
     const direct = v => /^(CPT|CHQ):/.test(v || "");
     const lignePayee = h("div", {class: "champ-ocr", hidden: !direct(x.carte) || estNoteFrais(x)}, h("label", null, "Payée le"), payeeLe, h("span", {class: "confiance"}, "vide = à payer ; sinon virement émis ou chèque remis ce jour-là"));
@@ -7084,8 +7098,8 @@ function ecranRapprochement(j, etat, attente){
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier") : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
-      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque, lignePayee, ligneSigne);
-    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num, payeeLe, signeLe});
+      ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque, lignePayee, ligneSigne, ligneAssocies);
+    champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num, payeeLe, signeLe, associes});
   });
   const enregistrerSaisie = () => {
     const aliasAProposer = [];
@@ -7095,7 +7109,7 @@ function ecranRapprochement(j, etat, attente){
       if (/^(CPT|CHQ):/.test(f.carte.value) && !dateSaisieOk(f.payeeLe, "Payée le", true)) return false;
       if (f.type.value === "engagement" && !dateSaisieOk(f.signeLe, "Signé le", true)) return false;
       // Devis : un engagement, jamais un paiement ; il quitte le rapprochement (et le retrouve s'il redevient une pièce de paiement)
-      if (f.type.value === "engagement"){ if ((f.x.operations || []).length) delier(f.x); Object.assign(f.x, {statut: "engagement", operations: [], dateSignature: f.signeLe.value || ""}); }
+      if (f.type.value === "engagement"){ if ((f.x.operations || []).length) delier(f.x); Object.assign(f.x, {statut: "engagement", operations: [], dateSignature: f.signeLe.value || "", fournisseursAssocies: [...f.associes]}); }
       else if (f.x.statut === "engagement") Object.assign(f.x, {statut: "a_rapprocher", dateSignature: ""});
       Object.assign(f.x, {type: f.type.value, montant: Math.abs(lireMontant(f.montant.value) || 0), date: f.date.value, commercantNom: f.cm.value.trim(), natureExacte: f.nat.value.trim(),
         lieu: f.lieu.value, numero: cleNumero(f.num.value), fournisseurProvisoire: false, aValider: false, carte: f.carte.value, cheque: f.carte.value.startsWith("CHQ:") ? f.cheque.value.replace(/\D/g, "") : "", datePaiement: /^(CPT|CHQ):/.test(f.carte.value) ? f.payeeLe.value || "" : ""}, valeurCategorie(f.cat));
@@ -7139,8 +7153,13 @@ function ecranRapprochement(j, etat, attente){
   if (j.texteOCR) saisie.appendChild(h("details", {style: {marginTop: ".5rem"}}, h("summary", {class: "petit"}, "Texte lu sur la pièce"), h("div", {class: "texte-brut"}, j.texteOCR)));
   grille.appendChild(saisie);
   // 3. Candidats
-  const cand = h("section", null, h("h2", null, "Opérations candidates"));
-  if (j.statut === "rapproche"){
+  const cand = h("section", null, h("h2", null, j.statut === "engagement" ? "Suivi du devis" : "Opérations candidates"));
+  if (j.statut === "engagement"){
+    const p = projetDePiece(j); const s = p ? suiviDevis(p).find(x => x.devis.id === j.id) : null;
+    cand.append(h("p", null, j.dateSignature ? "Devis signé le " + dateFr(j.dateSignature) + " : un engagement, pas un paiement." : "Devis à l'étude : ni engagement, ni paiement."),
+      s && s.signe ? h("p", null, "Facturé " + euros(s.facture || 0, 0) + " · payé " + euros(s.paye || 0, 0) + " · reste " + euros(s.reste, 0) + " (Projets › " + p + ")") : null,
+      p ? h("button", {class: "discret", onclick: () => aller("projets", {projet: p})}, "Voir le projet") : h("p", {class: "note"}, "Aucun projet ne porte sa catégorie : choisissez la catégorie du projet pour le suivre dans Projets."));
+  } else if (j.statut === "rapproche"){
     const op = obtenir("operations", (j.operations || [])[0]);
     cand.append(h("p", null, "Rapproché de : ", op ? libelleCompte(op.compte) + " · " + dateFr(op.date) + " · " + op.libelle + " · " + euros(op.montant) : "—"),
       j.auto ? h("p", {class: "note"}, "Rapprochement fait d'office" + (j.rapprocheLe ? " le " + dateFr(j.rapprocheLe.slice(0, 10)) : "") + " : à défaire s'il ne correspond pas au relevé.") : null,
@@ -8658,7 +8677,8 @@ declarerEcran("projets", {titre: "Projets", rendre(c, etat){
   if (x.devis.length) c.appendChild(h("section", null, h("h2", null, "Devis : " + x.nom),
     tableau([{titre: "Devis du"}, {titre: "Fournisseur"}, {titre: "N°"}, {titre: "Montant", num: true}, {titre: "État"}, {titre: "Facturé", num: true}, {titre: "Payé", num: true}, {titre: "Reste sur devis", num: true}, {titre: ""}],
       x.devis.sort((a, b) => (a.signe - b.signe) || (a.devis.date < b.devis.date ? -1 : 1)), {classe: "serre", ligne: s => h("tr", {class: s.signe ? "" : "choisie"},
-        h("td", null, dateFr(s.devis.date)), h("td", null, nomF(s.devis), s.devis.natureExacte ? h("div", {class: "petit discret"}, s.devis.natureExacte) : null), h("td", null, s.devis.numero || ""),
+        h("td", null, dateFr(s.devis.date)), h("td", null, nomF(s.devis), (s.devis.fournisseursAssocies || []).length ? h("div", {class: "petit"}, "avec " + s.devis.fournisseursAssocies.map(id => obtenir("commercants", id)?.nom || "?").join(", ")) : null,
+          s.devis.natureExacte ? h("div", {class: "petit discret"}, s.devis.natureExacte) : null), h("td", null, s.devis.numero || ""),
         h("td", {class: "num"}, euros(s.devis.montant || 0, 0)), h("td", null, s.signe ? h("span", {class: "pos"}, "signé le " + dateFr(s.devis.dateSignature)) : "à l'étude"),
         h("td", {class: "num"}, s.facture ? euros(s.facture, 0) : ""), h("td", {class: "num"}, s.paye ? euros(s.paye, 0) : ""), h("td", {class: "num"}, s.signe ? euros(s.reste, 0) : ""),
         h("td", null, h("button", {class: "mini" + (s.signe ? " discret" : ""), onclick: () => marquerDevisSigne(s.devis)}, s.signe ? "Modifier…" : "Marquer comme signé…"), " ",
@@ -9783,6 +9803,16 @@ async function autotest(){
           const s2 = suiviDevis("Chantier acompte essai")[0];
           v("devis : acompte payé sur devis déduit avant la facture, puis facture finale", [[s1.paye, s1.facture, s1.reste], [s2.paye, s2.facture, s2.reste]], [[1800, 0, 4200], [1800, 6000, 0]]);
           supprimer("justificatifs", fa.id); supprimer("operations", op.id); supprimer("justificatifs", dv.id); supprimer("echeances", ep.id); supprimer("commercants", fo.id);
+        }
+        {
+          const fa = enregistrer("commercants", {nom: "Architecte essai A", alias: [], stats: {}, natures: {}}), fb = enregistrer("commercants", {nom: "Architecte essai B", alias: [], stats: {}, natures: {}});
+          const ep = enregistrer("echeances", {libelle: "Enveloppe essai mission", projet: "Chantier mission essai", categorie: "Travaux mission essai", sousCategorie: "", montant: -50000, recurrence: "unique", debut: ajouterJours(aujourdhui(), 200), enveloppe: true, active: true});
+          const dv = enregistrer("justificatifs", {type: "engagement", statut: "engagement", date: "2026-05-20", dateSignature: "2026-05-24", montant: 12708, categorie: "Travaux mission essai", sousCategorie: "Honoraires", commercant: fa.id, commercantNom: fa.nom, fournisseursAssocies: [fb.id], operations: []});
+          const cpt = comptesDeType("courant")[0].id, base = {compte: cpt, categorie: "Travaux mission essai", sousCategorie: "Honoraires", nature: "Exceptionnelle"};
+          const ops = [["2026-01-16", -2800, fb], ["2026-07-30", -3132, fa], ["2026-07-30", -950, fb], ["2026-10-19", -4272, fa], ["2026-10-19", -1070, fb]].map(([date, montant, f]) => enregistrer("operations", Object.assign({date, montant, libelle: "VIR ESSAI MISSION", commercant: f.id}, base)));
+          const s = suiviDevis("Chantier mission essai")[0];
+          v("devis : fournisseur associé imputé à partir de la date du devis (paiement antérieur écarté)", [s.paye, s.reste], [9424, 3284]);
+          for (const o of ops) supprimer("operations", o.id); supprimer("justificatifs", dv.id); supprimer("echeances", ep.id); supprimer("commercants", fa.id); supprimer("commercants", fb.id);
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);

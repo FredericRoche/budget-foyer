@@ -640,6 +640,16 @@ async function autotest(){
           v("devis : acompte payé sur devis déduit avant la facture, puis facture finale", [[s1.paye, s1.facture, s1.reste], [s2.paye, s2.facture, s2.reste]], [[1800, 0, 4200], [1800, 6000, 0]]);
           supprimer("justificatifs", fa.id); supprimer("operations", op.id); supprimer("justificatifs", dv.id); supprimer("echeances", ep.id); supprimer("commercants", fo.id);
         }
+        {
+          const fa = enregistrer("commercants", {nom: "Architecte essai A", alias: [], stats: {}, natures: {}}), fb = enregistrer("commercants", {nom: "Architecte essai B", alias: [], stats: {}, natures: {}});
+          const ep = enregistrer("echeances", {libelle: "Enveloppe essai mission", projet: "Chantier mission essai", categorie: "Travaux mission essai", sousCategorie: "", montant: -50000, recurrence: "unique", debut: ajouterJours(aujourdhui(), 200), enveloppe: true, active: true});
+          const dv = enregistrer("justificatifs", {type: "engagement", statut: "engagement", date: "2026-05-20", dateSignature: "2026-05-24", montant: 12708, categorie: "Travaux mission essai", sousCategorie: "Honoraires", commercant: fa.id, commercantNom: fa.nom, fournisseursAssocies: [fb.id], operations: []});
+          const cpt = comptesDeType("courant")[0].id, base = {compte: cpt, categorie: "Travaux mission essai", sousCategorie: "Honoraires", nature: "Exceptionnelle"};
+          const ops = [["2026-01-16", -2800, fb], ["2026-07-30", -3132, fa], ["2026-07-30", -950, fb], ["2026-10-19", -4272, fa], ["2026-10-19", -1070, fb]].map(([date, montant, f]) => enregistrer("operations", Object.assign({date, montant, libelle: "VIR ESSAI MISSION", commercant: f.id}, base)));
+          const s = suiviDevis("Chantier mission essai")[0];
+          v("devis : fournisseur associé imputé à partir de la date du devis (paiement antérieur écarté)", [s.paye, s.reste], [9424, 3284]);
+          for (const o of ops) supprimer("operations", o.id); supprimer("justificatifs", dv.id); supprimer("echeances", ep.id); supprimer("commercants", fa.id); supprimer("commercants", fb.id);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

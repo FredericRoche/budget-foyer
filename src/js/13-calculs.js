@@ -54,12 +54,17 @@ function suiviDevis(nom){
   const ech = vivants("echeances").filter(e => e.projet === nom && e.active !== false);
   const ops = typeof operationsDuProjet === "function" ? operationsDuProjet(nom, ech) : [];
   const devis = devisDuProjet(nom);
-  // Un fournisseur à plusieurs devis : ses paiements et factures s'imputent aux devis signés dans l'ordre des dates
+  // Un fournisseur à plusieurs devis : ses paiements et factures s'imputent aux devis signés dans l'ordre des dates.
+  // Fournisseurs associés (cotraitants d'une même mission) : leurs flux comptent aussi, à partir de la date du plus ancien devis du groupe.
   const parF = regrouper(devis, cleFournisseur);
   const r = [];
   for (const [cle, ds] of parF){
-    const memeF = x => cle && cleFournisseur(x) === cle;
-    const opF = o => (o.commercant && devis.some(d => d.commercant === o.commercant && cleFournisseur(d) === cle)) || (o.justificatifs || []).some(id => { const j = obtenir("justificatifs", id); return j && memeF(j); });
+    const associes = new Set(ds.flatMap(d => d.fournisseursAssocies || []));
+    const depuis = ds.reduce((m, d) => !m || d.date < m ? d.date : m, "");
+    const cleOp = o => o.commercant || "";
+    const memeF = x => (cle && cleFournisseur(x) === cle) || (associes.has(x.commercant) && (x.date || "") >= depuis);
+    const opF = o => (o.commercant && devis.some(d => d.commercant === o.commercant && cleFournisseur(d) === cle)) || (associes.has(cleOp(o)) && o.date >= depuis)
+      || (o.justificatifs || []).some(id => { const j = obtenir("justificatifs", id); return j && memeF(j); });
     const facture = somme(factures.filter(memeF), f => f.montant || 0);
     const paye = -somme(ops.filter(opF), o => o.montant) + somme(factures.filter(f => memeF(f) && statutFacture(f) === "payee"), f => f.montant || 0);
     let impute = Math.max(facture, paye);
