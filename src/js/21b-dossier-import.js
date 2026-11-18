@@ -33,9 +33,21 @@ async function conflitDossiers(quoi, d, autre){
 async function dossierImport(quoi, interactif){
   const d = await reglage(DOSSIERS_IMPORT[quoi].cle, null);
   if (!d) return null;
+  return (await autoriserDossier(d, interactif, DOSSIERS_IMPORT[quoi].libelle)) ? d : null;
+}
+/* Chrome n'accepte qu'une demande d'autorisation par clic : au premier import d'une séance, celle du dossier des
+   archives, qui suit celle du dépôt, échouait (« user activation is required ») et l'import s'arrêtait sur un message
+   bref. La seconde demande passe désormais par une fenêtre dont le bouton « Autoriser » fournit le clic attendu. */
+async function autoriserDossier(d, interactif, libelle){
   let p = await d.queryPermission({mode: "readwrite"});
-  if (p !== "granted" && interactif) p = await d.requestPermission({mode: "readwrite"});
-  return p === "granted" ? d : null;
+  if (p === "granted" || !interactif) return p === "granted";
+  try { p = await d.requestPermission({mode: "readwrite"}); }
+  catch (e){
+    if (e.name !== "SecurityError" && !/activation/i.test(e.message || "")) throw e;
+    if (!(await confirmer("Chrome demande aussi l'accès au " + (libelle || "dossier").toLowerCase() + " « " + d.name + " ». Cliquez sur « Autoriser », puis acceptez dans la fenêtre de Chrome.", "Autoriser"))) return false;
+    p = await d.requestPermission({mode: "readwrite"});
+  }
+  return p === "granted";
 }
 
 /* ---------- Règles de rangement ---------- */

@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-2tcRMwM3O8WASi3SnerX0voKZXhAQKTcr/oM2AUadpw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-EmP27QTaDRbo1J9kaSTgnpfkitHR9Kny5meEq2epHJA=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-16.2155";
+const VERSION_APP = "2026-11-18.1807";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4472,7 +4472,7 @@ function extraireTicket(texte){
     if (s && !res.siret) res.siret = s[1].replace(/\s/g, "");
   }
   /* Raison sociale et enseigne : premières lignes significatives */
-  const ignorer = /ARTICLES?\b|VENDUS|=|BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}/;
+  const ignorer = /ARTICLES?\b|VENDUS|=|BIENVENUE|MERCI|TICKET|CAISSE|\bTEL\b|WWW|HTTP|@|^\d|SIRET|TVA|FACTURE|DUPLICATA|CLIENT|CONSERVER|CARTE BANCAIRE|SANS CONTACT|VENDEUR|VOUS A SERVI|SERVI PAR|CAISSIER|CAISSIERE|HOTESSE|OPERATEUR|^DEBIT|^MONTANT|^CB\b|VISA|MASTERCARD|^X{4}|^(MR|MME|MLLE|M\.|MM\.|MONSIEUR|MADAME|M ET MME|M\. ET MME)\b/;
   const nomPossible = i => /[A-Za-z]{3}/.test(lignes[i]) && !ignorer.test(N[i]) && !estBanqueTerminal(lignes[i]) && nomPlausible(lignes[i]) && !/TOTAL|NET A PAYER|^DATE|^N° ?[A-Z0-9]|^DEVIS|^OBJET/.test(N[i]) && !montantsDe(lignes[i]).length && lignes[i].length <= 40;
   const tete = lignes.slice(0, 8).filter((l, i) => nomPossible(i));
   /* Facturette CB : le commerçant suit la ligne « LE jj/mm/aa A hh:mm » ; ce qui précède (banque, AID, broderie
@@ -4484,7 +4484,7 @@ function extraireTicket(texte){
     const capitales = l => { const x = (l.match(/[A-Za-z]/g) || []); return x.length && x.filter(ch => ch === ch.toUpperCase()).length / x.length >= 0.8; };
     if (!nomFacturette) nomFacturette = tete.find(capitales) || "";
   }
-  const forme = lignes.find(l => /\b(SARL|SAS|SASU|EURL|SA|SNC|SCP|SELARL)\b/i.test(l));
+  const forme = lignes.find(l => l.length <= 80 && (/\b(SARL|SAS|SASU|EURL|SNC|SCP|SELARL)\b/i.test(l) || /\bSA\b/.test(l)));
   res.enseigne = nomFacturette || tete[0] || "";
   res.raisonSociale = forme ? forme.replace(/\s+(CAPITAL|AU CAPITAL|RCS).*$/i, "").trim() : res.enseigne;
   res.confiance.commercant = forme ? "lu" : "à vérifier";
@@ -6603,9 +6603,21 @@ async function conflitDossiers(quoi, d, autre){
 async function dossierImport(quoi, interactif){
   const d = await reglage(DOSSIERS_IMPORT[quoi].cle, null);
   if (!d) return null;
+  return (await autoriserDossier(d, interactif, DOSSIERS_IMPORT[quoi].libelle)) ? d : null;
+}
+/* Chrome n'accepte qu'une demande d'autorisation par clic : au premier import d'une séance, celle du dossier des
+   archives, qui suit celle du dépôt, échouait (« user activation is required ») et l'import s'arrêtait sur un message
+   bref. La seconde demande passe désormais par une fenêtre dont le bouton « Autoriser » fournit le clic attendu. */
+async function autoriserDossier(d, interactif, libelle){
   let p = await d.queryPermission({mode: "readwrite"});
-  if (p !== "granted" && interactif) p = await d.requestPermission({mode: "readwrite"});
-  return p === "granted" ? d : null;
+  if (p === "granted" || !interactif) return p === "granted";
+  try { p = await d.requestPermission({mode: "readwrite"}); }
+  catch (e){
+    if (e.name !== "SecurityError" && !/activation/i.test(e.message || "")) throw e;
+    if (!(await confirmer("Chrome demande aussi l'accès au " + (libelle || "dossier").toLowerCase() + " « " + d.name + " ». Cliquez sur « Autoriser », puis acceptez dans la fenêtre de Chrome.", "Autoriser"))) return false;
+    p = await d.requestPermission({mode: "readwrite"});
+  }
+  return p === "granted";
 }
 
 /* ---------- Règles de rangement ---------- */
@@ -9813,6 +9825,19 @@ async function autotest(){
           const s = suiviDevis("Chantier mission essai")[0];
           v("devis : fournisseur associé imputé à partir de la date du devis (paiement antérieur écarté)", [s.paye, s.reste], [9424, 3284]);
           for (const o of ops) supprimer("operations", o.id); supprimer("justificatifs", dv.id); supprimer("echeances", ep.id); supprimer("commercants", fa.id); supprimer("commercants", fb.id);
+        }
+        {
+          let n = 0;
+          const poignee = {name: "Archives essai", queryPermission: async () => "prompt", requestPermission: async () => { n++; if (n === 1){ const e = new Error("User activation is required to request permissions."); e.name = "SecurityError"; throw e; } return "granted"; }};
+          const pr = autoriserDossier(poignee, true, "Dossier des archives");
+          await new Promise(r => setTimeout(r, 30));
+          const bouton = [...document.querySelectorAll("#dialogue .actions button")].find(b => b.textContent === "Autoriser");
+          const vu = !!bouton; if (bouton) bouton.click();
+          v("dossiers d'import : seconde autorisation de la séance demandée par une fenêtre « Autoriser »", [vu, await pr, n], [true, true, 2]);
+        }
+        {
+          const fd = extraireTicket("MR MME DUPONT Jean\n5 rue de la Gare\nFACTURE N° FA26110265 DU 18/11/26\nASTIC ESSAI CHAUFFAGE\nNet à payer 133,07\ntoute somme, y compris l'acompte, non payée à sa date d'exigibilité");
+          v("facture : le destinataire n'est pas le fournisseur, le « sa » des conditions n'est pas une forme sociale", [fd.enseigne, /payée à sa date/.test(fd.raisonSociale)], ["ASTIC ESSAI CHAUFFAGE", false]);
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);

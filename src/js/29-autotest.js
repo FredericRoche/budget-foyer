@@ -650,6 +650,19 @@ async function autotest(){
           v("devis : fournisseur associé imputé à partir de la date du devis (paiement antérieur écarté)", [s.paye, s.reste], [9424, 3284]);
           for (const o of ops) supprimer("operations", o.id); supprimer("justificatifs", dv.id); supprimer("echeances", ep.id); supprimer("commercants", fa.id); supprimer("commercants", fb.id);
         }
+        {
+          let n = 0;
+          const poignee = {name: "Archives essai", queryPermission: async () => "prompt", requestPermission: async () => { n++; if (n === 1){ const e = new Error("User activation is required to request permissions."); e.name = "SecurityError"; throw e; } return "granted"; }};
+          const pr = autoriserDossier(poignee, true, "Dossier des archives");
+          await new Promise(r => setTimeout(r, 30));
+          const bouton = [...document.querySelectorAll("#dialogue .actions button")].find(b => b.textContent === "Autoriser");
+          const vu = !!bouton; if (bouton) bouton.click();
+          v("dossiers d'import : seconde autorisation de la séance demandée par une fenêtre « Autoriser »", [vu, await pr, n], [true, true, 2]);
+        }
+        {
+          const fd = extraireTicket("MR MME DUPONT Jean\n5 rue de la Gare\nFACTURE N° FA26110265 DU 18/11/26\nASTIC ESSAI CHAUFFAGE\nNet à payer 133,07\ntoute somme, y compris l'acompte, non payée à sa date d'exigibilité");
+          v("facture : le destinataire n'est pas le fournisseur, le « sa » des conditions n'est pas une forme sociale", [fd.enseigne, /payée à sa date/.test(fd.raisonSociale)], ["ASTIC ESSAI CHAUFFAGE", false]);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }
