@@ -663,6 +663,10 @@ async function autotest(){
           const fd = extraireTicket("MR MME DUPONT Jean\n5 rue de la Gare\nFACTURE N° FA26110265 DU 18/11/26\nASTIC ESSAI CHAUFFAGE\nNet à payer 133,07\ntoute somme, y compris l'acompte, non payée à sa date d'exigibilité");
           v("facture : le destinataire n'est pas le fournisseur, le « sa » des conditions n'est pas une forme sociale", [fd.enseigne, /payée à sa date/.test(fd.raisonSociale)], ["ASTIC ESSAI CHAUFFAGE", false]);
         }
+        {
+          const figee = {name: "Dépôt essai", queryPermission: () => new Promise(() => {}), requestPermission: async () => "granted"};
+          v("dossiers : une poignée qui ne répond plus est signalée au lieu de bloquer l'écran", [await accesDossier(figee, "readwrite", 40), await autoriserDossier(figee, true, "Dossier de dépôt", 40)], ["muet", "muet"]);
+        }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);
       }

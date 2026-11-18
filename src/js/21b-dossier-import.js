@@ -33,13 +33,23 @@ async function conflitDossiers(quoi, d, autre){
 async function dossierImport(quoi, interactif){
   const d = await reglage(DOSSIERS_IMPORT[quoi].cle, null);
   if (!d) return null;
-  return (await autoriserDossier(d, interactif, DOSSIERS_IMPORT[quoi].libelle)) ? d : null;
+  const a = await autoriserDossier(d, interactif, DOSSIERS_IMPORT[quoi].libelle);
+  if (a === "muet"){
+    const texte = messageDossierMuet(DOSSIERS_IMPORT[quoi].libelle, d);
+    if (!interactif){ message(texte + " : redésignez-le dans Réglages › Stockage et appareil.", true); return null; }
+    if (await confirmer(texte + ". Le redésigner maintenant ? (même dossier, choisi de nouveau)", "Choisir…")){
+      try { return await choisirDossierImport(quoi); } catch (e){ if (e.name !== "AbortError") message(e.message, true); }
+    }
+    return null;
+  }
+  return a ? d : null;
 }
 /* Chrome n'accepte qu'une demande d'autorisation par clic : au premier import d'une séance, celle du dossier des
    archives, qui suit celle du dépôt, échouait (« user activation is required ») et l'import s'arrêtait sur un message
    bref. La seconde demande passe désormais par une fenêtre dont le bouton « Autoriser » fournit le clic attendu. */
-async function autoriserDossier(d, interactif, libelle){
-  let p = await d.queryPermission({mode: "readwrite"});
+async function autoriserDossier(d, interactif, libelle, delai){
+  let p = await accesDossier(d, "readwrite", delai);
+  if (p === "muet") return "muet";
   if (p === "granted" || !interactif) return p === "granted";
   try { p = await d.requestPermission({mode: "readwrite"}); }
   catch (e){
@@ -214,7 +224,8 @@ async function choisirDossierImpots(){
 async function dossierImpots(interactif){
   let d = await reglage(DOSSIER_IMPOTS.cle, null);
   if (d){
-    let p = await d.queryPermission({mode: "readwrite"});
+    let p = await accesDossier(d, "readwrite");
+    if (p === "muet"){ message(messageDossierMuet("Le dossier des impôts", d) + " : redésignez-le dans Réglages › Stockage et appareil.", true); return null; }
     if (p !== "granted" && interactif) p = await d.requestPermission({mode: "readwrite"});
     return p === "granted" ? d : null;
   }

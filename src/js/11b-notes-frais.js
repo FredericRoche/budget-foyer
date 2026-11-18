@@ -382,7 +382,8 @@ const DOSSIER_NOTES_FRAIS = {cle: "notes_frais_racine", libelle: "Dossier des no
 async function dossierNotesFrais(interactif){
   let d = await reglage(DOSSIER_NOTES_FRAIS.cle, null);
   if (d){
-    let p = await d.queryPermission({mode: "readwrite"});
+    let p = await accesDossier(d, "readwrite");
+    if (p === "muet"){ message(messageDossierMuet("Le dossier des notes de frais", d) + " : redésignez-le dans Réglages › Stockage et appareil.", true); return null; }
     if (p !== "granted" && interactif) p = await d.requestPermission({mode: "readwrite"});
     return p === "granted" ? d : null;
   }

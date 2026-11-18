@@ -13,7 +13,8 @@ async function choisirDossierDocuments(){
 async function dossierDocuments(interactif){
   let d = await reglage(DOSSIER_DOCUMENTS.cle, null);
   if (!d){ if (!interactif || !window.showDirectoryPicker) return null; d = await choisirDossierDocuments(); }
-  let p = await d.queryPermission({mode: "read"});
+  let p = await accesDossier(d, "read");
+  if (p === "muet"){ message(messageDossierMuet("Le dossier des documents", d) + " : redésignez-le dans Réglages › Stockage et appareil.", true); return null; }
   if (p !== "granted" && interactif) p = await d.requestPermission({mode: "read"});
   return p === "granted" ? d : null;
 }

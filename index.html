@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-EmP27QTaDRbo1J9kaSTgnpfkitHR9Kny5meEq2epHJA=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-6ej3PmIlwOF3GutwFxGo7stPfDLvR50U6gkIaiZq1lI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-18.1807";
+const VERSION_APP = "2026-11-18.1827";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -1207,6 +1207,13 @@ const idbSuppr = (m, k) => idb(m, "readwrite", s => s.delete(k));
 const idbCles = m => idb(m, "readonly", s => s.getAllKeys());
 
 /* Réglages propres à l'appareil (jamais partagés) */
+/* Accès à un dossier gardé par Chrome. Une poignée devenue inutilisable (disque rechiffré, volume remonté…) laisse
+   queryPermission sans réponse, et l'écran restait muet (constaté le 18/11/2026) : au-delà du délai, « muet ». */
+async function accesDossier(d, mode, delai){
+  const attente = new Promise(r => setTimeout(() => r("muet"), delai || 4000));
+  try { return await Promise.race([d.queryPermission({mode: mode || "readwrite"}), attente]); } catch (e){ return "muet"; }
+}
+const messageDossierMuet = (libelle, d) => libelle + " « " + (d?.name || "?") + " » ne répond plus dans Chrome (accès perdu)";
 async function reglage(cle, defaut){ try { const v = await idbLire("reglages", cle); return v === undefined ? defaut : v; } catch (e) { return defaut; } }
 async function definirReglage(cle, v){ try { await idbEcrire("reglages", cle, v); } catch (e) {} }
 
@@ -4201,7 +4208,8 @@ const DOSSIER_NOTES_FRAIS = {cle: "notes_frais_racine", libelle: "Dossier des no
 async function dossierNotesFrais(interactif){
   let d = await reglage(DOSSIER_NOTES_FRAIS.cle, null);
   if (d){
-    let p = await d.queryPermission({mode: "readwrite"});
+    let p = await accesDossier(d, "readwrite");
+    if (p === "muet"){ message(messageDossierMuet("Le dossier des notes de frais", d) + " : redésignez-le dans Réglages › Stockage et appareil.", true); return null; }
     if (p !== "granted" && interactif) p = await d.requestPermission({mode: "readwrite"});
     return p === "granted" ? d : null;
   }
@@ -6603,13 +6611,23 @@ async function conflitDossiers(quoi, d, autre){
 async function dossierImport(quoi, interactif){
   const d = await reglage(DOSSIERS_IMPORT[quoi].cle, null);
   if (!d) return null;
-  return (await autoriserDossier(d, interactif, DOSSIERS_IMPORT[quoi].libelle)) ? d : null;
+  const a = await autoriserDossier(d, interactif, DOSSIERS_IMPORT[quoi].libelle);
+  if (a === "muet"){
+    const texte = messageDossierMuet(DOSSIERS_IMPORT[quoi].libelle, d);
+    if (!interactif){ message(texte + " : redésignez-le dans Réglages › Stockage et appareil.", true); return null; }
+    if (await confirmer(texte + ". Le redésigner maintenant ? (même dossier, choisi de nouveau)", "Choisir…")){
+      try { return await choisirDossierImport(quoi); } catch (e){ if (e.name !== "AbortError") message(e.message, true); }
+    }
+    return null;
+  }
+  return a ? d : null;
 }
 /* Chrome n'accepte qu'une demande d'autorisation par clic : au premier import d'une séance, celle du dossier des
    archives, qui suit celle du dépôt, échouait (« user activation is required ») et l'import s'arrêtait sur un message
    bref. La seconde demande passe désormais par une fenêtre dont le bouton « Autoriser » fournit le clic attendu. */
-async function autoriserDossier(d, interactif, libelle){
-  let p = await d.queryPermission({mode: "readwrite"});
+async function autoriserDossier(d, interactif, libelle, delai){
+  let p = await accesDossier(d, "readwrite", delai);
+  if (p === "muet") return "muet";
   if (p === "granted" || !interactif) return p === "granted";
   try { p = await d.requestPermission({mode: "readwrite"}); }
   catch (e){
@@ -6784,7 +6802,8 @@ async function choisirDossierImpots(){
 async function dossierImpots(interactif){
   let d = await reglage(DOSSIER_IMPOTS.cle, null);
   if (d){
-    let p = await d.queryPermission({mode: "readwrite"});
+    let p = await accesDossier(d, "readwrite");
+    if (p === "muet"){ message(messageDossierMuet("Le dossier des impôts", d) + " : redésignez-le dans Réglages › Stockage et appareil.", true); return null; }
     if (p !== "granted" && interactif) p = await d.requestPermission({mode: "readwrite"});
     return p === "granted" ? d : null;
   }
@@ -8731,7 +8750,8 @@ async function choisirDossierDocuments(){
 async function dossierDocuments(interactif){
   let d = await reglage(DOSSIER_DOCUMENTS.cle, null);
   if (!d){ if (!interactif || !window.showDirectoryPicker) return null; d = await choisirDossierDocuments(); }
-  let p = await d.queryPermission({mode: "read"});
+  let p = await accesDossier(d, "read");
+  if (p === "muet"){ message(messageDossierMuet("Le dossier des documents", d) + " : redésignez-le dans Réglages › Stockage et appareil.", true); return null; }
   if (p !== "granted" && interactif) p = await d.requestPermission({mode: "read"});
   return p === "granted" ? d : null;
 }
@@ -9838,6 +9858,10 @@ async function autotest(){
         {
           const fd = extraireTicket("MR MME DUPONT Jean\n5 rue de la Gare\nFACTURE N° FA26110265 DU 18/11/26\nASTIC ESSAI CHAUFFAGE\nNet à payer 133,07\ntoute somme, y compris l'acompte, non payée à sa date d'exigibilité");
           v("facture : le destinataire n'est pas le fournisseur, le « sa » des conditions n'est pas une forme sociale", [fd.enseigne, /payée à sa date/.test(fd.raisonSociale)], ["ASTIC ESSAI CHAUFFAGE", false]);
+        }
+        {
+          const figee = {name: "Dépôt essai", queryPermission: () => new Promise(() => {}), requestPermission: async () => "granted"};
+          v("dossiers : une poignée qui ne répond plus est signalée au lieu de bloquer l'écran", [await accesDossier(figee, "readwrite", 40), await autoriserDossier(figee, true, "Dossier de dépôt", 40)], ["muet", "muet"]);
         }
         v("ticket : la mention du vendeur n'est pas le magasin", extraireTicket("VENDEUR 01 VOUS A SERVI\nEPICERIE ESSAI\n20/10/26 11:02\nTOTAL 42,94").enseigne, "EPICERIE ESSAI");
         v("téléphone : saisie à valider ni rapprochée ni passée en espèces avant validation", [jv.statut, (jv.operations || []).length], ["a_rapprocher", 0]);

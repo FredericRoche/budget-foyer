@@ -38,6 +38,13 @@ const idbSuppr = (m, k) => idb(m, "readwrite", s => s.delete(k));
 const idbCles = m => idb(m, "readonly", s => s.getAllKeys());
 
 /* Réglages propres à l'appareil (jamais partagés) */
+/* Accès à un dossier gardé par Chrome. Une poignée devenue inutilisable (disque rechiffré, volume remonté…) laisse
+   queryPermission sans réponse, et l'écran restait muet (constaté le 18/11/2026) : au-delà du délai, « muet ». */
+async function accesDossier(d, mode, delai){
+  const attente = new Promise(r => setTimeout(() => r("muet"), delai || 4000));
+  try { return await Promise.race([d.queryPermission({mode: mode || "readwrite"}), attente]); } catch (e){ return "muet"; }
+}
+const messageDossierMuet = (libelle, d) => libelle + " « " + (d?.name || "?") + " » ne répond plus dans Chrome (accès perdu)";
 async function reglage(cle, defaut){ try { const v = await idbLire("reglages", cle); return v === undefined ? defaut : v; } catch (e) { return defaut; } }
 async function definirReglage(cle, v){ try { await idbEcrire("reglages", cle, v); } catch (e) {} }
 
