@@ -1094,6 +1094,14 @@ async function autotest(){
           [categorieFicheDepuisPiece(neuve, piece), neuve.categorie + "|" + neuve.sousCategorie + "|" + neuve.lieu, categorieFicheDepuisPiece(classee, piece), classee.categorie, categorieFicheDepuisPiece({nom: "x"}, {categorie: "À préciser"})],
           [true, "Chantier essai|Études|Maison", false, "Logement", false]);
       }
+      v("nom de pièce selon la convention (année, émetteur, objet, jour-mois ; caractères interdits retirés)",
+        [nomPieceConvention({date: "2026-11-19", commercantNom: "Fournisseur Essai", type: "facture", numero: "10486", natureExacte: "Repérage tuyaux / caméra"}, ".pdf"),
+         nomPieceConvention({date: "2026-10-20", commercantNom: "Entreprise Essai", type: "engagement", numero: "D0001", dateSignature: "2026-10-20"}, ".pdf"),
+         nomPieceConvention({date: "2026-03-02", raisonSociale: "Magasin Essai", type: "ticket"}, ".jpg"),
+         nomPieceConvention({date: "2026-01-05", commercantNom: "X", type: "facture", natureExacte: "a".repeat(300)}, ".pdf").length <= 150,
+         nomLibreSansCasse("A.pdf", new Set(["a.pdf", "a (2).pdf"]))],
+        ["2026 Fournisseur Essai - Facture 10486, Repérage tuyaux caméra - 19-11.pdf", "2026 Entreprise Essai - Devis D0001 signé - 20-10.pdf",
+         "2026 Magasin Essai - Ticket - 02-03.jpg", true, "A (3).pdf"]);
       v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
       v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);
       v("avis d'impôt reconnu", [reconnaitrePdf("x.pdf", "AVIS_TF_RG\nCENTRE DES FINANCES PUBLIQUES\nAVIS DE TAXES FONCIERES 2026", null).titre,

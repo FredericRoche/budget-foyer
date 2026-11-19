@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-eDc2W1i4AzICU8wxydjyGpORJh0lNu5yzc9jIT1FdG8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Acicybxo3yHOnhUUxul4gEGmF9UL4VNk5txgGtowPGs=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-19.2313";
+const VERSION_APP = "2026-11-19.2327";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -6930,35 +6930,61 @@ async function rangerFichier(f){
   } catch (e){ f.rangement = {erreur: e.message}; console.error(e); }
 }
 
-/* Pièce dont la catégorie ou le type a changé après l'import : son fichier rejoint le dossier qui lui revient
-   (dossier du chantier, ou Justificatifs/<année> s'il en sort). Copie relue avant retrait, jamais d'écrasement.
-   Rend null s'il n'y a rien à faire, {chemin} ou {erreur}. */
+/* Nom d'une pièce selon la convention du foyer : « AAAA Émetteur - Objet - JJ-MM.ext » (jour avant mois, jamais
+   AAAA-MM-JJ) ; l'objet dit le type, le numéro et la nature. Caractères interdits par Windows retirés, 150 caractères au plus. */
+const LIBELLES_NOM_PIECE = {ticket: "Ticket", facture: "Facture", devis: "Devis", engagement: "Devis", facturette: "Facturette CB", autre: "Pièce"};
+function nomPieceConvention(j, ext){
+  const propre = s => String(s || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim();
+  const d = String(j.date || "");
+  const an = /^\d{4}/.test(d) ? d.slice(0, 4) + " " : "";
+  const fin = (/^\d{4}-\d{2}-\d{2}/.test(d) ? " - " + d.slice(8, 10) + "-" + d.slice(5, 7) : "") + (ext || "");
+  const tete = an + (propre(j.commercantNom || j.raisonSociale) || "Émetteur inconnu") + " - "
+    + (LIBELLES_NOM_PIECE[j.type] || "Pièce") + (j.numero ? " " + propre(j.numero) : "") + (j.type === "engagement" && j.dateSignature ? " signé" : "");
+  const nature = propre(j.natureExacte), place = 150 - tete.length - fin.length - 2;
+  const corps = tete + (nature && place > 10 ? ", " + nature.slice(0, place).trim() : "");
+  return corps.replace(/[ .,]+$/, "") + fin;
+}
+/* Nom libre sans égard à la casse (Windows ne distingue pas « A.pdf » de « a.pdf ») ; « prisMin » en minuscules. */
+function nomLibreSansCasse(nom, prisMin){
+  if (!prisMin.has(nom.toLowerCase())) return nom;
+  const i = nom.lastIndexOf("."); const base = i > 0 ? nom.slice(0, i) : nom, ext = i > 0 ? nom.slice(i) : "";
+  for (let n = 2; ; n++){ const c = base + " (" + n + ")" + ext; if (!prisMin.has(c.toLowerCase())) return c; }
+}
+
+/* Pièce validée : son fichier prend le nom de la convention et le dossier qui lui revient (dossier du chantier ;
+   Justificatifs/<année> pour une pièce qui en sort ; sinon il reste où il est). Copie relue avant retrait, jamais
+   d'écrasement ; le premier nom du fichier est gardé dans la pièce (« nomOrigine »). Seules les pièces rangées depuis
+   que la pièce retient son fichier sont concernées. Rend null s'il n'y a rien à faire, {chemin} ou {erreur}. */
 async function reclasserFichierPiece(j){
-  if (!j || !j.fichierArchive) return null;
+  if (!j || !j.fichierArchive || estNoteFrais(j)) return null;
   const rc = regleCategorie(j);
-  const cible = rc ? rc.split("/").filter(Boolean).concat(sousDossierPiece(j))
-    : String(reglesRangement().justificatifs || "Justificatifs").split("/").filter(Boolean).concat(String(j.date || aujourdhui()).slice(0, 4));
   const parties = j.fichierArchive.split("/"); const nom = parties.pop();
-  const deNom = j.fichierRacine || "archives", versNom = rc ? "documents" : "archives";
-  if (deNom === versNom && norm(parties.join("/")) === norm(cible.join("/"))) return null;
-  // Rangement par catégorie seulement : une pièce ordinaire qui change de catégorie reste où elle est
-  if (!rc && !j.dansDossierCategorie) return null;
+  const deNom = j.fichierRacine || "archives";
+  let versNom = deNom, cible = parties;
+  if (rc){ versNom = "documents"; cible = rc.split("/").filter(Boolean).concat(sousDossierPiece(j)); }
+  else if (j.dansDossierCategorie){ versNom = "archives"; cible = String(reglesRangement().justificatifs || "Justificatifs").split("/").filter(Boolean).concat(String(j.date || aujourdhui()).slice(0, 4)); }
+  const ext = ((nom.match(/\.[^.\s]+$/) || [""])[0]).toLowerCase();
+  const voulu = j.aValider ? nom : nomPieceConvention(j, ext);
+  const memeDossier = deNom === versNom && norm(parties.join("/")) === norm(cible.join("/"));
+  if (memeDossier && voulu.toLowerCase() === nom.toLowerCase()) return null;
   const de = await racinePiece(deNom, true);
   const vers = versNom === deNom ? de : await racinePiece(versNom, true);
   if (!de || !vers) return {erreur: (!de ? deNom : versNom) === "documents" ? "dossier des documents non désigné ou non autorisé" : "archives non désignées"};
   try {
     let src = de;
     try { for (const p of parties) src = await src.getDirectoryHandle(p); var fh0 = await src.getFileHandle(nom); }
-    catch (e){ return {erreur: "fichier introuvable à « " + j.fichierArchive + " » (déplacé à la main ?)"}; }
+    catch (e){ return {erreur: "fichier introuvable à « " + j.fichierArchive + " » (déplacé ou renommé à la main ?)"}; }
     const octets = new Uint8Array(await (await fh0.getFile()).arrayBuffer());
     const {d, noms} = await ouvrirChemin(vers, cible);
-    const pris = new Set(); for await (const [n] of d.entries()) pris.add(n);
-    const final = nomLibre(nom, pris);
+    const prisMin = new Set(); for await (const [n] of d.entries()) if (!(memeDossier && n === nom)) prisMin.add(n.toLowerCase());
+    const final = nomLibreSansCasse(voulu, prisMin);
+    // Garde-fou : le fichier ne s'écrit jamais sur lui-même (il serait ensuite retiré)
+    if (memeDossier && final.toLowerCase() === nom.toLowerCase()) return null;
     const fh = await d.getFileHandle(final, {create: true});
     const w = await fh.createWritable(); await w.write(octets); await w.close();
     if (!memesOctets(new Uint8Array(await (await fh.getFile()).arrayBuffer()), octets)) throw new Error("copie non conforme, le fichier reste à sa place");
     await src.removeEntry(nom);
-    Object.assign(j, {fichierArchive: noms.concat(final).join("/"), fichierRacine: versNom, dansDossierCategorie: !!rc});
+    Object.assign(j, {fichierArchive: noms.concat(final).join("/"), fichierRacine: versNom, dansDossierCategorie: !!rc, nomOrigine: j.nomOrigine || nom});
     enregistrer("justificatifs", j);
     return {chemin: j.fichierArchive};
   } catch (e){ console.error(e); return {erreur: e.message}; }
@@ -7223,7 +7249,6 @@ function ecranRapprochement(j, etat, attente){
     const aliasAProposer = [], aRanger = [];
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
-      const rangementAvant = (f.x.categorie || "") + "|" + (f.x.type === "engagement");
       if (!dateSaisieOk(f.date, "Date")) return false;
       if (/^(CPT|CHQ):/.test(f.carte.value) && !dateSaisieOk(f.payeeLe, "Payée le", true)) return false;
       if (f.type.value === "engagement" && !dateSaisieOk(f.signeLe, "Signé le", true)) return false;
@@ -7252,13 +7277,13 @@ function ecranRapprochement(j, etat, attente){
         aliasAProposer.push({fiche: ficheFinale, nom: f.x.raisonSociale, x: f.x});
       f.x.fournisseurDevine = false;
       enregistrer("justificatifs", f.x);
-      if (f.x.fichierArchive && rangementAvant !== (f.x.categorie || "") + "|" + (f.x.type === "engagement")) aRanger.push(f.x);
+      if (f.x.fichierArchive) aRanger.push(f.x);   // nom de la convention et dossier qui revient (rien à faire s'ils sont déjà bons)
       if (apprendreChiffresCarte(f.x.carte4, f.x.carte)) message("Mémorisé : carte ****" + String(f.x.carte4).slice(-4) + " = " + libelleMoyen(f.x.carte) + ".");
       if (f.x.carte === "ESPECES" && !estNoteFrais(f.x) && !(f.x.operations || []).length) creerOperationEspeces(f.x);
     }
     // Questions posées après l'enregistrement (la saisie est déjà sauvée, quelle que soit la réponse)
     (async () => {
-      // Catégorie ou type changé : le fichier rangé suit (dossier du chantier, devis ou factures)
+      // Fichier rangé : renommé selon la convention, et déplacé si la catégorie ou le type le demande
       for (const x of aRanger){
         const r = await reclasserFichierPiece(x);
         if (r?.chemin) message("Fichier rangé : " + r.chemin + ".");
@@ -10386,6 +10411,14 @@ async function autotest(){
           [categorieFicheDepuisPiece(neuve, piece), neuve.categorie + "|" + neuve.sousCategorie + "|" + neuve.lieu, categorieFicheDepuisPiece(classee, piece), classee.categorie, categorieFicheDepuisPiece({nom: "x"}, {categorie: "À préciser"})],
           [true, "Chantier essai|Études|Maison", false, "Logement", false]);
       }
+      v("nom de pièce selon la convention (année, émetteur, objet, jour-mois ; caractères interdits retirés)",
+        [nomPieceConvention({date: "2026-11-19", commercantNom: "Fournisseur Essai", type: "facture", numero: "10486", natureExacte: "Repérage tuyaux / caméra"}, ".pdf"),
+         nomPieceConvention({date: "2026-10-20", commercantNom: "Entreprise Essai", type: "engagement", numero: "D0001", dateSignature: "2026-10-20"}, ".pdf"),
+         nomPieceConvention({date: "2026-03-02", raisonSociale: "Magasin Essai", type: "ticket"}, ".jpg"),
+         nomPieceConvention({date: "2026-01-05", commercantNom: "X", type: "facture", natureExacte: "a".repeat(300)}, ".pdf").length <= 150,
+         nomLibreSansCasse("A.pdf", new Set(["a.pdf", "a (2).pdf"]))],
+        ["2026 Fournisseur Essai - Facture 10486, Repérage tuyaux caméra - 19-11.pdf", "2026 Entreprise Essai - Devis D0001 signé - 20-10.pdf",
+         "2026 Magasin Essai - Ticket - 02-03.jpg", true, "A (3).pdf"]);
       v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
       v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);
       v("avis d'impôt reconnu", [reconnaitrePdf("x.pdf", "AVIS_TF_RG\nCENTRE DES FINANCES PUBLIQUES\nAVIS DE TAXES FONCIERES 2026", null).titre,

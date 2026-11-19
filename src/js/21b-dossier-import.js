@@ -351,35 +351,61 @@ async function rangerFichier(f){
   } catch (e){ f.rangement = {erreur: e.message}; console.error(e); }
 }
 
-/* Pièce dont la catégorie ou le type a changé après l'import : son fichier rejoint le dossier qui lui revient
-   (dossier du chantier, ou Justificatifs/<année> s'il en sort). Copie relue avant retrait, jamais d'écrasement.
-   Rend null s'il n'y a rien à faire, {chemin} ou {erreur}. */
+/* Nom d'une pièce selon la convention du foyer : « AAAA Émetteur - Objet - JJ-MM.ext » (jour avant mois, jamais
+   AAAA-MM-JJ) ; l'objet dit le type, le numéro et la nature. Caractères interdits par Windows retirés, 150 caractères au plus. */
+const LIBELLES_NOM_PIECE = {ticket: "Ticket", facture: "Facture", devis: "Devis", engagement: "Devis", facturette: "Facturette CB", autre: "Pièce"};
+function nomPieceConvention(j, ext){
+  const propre = s => String(s || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim();
+  const d = String(j.date || "");
+  const an = /^\d{4}/.test(d) ? d.slice(0, 4) + " " : "";
+  const fin = (/^\d{4}-\d{2}-\d{2}/.test(d) ? " - " + d.slice(8, 10) + "-" + d.slice(5, 7) : "") + (ext || "");
+  const tete = an + (propre(j.commercantNom || j.raisonSociale) || "Émetteur inconnu") + " - "
+    + (LIBELLES_NOM_PIECE[j.type] || "Pièce") + (j.numero ? " " + propre(j.numero) : "") + (j.type === "engagement" && j.dateSignature ? " signé" : "");
+  const nature = propre(j.natureExacte), place = 150 - tete.length - fin.length - 2;
+  const corps = tete + (nature && place > 10 ? ", " + nature.slice(0, place).trim() : "");
+  return corps.replace(/[ .,]+$/, "") + fin;
+}
+/* Nom libre sans égard à la casse (Windows ne distingue pas « A.pdf » de « a.pdf ») ; « prisMin » en minuscules. */
+function nomLibreSansCasse(nom, prisMin){
+  if (!prisMin.has(nom.toLowerCase())) return nom;
+  const i = nom.lastIndexOf("."); const base = i > 0 ? nom.slice(0, i) : nom, ext = i > 0 ? nom.slice(i) : "";
+  for (let n = 2; ; n++){ const c = base + " (" + n + ")" + ext; if (!prisMin.has(c.toLowerCase())) return c; }
+}
+
+/* Pièce validée : son fichier prend le nom de la convention et le dossier qui lui revient (dossier du chantier ;
+   Justificatifs/<année> pour une pièce qui en sort ; sinon il reste où il est). Copie relue avant retrait, jamais
+   d'écrasement ; le premier nom du fichier est gardé dans la pièce (« nomOrigine »). Seules les pièces rangées depuis
+   que la pièce retient son fichier sont concernées. Rend null s'il n'y a rien à faire, {chemin} ou {erreur}. */
 async function reclasserFichierPiece(j){
-  if (!j || !j.fichierArchive) return null;
+  if (!j || !j.fichierArchive || estNoteFrais(j)) return null;
   const rc = regleCategorie(j);
-  const cible = rc ? rc.split("/").filter(Boolean).concat(sousDossierPiece(j))
-    : String(reglesRangement().justificatifs || "Justificatifs").split("/").filter(Boolean).concat(String(j.date || aujourdhui()).slice(0, 4));
   const parties = j.fichierArchive.split("/"); const nom = parties.pop();
-  const deNom = j.fichierRacine || "archives", versNom = rc ? "documents" : "archives";
-  if (deNom === versNom && norm(parties.join("/")) === norm(cible.join("/"))) return null;
-  // Rangement par catégorie seulement : une pièce ordinaire qui change de catégorie reste où elle est
-  if (!rc && !j.dansDossierCategorie) return null;
+  const deNom = j.fichierRacine || "archives";
+  let versNom = deNom, cible = parties;
+  if (rc){ versNom = "documents"; cible = rc.split("/").filter(Boolean).concat(sousDossierPiece(j)); }
+  else if (j.dansDossierCategorie){ versNom = "archives"; cible = String(reglesRangement().justificatifs || "Justificatifs").split("/").filter(Boolean).concat(String(j.date || aujourdhui()).slice(0, 4)); }
+  const ext = ((nom.match(/\.[^.\s]+$/) || [""])[0]).toLowerCase();
+  const voulu = j.aValider ? nom : nomPieceConvention(j, ext);
+  const memeDossier = deNom === versNom && norm(parties.join("/")) === norm(cible.join("/"));
+  if (memeDossier && voulu.toLowerCase() === nom.toLowerCase()) return null;
   const de = await racinePiece(deNom, true);
   const vers = versNom === deNom ? de : await racinePiece(versNom, true);
   if (!de || !vers) return {erreur: (!de ? deNom : versNom) === "documents" ? "dossier des documents non désigné ou non autorisé" : "archives non désignées"};
   try {
     let src = de;
     try { for (const p of parties) src = await src.getDirectoryHandle(p); var fh0 = await src.getFileHandle(nom); }
-    catch (e){ return {erreur: "fichier introuvable à « " + j.fichierArchive + " » (déplacé à la main ?)"}; }
+    catch (e){ return {erreur: "fichier introuvable à « " + j.fichierArchive + " » (déplacé ou renommé à la main ?)"}; }
     const octets = new Uint8Array(await (await fh0.getFile()).arrayBuffer());
     const {d, noms} = await ouvrirChemin(vers, cible);
-    const pris = new Set(); for await (const [n] of d.entries()) pris.add(n);
-    const final = nomLibre(nom, pris);
+    const prisMin = new Set(); for await (const [n] of d.entries()) if (!(memeDossier && n === nom)) prisMin.add(n.toLowerCase());
+    const final = nomLibreSansCasse(voulu, prisMin);
+    // Garde-fou : le fichier ne s'écrit jamais sur lui-même (il serait ensuite retiré)
+    if (memeDossier && final.toLowerCase() === nom.toLowerCase()) return null;
     const fh = await d.getFileHandle(final, {create: true});
     const w = await fh.createWritable(); await w.write(octets); await w.close();
     if (!memesOctets(new Uint8Array(await (await fh.getFile()).arrayBuffer()), octets)) throw new Error("copie non conforme, le fichier reste à sa place");
     await src.removeEntry(nom);
-    Object.assign(j, {fichierArchive: noms.concat(final).join("/"), fichierRacine: versNom, dansDossierCategorie: !!rc});
+    Object.assign(j, {fichierArchive: noms.concat(final).join("/"), fichierRacine: versNom, dansDossierCategorie: !!rc, nomOrigine: j.nomOrigine || nom});
     enregistrer("justificatifs", j);
     return {chemin: j.fichierArchive};
   } catch (e){ console.error(e); return {erreur: e.message}; }

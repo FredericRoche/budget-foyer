@@ -179,7 +179,6 @@ function ecranRapprochement(j, etat, attente){
     const aliasAProposer = [], aRanger = [];
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
-      const rangementAvant = (f.x.categorie || "") + "|" + (f.x.type === "engagement");
       if (!dateSaisieOk(f.date, "Date")) return false;
       if (/^(CPT|CHQ):/.test(f.carte.value) && !dateSaisieOk(f.payeeLe, "Payée le", true)) return false;
       if (f.type.value === "engagement" && !dateSaisieOk(f.signeLe, "Signé le", true)) return false;
@@ -208,13 +207,13 @@ function ecranRapprochement(j, etat, attente){
         aliasAProposer.push({fiche: ficheFinale, nom: f.x.raisonSociale, x: f.x});
       f.x.fournisseurDevine = false;
       enregistrer("justificatifs", f.x);
-      if (f.x.fichierArchive && rangementAvant !== (f.x.categorie || "") + "|" + (f.x.type === "engagement")) aRanger.push(f.x);
+      if (f.x.fichierArchive) aRanger.push(f.x);   // nom de la convention et dossier qui revient (rien à faire s'ils sont déjà bons)
       if (apprendreChiffresCarte(f.x.carte4, f.x.carte)) message("Mémorisé : carte ****" + String(f.x.carte4).slice(-4) + " = " + libelleMoyen(f.x.carte) + ".");
       if (f.x.carte === "ESPECES" && !estNoteFrais(f.x) && !(f.x.operations || []).length) creerOperationEspeces(f.x);
     }
     // Questions posées après l'enregistrement (la saisie est déjà sauvée, quelle que soit la réponse)
     (async () => {
-      // Catégorie ou type changé : le fichier rangé suit (dossier du chantier, devis ou factures)
+      // Fichier rangé : renommé selon la convention, et déplacé si la catégorie ou le type le demande
       for (const x of aRanger){
         const r = await reclasserFichierPiece(x);
         if (r?.chemin) message("Fichier rangé : " + r.chemin + ".");
