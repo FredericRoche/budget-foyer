@@ -138,7 +138,17 @@ async function ouvrirChemin(racine, parties){
   }
   return {d, noms};
 }
-function noterArchive(f, chemin){ if (f.justif){ f.justif.fichierArchive = chemin; f.justif.dansDossierCategorie = !!regleCategorie(f.justif); enregistrer("justificatifs", f.justif); } }
+function noterArchive(f, chemin, racine){ if (f.justif){ Object.assign(f.justif, {fichierArchive: chemin, fichierRacine: racine, dansDossierCategorie: racine === "documents"}); enregistrer("justificatifs", f.justif); } }
+/* Le dossier d'un chantier vit hors des archives (« 02 Finances du foyer ») : son chemin part du dossier des
+   documents (FROCHE entier), ouvert ici en écriture. */
+async function racineDocumentsEcriture(interactif){
+  const d = await reglage(DOSSIER_DOCUMENTS.cle, null);
+  if (!d) return null;
+  const a = await autoriserDossier(d, interactif, DOSSIER_DOCUMENTS.libelle);
+  if (a === "muet"){ message(messageDossierMuet(DOSSIER_DOCUMENTS.libelle, d) + " : redésignez-le dans Réglages › Stockage et appareil.", true); return null; }
+  return a ? d : null;
+}
+async function racinePiece(nom, interactif){ return nom === "documents" ? racineDocumentsEcriture(interactif) : dossierImport("archives", interactif); }
 
 /* Dossier (sans l'année) où ira le fichier : la règle du livre, sinon la proposition. */
 function dossierRangement(f){
@@ -150,7 +160,7 @@ function dossierRangement(f){
 }
 async function modifierRangement(cle, actuel){
   const v = await demander("Rangement · " + libelleRangement(cle), cle.startsWith("categorie:")
-    ? "Dossier, relatif aux archives (sous-dossier Devis ou Factures ajouté d'office, pas d'année) ; vide = règle retirée"
+    ? "Dossier, relatif au dossier des documents (FROCHE), par exemple « Immobilier/Maison/Travaux » ; sous-dossier Devis ou Factures ajouté d'office, pas d'année ; vide = règle retirée"
     : "Dossier, relatif aux archives (l'année est ajoutée d'office) ; vide = règle retirée", actuel || "");
   if (v === null) return;
   const r = Object.assign({}, reglesRangement());
@@ -294,10 +304,11 @@ async function memePdfDejaRange(d, nom, octets){
 async function rangerFichier(f){
   if (f.lu.noteFrais) return rangerNoteFrais(f);   // dossier propre, nom normalisé, sans sous-dossier d'année
   if (f.lu.genre === "document" && f.lu.sousGenre === "avis_impot") return rangerAvisImpot(f);
-  const archives = await dossierImport("archives", true);
-  if (!archives){ f.rangement = {reste: "archives non désignées"}; return; }
   const r = dossierRangement(f);
   if (!r || !r.dossier){ f.rangement = {reste: "aucune règle"}; return; }
+  const racineNom = r.sousDossier ? "documents" : "archives";
+  const archives = await racinePiece(racineNom, true);
+  if (!archives){ f.rangement = {reste: racineNom === "documents" ? "dossier des documents non désigné ou non autorisé" : "archives non désignées"}; return; }
   try {
     const octets = new Uint8Array(await (await f.source.poignee.getFile()).arrayBuffer());
     // Copie identique déjà rangée dans le dossier du compte (à n'importe quel niveau, sous un autre nom) : rien à copier
@@ -309,7 +320,7 @@ async function rangerFichier(f){
       await f.source.dossier.removeEntry(f.source.nom);
       if (r.propose) modifierParametres({rangement: Object.assign({}, reglesRangement(), {[r.cle]: r.dossier})});
       f.rangement = {chemin: dejaRange, identique: true};
-      noterArchive(f, dejaRange);
+      noterArchive(f, dejaRange, racineNom);
       return;
     }
     const ouvert = await ouvrirChemin(archives, parties.concat(r.sousDossier || anneeFichier(f.lu)));
@@ -324,7 +335,7 @@ async function rangerFichier(f){
       await f.source.dossier.removeEntry(f.source.nom);
       if (r.propose) modifierParametres({rangement: Object.assign({}, reglesRangement(), {[r.cle]: r.dossier})});
       f.rangement = {chemin: chemin.join("/") + "/" + memeNom, identique: true};
-      noterArchive(f, f.rangement.chemin);
+      noterArchive(f, f.rangement.chemin, racineNom);
       return;
     }
     const final = nomLibre(nomCible, pris);
@@ -336,7 +347,7 @@ async function rangerFichier(f){
     // La proposition retenue devient la règle : le rangement suivant ira au même endroit
     if (r.propose) modifierParametres({rangement: Object.assign({}, reglesRangement(), {[r.cle]: r.dossier})});
     f.rangement = {chemin: chemin.join("/") + "/" + final, identique: false};
-    noterArchive(f, f.rangement.chemin);
+    noterArchive(f, f.rangement.chemin, racineNom);
   } catch (e){ f.rangement = {erreur: e.message}; console.error(e); }
 }
 
@@ -349,25 +360,26 @@ async function reclasserFichierPiece(j){
   const cible = rc ? rc.split("/").filter(Boolean).concat(sousDossierPiece(j))
     : String(reglesRangement().justificatifs || "Justificatifs").split("/").filter(Boolean).concat(String(j.date || aujourdhui()).slice(0, 4));
   const parties = j.fichierArchive.split("/"); const nom = parties.pop();
-  if (norm(parties.join("/")) === norm(cible.join("/"))) return null;
+  const deNom = j.fichierRacine || "archives", versNom = rc ? "documents" : "archives";
+  if (deNom === versNom && norm(parties.join("/")) === norm(cible.join("/"))) return null;
   // Rangement par catégorie seulement : une pièce ordinaire qui change de catégorie reste où elle est
   if (!rc && !j.dansDossierCategorie) return null;
-  const archives = await dossierImport("archives", true);
-  if (!archives) return {erreur: "archives non désignées"};
+  const de = await racinePiece(deNom, true);
+  const vers = versNom === deNom ? de : await racinePiece(versNom, true);
+  if (!de || !vers) return {erreur: (!de ? deNom : versNom) === "documents" ? "dossier des documents non désigné ou non autorisé" : "archives non désignées"};
   try {
-    let src = archives;
+    let src = de;
     try { for (const p of parties) src = await src.getDirectoryHandle(p); var fh0 = await src.getFileHandle(nom); }
     catch (e){ return {erreur: "fichier introuvable à « " + j.fichierArchive + " » (déplacé à la main ?)"}; }
     const octets = new Uint8Array(await (await fh0.getFile()).arrayBuffer());
-    const {d, noms} = await ouvrirChemin(archives, cible);
+    const {d, noms} = await ouvrirChemin(vers, cible);
     const pris = new Set(); for await (const [n] of d.entries()) pris.add(n);
     const final = nomLibre(nom, pris);
     const fh = await d.getFileHandle(final, {create: true});
     const w = await fh.createWritable(); await w.write(octets); await w.close();
     if (!memesOctets(new Uint8Array(await (await fh.getFile()).arrayBuffer()), octets)) throw new Error("copie non conforme, le fichier reste à sa place");
     await src.removeEntry(nom);
-    j.fichierArchive = noms.concat(final).join("/");
-    j.dansDossierCategorie = !!rc;
+    Object.assign(j, {fichierArchive: noms.concat(final).join("/"), fichierRacine: versNom, dansDossierCategorie: !!rc});
     enregistrer("justificatifs", j);
     return {chemin: j.fichierArchive};
   } catch (e){ console.error(e); return {erreur: e.message}; }
@@ -444,8 +456,8 @@ function sectionDossiersImport(){
   corps.appendChild(h("ul", {class: "liste-traiter"}, ligne("depot"), ligne("archives"), ligneNdf, ligneImpots, ligneDocuments));
   const regles = Object.entries(reglesRangement()).sort((a, b) => libelleRangement(a[0]).localeCompare(libelleRangement(b[0])));
   if (regles.length) corps.appendChild(tableau([{titre: "Pièces"}, {titre: "Rangées dans (+ année)"}, {titre: ""}], regles, {classe: "serre", ligne: ([cle, d]) =>
-    h("tr", null, h("td", null, libelleRangement(cle)), h("td", {class: "petit"}, d + (cle.startsWith("categorie:") ? " (+ Devis ou Factures, pas d'année)" : "")), h("td", null, h("button", {class: "mini discret", onclick: () => modifierRangement(cle, d)}, "Modifier")))}));
+    h("tr", null, h("td", null, libelleRangement(cle)), h("td", {class: "petit"}, d + (cle.startsWith("categorie:") ? " (dans le dossier des documents, + Devis ou Factures, pas d'année)" : "")), h("td", null, h("button", {class: "mini discret", onclick: () => modifierRangement(cle, d)}, "Modifier")))}));
   corps.appendChild(h("div", {class: "outils"}, h("button", {class: "mini discret", onclick: () => ajouterRangementCategorie()}, "Ranger une catégorie à part…")));
-  corps.appendChild(h("p", {class: "note"}, "Dépôt et archives sont propres à cet appareil (par exemple le dépôt sur le disque externe, les archives sur le disque interne). Les règles de rangement sont communes : elles se créent au premier rangement de chaque compte, à partir du dossier des archives qui porte son numéro. Une catégorie rangée à part (un chantier) envoie ses devis et factures dans son dossier, y compris quand la catégorie est choisie après l'import."));
+  corps.appendChild(h("p", {class: "note"}, "Dépôt et archives sont propres à cet appareil (par exemple le dépôt sur le disque externe, les archives sur le disque interne). Les règles de rangement sont communes : elles se créent au premier rangement de chaque compte, à partir du dossier des archives qui porte son numéro. Une catégorie rangée à part (un chantier) envoie ses devis et factures dans son dossier, pris dans le dossier des documents (FROCHE), y compris quand la catégorie est choisie après l'import."));
   return h("section", {class: "carte", style: {marginTop: "1rem"}}, h("h2", null, "Dossiers d'import"), corps);
 }
