@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-yU9UebdvNZugtBEEOlfcghfni8lyx2oPBb0gZtEjdtI=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-eDc2W1i4AzICU8wxydjyGpORJh0lNu5yzc9jIT1FdG8=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-19.2203";
+const VERSION_APP = "2026-11-19.2313";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -7043,6 +7043,14 @@ function sectionDossiersImport(){
 
 /* ===== 22-ui-justificatifs.js ===== */
 /* ================= Justificatifs : rapprochement et boîte de saisies ================= */
+/* Fiche sans catégorie par défaut (créée à la validation d'une pièce, ou restée « Sans catégorie ») : elle prend
+   celle de la pièce validée, et son lieu s'il manque ; une fiche déjà classée n'est jamais changée. Pas pour une
+   note de frais (la fiche est l'employeur). Rend vrai si la fiche a changé. */
+function categorieFicheDepuisPiece(fiche, x){
+  if (!fiche || fiche.categorie || !x.categorie || x.categorie === "À préciser" || estNoteFrais(x)) return false;
+  Object.assign(fiche, {categorie: x.categorie, sousCategorie: x.sousCategorie || ""}, fiche.lieu ? {} : {lieu: x.lieu || ""});
+  return true;
+}
 declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   const tous = vivants("justificatifs").sort((a, b) => a.date < b.date ? 1 : -1);
   const aRapprocher = tous.filter(pieceOuverte);
@@ -7238,6 +7246,7 @@ function ecranRapprochement(j, etat, attente){
       }
       // Nom lu sur la pièce, nouveau pour la fiche : proposé comme alias, jamais ajouté sans accord
       const ficheFinale = f.x.commercant ? obtenir("commercants", f.x.commercant) : null;
+      if (categorieFicheDepuisPiece(ficheFinale, f.x)){ enregistrer("commercants", ficheFinale); invaliderIndex(); }
       if (ficheFinale && f.x.raisonSociale && nomPlausible(f.x.raisonSociale) && !estBanqueTerminal(f.x.raisonSociale) && cleLibelle(f.x.raisonSociale)
         && !(ficheFinale.alias || []).includes(cleLibelle(f.x.raisonSociale)) && norm(ficheFinale.nom) !== norm(f.x.raisonSociale) && !f.x.aliasRefuse)
         aliasAProposer.push({fiche: ficheFinale, nom: f.x.raisonSociale, x: f.x});
@@ -10370,6 +10379,13 @@ async function autotest(){
          dossierRangement({lu: {genre: "justificatif_pdf"}, justif: {categorie: "Logement", type: "facture"}}).cle, libelleRangement("categorie:Chantier essai")],
         [{cle: "categorie:Chantier essai", dossier: "Immobilier/Maison essai/Travaux", propose: false, sousDossier: "Factures"}, "Devis", "justificatifs", "Catégorie « Chantier essai » (devis et factures)"]);
       modifierParametres({rangement: {}});
+      {
+        const neuve = {nom: "Fiche neuve essai"}, classee = {nom: "Fiche classée essai", categorie: "Logement", sousCategorie: "Loyer", lieu: "Paris"};
+        const piece = {type: "facture", categorie: "Chantier essai", sousCategorie: "Études", lieu: "Maison"};
+        v("fiche créée à la validation : catégorie et lieu de la pièce ; fiche déjà classée inchangée",
+          [categorieFicheDepuisPiece(neuve, piece), neuve.categorie + "|" + neuve.sousCategorie + "|" + neuve.lieu, categorieFicheDepuisPiece(classee, piece), classee.categorie, categorieFicheDepuisPiece({nom: "x"}, {categorie: "À préciser"})],
+          [true, "Chantier essai|Études|Maison", false, "Logement", false]);
+      }
       v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
       v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);
       v("avis d'impôt reconnu", [reconnaitrePdf("x.pdf", "AVIS_TF_RG\nCENTRE DES FINANCES PUBLIQUES\nAVIS DE TAXES FONCIERES 2026", null).titre,

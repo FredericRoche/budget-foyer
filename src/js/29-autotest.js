@@ -1087,6 +1087,13 @@ async function autotest(){
          dossierRangement({lu: {genre: "justificatif_pdf"}, justif: {categorie: "Logement", type: "facture"}}).cle, libelleRangement("categorie:Chantier essai")],
         [{cle: "categorie:Chantier essai", dossier: "Immobilier/Maison essai/Travaux", propose: false, sousDossier: "Factures"}, "Devis", "justificatifs", "Catégorie « Chantier essai » (devis et factures)"]);
       modifierParametres({rangement: {}});
+      {
+        const neuve = {nom: "Fiche neuve essai"}, classee = {nom: "Fiche classée essai", categorie: "Logement", sousCategorie: "Loyer", lieu: "Paris"};
+        const piece = {type: "facture", categorie: "Chantier essai", sousCategorie: "Études", lieu: "Maison"};
+        v("fiche créée à la validation : catégorie et lieu de la pièce ; fiche déjà classée inchangée",
+          [categorieFicheDepuisPiece(neuve, piece), neuve.categorie + "|" + neuve.sousCategorie + "|" + neuve.lieu, categorieFicheDepuisPiece(classee, piece), classee.categorie, categorieFicheDepuisPiece({nom: "x"}, {categorie: "À préciser"})],
+          [true, "Chantier essai|Études|Maison", false, "Logement", false]);
+      }
       v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
       v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);
       v("avis d'impôt reconnu", [reconnaitrePdf("x.pdf", "AVIS_TF_RG\nCENTRE DES FINANCES PUBLIQUES\nAVIS DE TAXES FONCIERES 2026", null).titre,

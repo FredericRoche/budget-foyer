@@ -1,4 +1,12 @@
 /* ================= Justificatifs : rapprochement et boîte de saisies ================= */
+/* Fiche sans catégorie par défaut (créée à la validation d'une pièce, ou restée « Sans catégorie ») : elle prend
+   celle de la pièce validée, et son lieu s'il manque ; une fiche déjà classée n'est jamais changée. Pas pour une
+   note de frais (la fiche est l'employeur). Rend vrai si la fiche a changé. */
+function categorieFicheDepuisPiece(fiche, x){
+  if (!fiche || fiche.categorie || !x.categorie || x.categorie === "À préciser" || estNoteFrais(x)) return false;
+  Object.assign(fiche, {categorie: x.categorie, sousCategorie: x.sousCategorie || ""}, fiche.lieu ? {} : {lieu: x.lieu || ""});
+  return true;
+}
 declarerEcran("justificatifs", {titre: "Justificatifs", rendre(c, etat){
   const tous = vivants("justificatifs").sort((a, b) => a.date < b.date ? 1 : -1);
   const aRapprocher = tous.filter(pieceOuverte);
@@ -194,6 +202,7 @@ function ecranRapprochement(j, etat, attente){
       }
       // Nom lu sur la pièce, nouveau pour la fiche : proposé comme alias, jamais ajouté sans accord
       const ficheFinale = f.x.commercant ? obtenir("commercants", f.x.commercant) : null;
+      if (categorieFicheDepuisPiece(ficheFinale, f.x)){ enregistrer("commercants", ficheFinale); invaliderIndex(); }
       if (ficheFinale && f.x.raisonSociale && nomPlausible(f.x.raisonSociale) && !estBanqueTerminal(f.x.raisonSociale) && cleLibelle(f.x.raisonSociale)
         && !(ficheFinale.alias || []).includes(cleLibelle(f.x.raisonSociale)) && norm(ficheFinale.nom) !== norm(f.x.raisonSociale) && !f.x.aliasRefuse)
         aliasAProposer.push({fiche: ficheFinale, nom: f.x.raisonSociale, x: f.x});
