@@ -1080,6 +1080,12 @@ async function autotest(){
       v("rangement proposé : compte sans dossier → son nom ; avis d'impôt → Impôts", [proposerRangement({genre: "compte"}, sansDossier, ix), proposerRangement({genre: "document", sousGenre: "avis_impot"}, null, ix)], ["Compte sans dossier", "Impôts"]);
       modifierParametres({rangement: {["compte:" + lv.id]: "Ailleurs/Livret"}});
       v("rangement : la règle du livre l'emporte", dossierRangement({lu: {genre: "valorisation"}, compte: lv}), {cle: "compte:" + lv.id, dossier: "Ailleurs/Livret", propose: false});
+      modifierParametres({rangement: {"categorie:Chantier essai": "Immobilier/Maison essai/Travaux"}});
+      const pj = {categorie: "Chantier essai", type: "facture", statut: "a_rapprocher"}, pd = {categorie: "Chantier essai", type: "engagement", statut: "engagement"};
+      v("rangement par catégorie : facture et devis d'un chantier, sans année ; autre catégorie inchangée",
+        [dossierRangement({lu: {genre: "justificatif_pdf"}, justif: pj}), dossierRangement({lu: {genre: "justificatif_pdf"}, justif: pd}).sousDossier,
+         dossierRangement({lu: {genre: "justificatif_pdf"}, justif: {categorie: "Logement", type: "facture"}}).cle, libelleRangement("categorie:Chantier essai")],
+        [{cle: "categorie:Chantier essai", dossier: "Immobilier/Maison essai/Travaux", propose: false, sousDossier: "Factures"}, "Devis", "justificatifs", "Catégorie « Chantier essai » (devis et factures)"]);
       modifierParametres({rangement: {}});
       v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
       v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);

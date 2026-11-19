@@ -168,9 +168,10 @@ function ecranRapprochement(j, etat, attente){
     champsParJ.push({x, type, montant, date, cm, selF, nat, cat, lieu, carte, cheque, num, payeeLe, signeLe, associes});
   });
   const enregistrerSaisie = () => {
-    const aliasAProposer = [];
+    const aliasAProposer = [], aRanger = [];
     for (const f of champsParJ){
       const ancienNom = f.x.commercantNom;
+      const rangementAvant = (f.x.categorie || "") + "|" + (f.x.type === "engagement");
       if (!dateSaisieOk(f.date, "Date")) return false;
       if (/^(CPT|CHQ):/.test(f.carte.value) && !dateSaisieOk(f.payeeLe, "Payée le", true)) return false;
       if (f.type.value === "engagement" && !dateSaisieOk(f.signeLe, "Signé le", true)) return false;
@@ -198,11 +199,18 @@ function ecranRapprochement(j, etat, attente){
         aliasAProposer.push({fiche: ficheFinale, nom: f.x.raisonSociale, x: f.x});
       f.x.fournisseurDevine = false;
       enregistrer("justificatifs", f.x);
+      if (f.x.fichierArchive && rangementAvant !== (f.x.categorie || "") + "|" + (f.x.type === "engagement")) aRanger.push(f.x);
       if (apprendreChiffresCarte(f.x.carte4, f.x.carte)) message("Mémorisé : carte ****" + String(f.x.carte4).slice(-4) + " = " + libelleMoyen(f.x.carte) + ".");
       if (f.x.carte === "ESPECES" && !estNoteFrais(f.x) && !(f.x.operations || []).length) creerOperationEspeces(f.x);
     }
     // Questions posées après l'enregistrement (la saisie est déjà sauvée, quelle que soit la réponse)
     (async () => {
+      // Catégorie ou type changé : le fichier rangé suit (dossier du chantier, devis ou factures)
+      for (const x of aRanger){
+        const r = await reclasserFichierPiece(x);
+        if (r?.chemin) message("Fichier rangé : " + r.chemin + ".");
+        else if (r?.erreur) message("Fichier non déplacé : " + r.erreur + ". À ranger à la main.", true);
+      }
       for (const p of aliasAProposer){
         if (await confirmer("Ajouter « " + p.nom + " » (raison sociale lue sur la pièce) aux alias de la fiche « " + p.fiche.nom + " » ? La fiche garde son nom « " + p.fiche.nom + " » ; les prochaines pièces portant cette raison sociale y seront rattachées sans question.", "Ajouter l'alias")){
           if (ajouterAlias(p.fiche, p.nom)) message("Retenu : « " + p.nom + " » = " + p.fiche.nom + ".");

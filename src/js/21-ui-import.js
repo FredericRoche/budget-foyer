@@ -227,7 +227,7 @@ async function enregistrerFichier(f, enLot){
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
     else if (lu.genre === "regles"){ const n = appliquerRegles(lu.contenu); message(n + " règle(s) importée(s).");
       for (const op of vivants("operations").filter(o => o.statut !== "classe")) enregistrer("operations", classerAutomatiquement(op)); }
-    else if (lu.genre === "justificatif_pdf" || lu.genre === "image") await importerJustificatifPc(lu, !!f.source);
+    else if (lu.genre === "justificatif_pdf" || lu.genre === "image") f.justif = await importerJustificatifPc(lu, !!f.source);
     else if (lu.genre === "document" && lu.sousGenre === "achat_sncf"){ const n = enregistrerAchatsSncf(lu); f.resultat = n + " paiement(s) nouveau(x)"; message(n + " justificatif(s) SNCF Connect enregistré(s) : ils serviront au rapprochement des notes de frais."); }
     else if (lu.genre === "document" && lu.sousGenre === "avis_impot"){
       // Un avis réimporté remplace le précédent (même nature, même année, même montant) au lieu de s'ajouter
@@ -268,4 +268,5 @@ async function importerJustificatifPc(lu, depuisDepot){
     aValider: !!depuisDepot, statut: t.type === "engagement" ? "engagement" : "a_rapprocher"}, t.photo);
   rapprocherTout();
   ETAT_ECRAN.justificatifs = Object.assign(ETAT_ECRAN.justificatifs || {}, {choisi: j.id});
+  return j;   // le rangement du fichier suit sa catégorie (dossier d'un chantier)
 }
