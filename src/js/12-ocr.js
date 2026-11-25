@@ -240,9 +240,13 @@ function extraireTicket(texte){
     const capitales = l => { const x = (l.match(/[A-Za-z]/g) || []); return x.length && x.filter(ch => ch === ch.toUpperCase()).length / x.length >= 0.8; };
     if (!nomFacturette) nomFacturette = tete.find(capitales) || "";
   }
-  const forme = lignes.find(l => l.length <= 80 && (/\b(SARL|SAS|SASU|EURL|SNC|SCP|SELARL)\b/i.test(l) || /\bSA\b/.test(l)));
+  // Raison sociale : première ligne portant une forme juridique qui dit aussi un nom ; « SASU au capital de… »
+  // seule (le nom est dans le logo) n'en est pas une, et laisse la place à l'enseigne (Indigo, 26/11/2026)
+  const sansCapital = l => l.replace(/\s+(CAPITAL|AU CAPITAL|RCS).*$/i, "").replace(/[\s,;.\-–]+$/, "").trim();
+  const forme = lignes.filter(l => l.length <= 80 && (/\b(SARL|SAS|SASU|EURL|SNC|SCP|SELARL)\b/i.test(l) || /\bSA\b/.test(l)))
+    .map(sansCapital).find(l => l && !formeJuridiqueSeule(cleLibelle(l))) || "";
   res.enseigne = nomFacturette || tete[0] || "";
-  res.raisonSociale = forme ? forme.replace(/\s+(CAPITAL|AU CAPITAL|RCS).*$/i, "").trim() : res.enseigne;
+  res.raisonSociale = forme || res.enseigne;
   res.confiance.commercant = forme ? "lu" : "à vérifier";
   return res;
 }

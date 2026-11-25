@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-cNgIqWWnYo7v3aJUAYjkEDceCi+XVXJ3iqHmrisrWnM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-/6e5K4SNk8cp64QnN6fACN3Y7wXdxRnrrxDKhQBqRvw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-24.1820";
+const VERSION_APP = "2026-11-25.1230";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4497,9 +4497,13 @@ function extraireTicket(texte){
     const capitales = l => { const x = (l.match(/[A-Za-z]/g) || []); return x.length && x.filter(ch => ch === ch.toUpperCase()).length / x.length >= 0.8; };
     if (!nomFacturette) nomFacturette = tete.find(capitales) || "";
   }
-  const forme = lignes.find(l => l.length <= 80 && (/\b(SARL|SAS|SASU|EURL|SNC|SCP|SELARL)\b/i.test(l) || /\bSA\b/.test(l)));
+  // Raison sociale : première ligne portant une forme juridique qui dit aussi un nom ; « SASU au capital de… »
+  // seule (le nom est dans le logo) n'en est pas une, et laisse la place à l'enseigne (Indigo, 26/11/2026)
+  const sansCapital = l => l.replace(/\s+(CAPITAL|AU CAPITAL|RCS).*$/i, "").replace(/[\s,;.\-–]+$/, "").trim();
+  const forme = lignes.filter(l => l.length <= 80 && (/\b(SARL|SAS|SASU|EURL|SNC|SCP|SELARL)\b/i.test(l) || /\bSA\b/.test(l)))
+    .map(sansCapital).find(l => l && !formeJuridiqueSeule(cleLibelle(l))) || "";
   res.enseigne = nomFacturette || tete[0] || "";
-  res.raisonSociale = forme ? forme.replace(/\s+(CAPITAL|AU CAPITAL|RCS).*$/i, "").trim() : res.enseigne;
+  res.raisonSociale = forme || res.enseigne;
   res.confiance.commercant = forme ? "lu" : "à vérifier";
   return res;
 }
@@ -6514,6 +6518,10 @@ async function creerCompteImport(f){
   rafraichirEcran();
 }
 async function enregistrerFichier(f, enLot){
+  // Un fichier déjà enregistré ou en cours ne repart pas : un clic sur sa ligne pendant « Tout enregistrer »
+  // le traitait deux fois (pièce en double, rangement « introuvable » ; 25/11/2026)
+  if (f.enCours || f.statut === "fait") return;
+  f.enCours = true;
   try {
     const lu = f.lu;
     if (lu.genre === "compte" || lu.genre === "carte"){ const imp = appliquerReleve(f.prep); f.resultat = imp.nouvelles + " opération(s)"; }
@@ -6553,6 +6561,7 @@ async function enregistrerFichier(f, enLot){
     for (const autre of FICHIERS_EN_COURS.filter(x => x.statut === "pret" && x !== f)) preparerFichier(autre);
     if (!enLot) rafraichirEcran();
   } catch (e){ f.erreur = e.message; f.statut = "erreur"; console.error(e); message(e.message, true); if (!enLot) rafraichirEcran(); }
+  finally { f.enCours = false; }
 }
 /* Justificatif déposé sur le PC : lecture, puis écran de rapprochement. Venu du dossier de dépôt, il n'a
    été vu par personne : il attend une validation (moyen de paiement, doublon possible), comme une saisie du téléphone. */
@@ -10432,6 +10441,10 @@ async function autotest(){
           [true, true, false, false, null, "Transporteur essai", null]);
         enregistrer("commercants", Object.assign(fg, {alias: []})); invaliderIndex();
       }
+      v("raison sociale : « SASU au capital de… » seule n'est pas un nom ; « Dupont SAS » l'est",
+        [extraireTicket("FACTURE\nSASU au capital de 10 000 €\nTOTAL TTC 12,00 €").raisonSociale !== "SASU",
+         extraireTicket("FACTURE\nDupont Essai SAS au capital de 5 000 €\nTOTAL TTC 12,00 €").raisonSociale],
+        [true, "Dupont Essai SAS"]);
       v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
       v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);
       v("avis d'impôt reconnu", [reconnaitrePdf("x.pdf", "AVIS_TF_RG\nCENTRE DES FINANCES PUBLIQUES\nAVIS DE TAXES FONCIERES 2026", null).titre,

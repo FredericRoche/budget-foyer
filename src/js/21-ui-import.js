@@ -204,6 +204,10 @@ async function creerCompteImport(f){
   rafraichirEcran();
 }
 async function enregistrerFichier(f, enLot){
+  // Un fichier déjà enregistré ou en cours ne repart pas : un clic sur sa ligne pendant « Tout enregistrer »
+  // le traitait deux fois (pièce en double, rangement « introuvable » ; 25/11/2026)
+  if (f.enCours || f.statut === "fait") return;
+  f.enCours = true;
   try {
     const lu = f.lu;
     if (lu.genre === "compte" || lu.genre === "carte"){ const imp = appliquerReleve(f.prep); f.resultat = imp.nouvelles + " opération(s)"; }
@@ -243,6 +247,7 @@ async function enregistrerFichier(f, enLot){
     for (const autre of FICHIERS_EN_COURS.filter(x => x.statut === "pret" && x !== f)) preparerFichier(autre);
     if (!enLot) rafraichirEcran();
   } catch (e){ f.erreur = e.message; f.statut = "erreur"; console.error(e); message(e.message, true); if (!enLot) rafraichirEcran(); }
+  finally { f.enCours = false; }
 }
 /* Justificatif déposé sur le PC : lecture, puis écran de rapprochement. Venu du dossier de dépôt, il n'a
    été vu par personne : il attend une validation (moyen de paiement, doublon possible), comme une saisie du téléphone. */

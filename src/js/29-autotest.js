@@ -1110,6 +1110,10 @@ async function autotest(){
           [true, true, false, false, null, "Transporteur essai", null]);
         enregistrer("commercants", Object.assign(fg, {alias: []})); invaliderIndex();
       }
+      v("raison sociale : « SASU au capital de… » seule n'est pas un nom ; « Dupont SAS » l'est",
+        [extraireTicket("FACTURE\nSASU au capital de 10 000 €\nTOTAL TTC 12,00 €").raisonSociale !== "SASU",
+         extraireTicket("FACTURE\nDupont Essai SAS au capital de 5 000 €\nTOTAL TTC 12,00 €").raisonSociale],
+        [true, "Dupont Essai SAS"]);
       v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
       v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);
       v("avis d'impôt reconnu", [reconnaitrePdf("x.pdf", "AVIS_TF_RG\nCENTRE DES FINANCES PUBLIQUES\nAVIS DE TAXES FONCIERES 2026", null).titre,
