@@ -259,6 +259,14 @@ function numeroFacture(lignes, date){
   const propre = s => s.replace(RE_DATE_LIGNE, " ").replace(/\b(DATE|DU|LE|FACTURE|N°|NO|NUMERO|DE|:)\b/gi, " ").trim();
   for (let i = 0; i < lignes.length; i++){
     const l = norm(lignes[i]).toUpperCase();
+    // Numéros de l'émetteur ou du client (« N° de société », TVA, SIRET, RCS, compte client, commande) : identiques
+    // sur toutes ses pièces, ils ne sont pas un numéro de facture (trois factures d'un hébergeur prises pour une, 26/11/2026)
+    if (!/FACTURE|INVOICE/.test(l) && /\b(TVA|SOCIETE|SIRET|SIREN|RCS|APE|NAF|EORI|IBAN|BIC|TEL|CLIENT|COMMANDE|ADHERENT|CONTRAT)\b/.test(l)) continue;
+    // « Facture » seul sur sa ligne, le numéro sur la suivante
+    if (/^\s*(FACTURE|INVOICE)\s*:?\s*$/.test(l) && i + 1 < lignes.length){
+      const c = sansDate(cleNumero(propre(norm(lignes[i + 1]).toUpperCase())));
+      if (c.length >= 3 && /\d/.test(c)) return c;
+    }
     const m = l.match(/(?:FACTURE|INVOICE)?\s*(?:N°|NO\b|NUMERO|N\s?O\b)\s*:?\s*([A-Z]{0,4}[\s\-]?\d[\w\s\-–\/.]{1,20})/) || (/FACTURE/.test(l) && l.match(/FACTURE\s*:?\s*([A-Z]{0,4}\d[\w\-–\/.]{2,20})/));
     let brut = m ? propre(m[1]) : "";
     if (!/\d/.test(brut) && /(?:^|\s)(N°|NO|NUMERO)(\s|$)/.test(l) && i + 1 < lignes.length) brut = propre(norm(lignes[i + 1]).toUpperCase());

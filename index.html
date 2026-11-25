@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ikotNRPe0fmVN2wNbgOgxEdT75JXgJ2AlbU2Jww52LY=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-a0UxH0/gzBRWECI8KI4upDaa1RuMq5076a8Iu/yQA3U=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-25.1307";
+const VERSION_APP = "2026-11-25.1507";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -4516,6 +4516,14 @@ function numeroFacture(lignes, date){
   const propre = s => s.replace(RE_DATE_LIGNE, " ").replace(/\b(DATE|DU|LE|FACTURE|N°|NO|NUMERO|DE|:)\b/gi, " ").trim();
   for (let i = 0; i < lignes.length; i++){
     const l = norm(lignes[i]).toUpperCase();
+    // Numéros de l'émetteur ou du client (« N° de société », TVA, SIRET, RCS, compte client, commande) : identiques
+    // sur toutes ses pièces, ils ne sont pas un numéro de facture (trois factures d'un hébergeur prises pour une, 26/11/2026)
+    if (!/FACTURE|INVOICE/.test(l) && /\b(TVA|SOCIETE|SIRET|SIREN|RCS|APE|NAF|EORI|IBAN|BIC|TEL|CLIENT|COMMANDE|ADHERENT|CONTRAT)\b/.test(l)) continue;
+    // « Facture » seul sur sa ligne, le numéro sur la suivante
+    if (/^\s*(FACTURE|INVOICE)\s*:?\s*$/.test(l) && i + 1 < lignes.length){
+      const c = sansDate(cleNumero(propre(norm(lignes[i + 1]).toUpperCase())));
+      if (c.length >= 3 && /\d/.test(c)) return c;
+    }
     const m = l.match(/(?:FACTURE|INVOICE)?\s*(?:N°|NO\b|NUMERO|N\s?O\b)\s*:?\s*([A-Z]{0,4}[\s\-]?\d[\w\s\-–\/.]{1,20})/) || (/FACTURE/.test(l) && l.match(/FACTURE\s*:?\s*([A-Z]{0,4}\d[\w\-–\/.]{2,20})/));
     let brut = m ? propre(m[1]) : "";
     if (!/\d/.test(brut) && /(?:^|\s)(N°|NO|NUMERO)(\s|$)/.test(l) && i + 1 < lignes.length) brut = propre(norm(lignes[i + 1]).toUpperCase());
@@ -10029,6 +10037,10 @@ async function autotest(){
         const jd = await creerJustificatif({type: "facture", date: "2027-03-11", montant: 980, raisonSociale: "Jean Dupont, architecte essai", origine: "pc"});
         v("justificatif : la même pièce est repérée", [!!justificatifDejaLa({montant: 980, date: "2027-03-11", raisonSociale: "Jean Dupont, architecte essai"}), !!justificatifDejaLa({montant: 981, date: "2027-03-11", raisonSociale: "Jean Dupont, architecte essai"})], [true, false]);
       }
+      v("factures : le numéro de société, de TVA ou de client n'est pas un numéro de facture ; « Facture » puis le numéro",
+        [numeroFacture(["Exemple Network SA", "N° TVA : EU123456789", "N° de société : CH - 111 - 2223333 - 1", " Facture", "8400001", "Echéance :", "20/11/2027"]),
+         numeroFacture(["SIRET : 123 456 789 00012", "Facture N° 2027-15"])],
+        ["8400001", "202715"]);
       v("factures : numéro lu", [numeroFacture(["FACTURE", "N°D26-011", "Date de création : 13/10/2026"]), numeroFacture(["Facture", "n° Date", "2 6 – 0 7 – 10 2 12 / 10 /202 6"]), numeroFacture(["Facture n° F-2027-0042 du 03/02/2027"])],
         ["D26011", "2607102", "F20270042"]);
       {

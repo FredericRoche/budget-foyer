@@ -674,6 +674,10 @@ async function autotest(){
         const jd = await creerJustificatif({type: "facture", date: "2027-03-11", montant: 980, raisonSociale: "Jean Dupont, architecte essai", origine: "pc"});
         v("justificatif : la même pièce est repérée", [!!justificatifDejaLa({montant: 980, date: "2027-03-11", raisonSociale: "Jean Dupont, architecte essai"}), !!justificatifDejaLa({montant: 981, date: "2027-03-11", raisonSociale: "Jean Dupont, architecte essai"})], [true, false]);
       }
+      v("factures : le numéro de société, de TVA ou de client n'est pas un numéro de facture ; « Facture » puis le numéro",
+        [numeroFacture(["Exemple Network SA", "N° TVA : EU123456789", "N° de société : CH - 111 - 2223333 - 1", " Facture", "8400001", "Echéance :", "20/11/2027"]),
+         numeroFacture(["SIRET : 123 456 789 00012", "Facture N° 2027-15"])],
+        ["8400001", "202715"]);
       v("factures : numéro lu", [numeroFacture(["FACTURE", "N°D26-011", "Date de création : 13/10/2026"]), numeroFacture(["Facture", "n° Date", "2 6 – 0 7 – 10 2 12 / 10 /202 6"]), numeroFacture(["Facture n° F-2027-0042 du 03/02/2027"])],
         ["D26011", "2607102", "F20270042"]);
       {
