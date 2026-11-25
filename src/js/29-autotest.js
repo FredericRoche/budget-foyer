@@ -1102,6 +1102,14 @@ async function autotest(){
          nomLibreSansCasse("A.pdf", new Set(["a.pdf", "a (2).pdf"]))],
         ["2026 Fournisseur Essai - Facture 10486, Repérage tuyaux caméra - 19-11.pdf", "2026 Entreprise Essai - Devis D0001 signé - 20-10.pdf",
          "2026 Magasin Essai - Ticket - 02-03.jpg", true, "A (3).pdf"]);
+      {
+        const fg = enregistrer("commercants", {nom: "Transporteur essai", alias: ["SAS", "TRANSPORTEUR ESSAI"], stats: {}, natures: {}}); invaliderIndex();
+        v("forme juridique seule : ni alias, ni clé de reconnaissance",
+          [formeJuridiqueSeule("SAS"), formeJuridiqueSeule("STE SA"), formeJuridiqueSeule("SAS DUPONT"), ajouterAlias(fg, "SARL"),
+           commercantSur({raisonSociale: "SAS", texte: ""})?.nom || null, commercantSur({raisonSociale: "Transporteur essai", texte: ""})?.nom || null, trouverCommercant("SAS", true)?.nom || null],
+          [true, true, false, false, null, "Transporteur essai", null]);
+        enregistrer("commercants", Object.assign(fg, {alias: []})); invaliderIndex();
+      }
       v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
       v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);
       v("avis d'impôt reconnu", [reconnaitrePdf("x.pdf", "AVIS_TF_RG\nCENTRE DES FINANCES PUBLIQUES\nAVIS DE TAXES FONCIERES 2026", null).titre,

@@ -334,12 +334,12 @@ const aliasCorrespond = (a, k) => a === k || (a.length >= 6 && k.length >= 6 && 
 function aliasFaibles(fiches){
   const n = new Map();
   for (const f of fiches) for (const w of motsFiche(f.nom)) n.set(w, (n.get(w) || 0) + 1);
-  return a => { const w = norm(a).toLowerCase(); return !/\s/.test(w) && w.length < 8 && ((n.get(w) || 0) >= 2 || MOTS_LIEUX.has(w)); };
+  return a => { if (formeJuridiqueSeule(a)) return true; const w = norm(a).toLowerCase(); return !/\s/.test(w) && w.length < 8 && ((n.get(w) || 0) >= 2 || MOTS_LIEUX.has(w)); };
 }
 /* Reconnaissance sûre : alias (raison sociale, enseigne) ou SIRET. Le reste n'est qu'une supposition, à faire confirmer. */
 function commercantSur(t, liste){
   const fiches = liste || vivants("commercants");
-  const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
+  const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(k => k && !formeJuridiqueSeule(k));
   const faible = aliasFaibles(fiches);
   for (const f of fiches){
     if (t.siret && f.siret === t.siret) return f;
@@ -350,7 +350,7 @@ function commercantSur(t, liste){
 /* Commerçant connu pour un ticket : par alias (raison sociale, enseigne) ou SIRET, sinon par son nom dans le texte. */
 function commercantPourTicket(t, liste){
   const fiches = liste || vivants("commercants");
-  const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(Boolean);
+  const cles = [t.raisonSociale, t.enseigne].filter(Boolean).map(cleLibelle).filter(k => k && !formeJuridiqueSeule(k));
   const faible = aliasFaibles(fiches);
   for (const f of fiches){
     if (t.siret && f.siret === t.siret) return f;

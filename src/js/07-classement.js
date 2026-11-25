@@ -26,7 +26,7 @@ let INDEX_ALIAS = null;
 function indexAlias(){
   if (INDEX_ALIAS) return INDEX_ALIAS;
   INDEX_ALIAS = new Map();
-  for (const c of vivants("commercants")) for (const a of c.alias || []) INDEX_ALIAS.set(a, c.id);
+  for (const c of vivants("commercants")) for (const a of c.alias || []) if (!formeJuridiqueSeule(a)) INDEX_ALIAS.set(a, c.id);
   return INDEX_ALIAS;
 }
 function invaliderIndex(){ INDEX_ALIAS = null; }
@@ -74,10 +74,15 @@ function nomPlausible(s){
   const t = norm(s || "").replace(/\s+/g, "");
   return /[A-Za-z]{4,}/.test(norm(s || "")) && t.length > 0 && (t.match(/[A-Za-z]/g) || []).length / t.length >= 0.6;
 }
+/* Forme juridique seule (« SAS », « SARL », « STE SA »…) : elle ne désigne aucune entreprise. Lue comme raison sociale
+   ou apprise comme alias, elle reconnaissait n'importe quelle pièce qui la porte (le 24/11/2026, une facture de loyer
+   attribuée à un déménageur). Jamais un alias, jamais une clé de reconnaissance. */
+const FORMES_JURIDIQUES = new Set(["SA", "SAS", "SASU", "SARL", "EURL", "SNC", "SCI", "SCP", "SCM", "SCOP", "SELARL", "SELAS", "SELAFA", "GIE", "EI", "EIRL", "AE", "ETS", "STE", "SOCIETE", "CIE", "ET", "&"]);
+function formeJuridiqueSeule(cle){ const m = String(cle || "").toUpperCase().split(/\s+/).filter(Boolean); return !!m.length && m.every(w => FORMES_JURIDIQUES.has(w)); }
 function ajouterAlias(commercant, texte){
   if (estBanqueTerminal(texte)) return false;
   const cle = cleLibelle(texte);
-  if (!cle || (commercant.alias || []).includes(cle)) return false;
+  if (!cle || formeJuridiqueSeule(cle) || (commercant.alias || []).includes(cle)) return false;
   // L'alias est retiré d'une autre fiche qui le portait.
   for (const autre of vivants("commercants")) if (autre.id !== commercant.id && (autre.alias || []).includes(cle))
     enregistrer("commercants", Object.assign(autre, {alias: autre.alias.filter(a => a !== cle)}));
