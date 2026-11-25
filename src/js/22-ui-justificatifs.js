@@ -167,7 +167,7 @@ function ecranRapprochement(j, etat, attente){
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     // Note de frais : le moyen de paiement devient le compte sur lequel le remboursement est attendu
     const libPaye = () => estNoteFrais({type: type.value}) ? "Remboursé sur" : "Payé avec";
-    const ligneCarte = ligneOcr(libPaye(), carte, x.carte4 ? "carte ****" + x.carte4 : "");
+    const ligneCarte = ligneOcr(libPaye(), carte, [x.carte4 ? "carte ****" + x.carte4 : "", ticketNommeAmex(x) && x.carte !== "AMEX" ? "le ticket nomme American Express" : ""].filter(Boolean).join(" · "));
     type.addEventListener("change", () => { ligneCarte.querySelector("label").textContent = libPaye(); });
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier") : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
@@ -230,6 +230,11 @@ function ecranRapprochement(j, etat, attente){
       if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s) d'office." : "."));
         // Saisie suivante à valider, sinon justificatif suivant
         const suivant = attente.find(x => x.aValider && !groupe.includes(x)) || attente[idx + 1]; etat.choisi = suivant ? suivant.id : null;
+      } else if (groupe.some(x => x.statut === "a_rapprocher")){
+        // Une correction (moyen de paiement, montant, date) peut faire trouver le débit : rapprochement relancé (25/11/2026)
+        const n = rapprocherTout(); const reste = groupe.some(x => obtenir("justificatifs", x.id)?.statut === "a_rapprocher");
+        message("Saisie enregistrée" + (!reste ? " et rapprochée." : (obtenir("justificatifs", j.id)?.propositions || []).length ? " ; débit trouvé, à confirmer ci-contre." : ".") + (n > 1 ? " " + n + " rapprochement(s) fait(s) d'office." : ""));
+        etat.choisi = reste ? j.id : null;
       } else { message("Saisie enregistrée."); etat.choisi = null; } rafraichirEcran(); }}, j.aValider ? "Valider la saisie" : "Enregistrer la saisie"),
     h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer ce justificatif ?", "Supprimer", true)){ for (const x of groupe){ delier(x); supprimer("justificatifs", x.id); } etat.choisi = null; rafraichirEcran(); } }}, "Supprimer")));
   if (j.texteOCR) saisie.appendChild(h("details", {style: {marginTop: ".5rem"}}, h("summary", {class: "petit"}, "Texte lu sur la pièce"), h("div", {class: "texte-brut"}, j.texteOCR)));

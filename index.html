@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-a0UxH0/gzBRWECI8KI4upDaa1RuMq5076a8Iu/yQA3U=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-si+GZ7bknl3B6OUneJuDpYb1XSziC876iZbAxcdiefM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-25.1507";
+const VERSION_APP = "2026-11-25.1612";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -3625,6 +3625,7 @@ function anomaliesRapprochement(){
   for (const o of vivants("operations")) if (o.date > (derniere.get(o.compte) || "")) derniere.set(o.compte, o.date);
   const r = [], nomJ = j => (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || j.raisonSociale || "—";
   const pieces = vivants("justificatifs").filter(x => !x.aValider && !estNoteFrais(x));
+  const trouves = new Set();   // débits exacts déjà annoncés du côté de leur pièce
   for (const j of pieces.filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES")){
     const jj = Object.assign({}, j); if (!jj.carte && jj.carte4) jj.carte = carteDesChiffres(jj.carte4);
     const [avant, apres] = fenetre(jj);
@@ -3638,6 +3639,10 @@ function anomaliesRapprochement(){
     if ((j.propositions || []).length) raison = "rapprochement proposé, à confirmer";
     else if (!compat.length) raison = "moyen de paiement inconnu ou sans relevé importé : préciser la carte";
     else {
+      // Débit exact sur le bon moyen de paiement : la pièce a été corrigée après le dernier rapprochement (25/11/2026)
+      const exact = vivants("operations").find(o => o.montant < 0 && -versCentimes(o.montant) === cents && dansFenetre(o) && libre(o) && compat.some(c => c.id === o.compte));
+      if (exact){ r.push({genre, j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant), debitTrouve: exact,
+        raison: "débit trouvé : " + dateFr(exact.date) + " · " + exact.libelle + " · " + euros(exact.montant) + " ; ouvrir la pièce pour rapprocher, ou « Relancer le rapprochement »"}); trouves.add(exact.id); continue; }
       const ailleurs = vivants("operations").find(o => o.montant < 0 && -versCentimes(o.montant) === cents && dansFenetre(o) && libre(o) && !compat.some(c => c.id === o.compte));
       const voisin = !ailleurs && vivants("operations").find(o => o.montant < 0 && compat.some(c => c.id === o.compte) && dansFenetre(o) && libre(o)
         && Math.abs(-versCentimes(o.montant) - cents) <= Math.max(10, cents * 0.03) && -versCentimes(o.montant) !== cents);
@@ -3645,6 +3650,7 @@ function anomaliesRapprochement(){
       raison = ailleurs ? "même montant le " + dateFr(ailleurs.date) + " sur " + libelleCompte(ailleurs.compte) + " : la carte de la pièce est-elle la bonne ?"
         : voisin ? "au relevé : " + euros(voisin.montant) + " le " + dateFr(voisin.date) + " (devise, pourboire, erreur de saisie ?)"
         : "aucun débit de ce montant au relevé (" + libelleMoyen(jj.carte) + ") : espèces, autre moyen, date ou montant mal lus ?";
+      if (!ailleurs && ticketNommeAmex(j) && jj.carte !== "AMEX") raison += " ; le ticket nomme American Express";
     }
     r.push({genre, j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant), raison});
   }
@@ -3661,7 +3667,7 @@ function anomaliesRapprochement(){
     const cartes = new Set(comptes.filter(c => c.type === "carte").map(c => c.id));
     const debits = [];
     for (const o of vivants("operations").filter(o => cartes.has(o.compte) && o.montant < 0 && o.date >= depuis && !(o.justificatifs || []).length && !o.sansPiece && !o.ndf && !(o.commercant && obtenir("commercants", o.commercant)?.sansPiece))){
-      if (pieces.some(j => j.statut === "a_rapprocher" && (j.propositions || []).some(p => p.op === o.id))) continue;
+      if (trouves.has(o.id) || pieces.some(j => j.statut === "a_rapprocher" && (j.propositions || []).some(p => p.op === o.id))) continue;
       debits.push(o);
     }
     // Pièces voisines : chaque pièce va à un seul débit, les paires les plus proches d'abord
@@ -3697,6 +3703,28 @@ function piecesPourDebit(o, pieces){
   return ok;
 }
 /* Rapprochement malgré un écart de montant, sur décision de l'utilisateur : l'écart est noté sur la pièce. */
+/* Le texte lu sur la pièce nomme Amex (facturette « AMERICAN EXPRESS », « CARTE AMEX ») */
+const ticketNommeAmex = j => /AMERICAN\s*EXPRESS|\bAMEX\b/i.test(j?.texteOCR || "");
+/* Pièces déjà saisies qui peuvent être celles d'une opération, quel que soit leur moyen de paiement (choix depuis
+   l'opération, 25/11/2026) : pièces ouvertes, montant exact à 15 jours près, ou même fournisseur à 25 % près et
+   7 jours ; les plus proches d'abord. */
+function piecesSaisiesPour(o){
+  const m = Math.abs(versCentimes(o.montant));
+  return vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && !j.aValider && !(j.operations || []).length && j.type !== "engagement").map(j => {
+    const d = Math.abs(ecartJours(j.date, o.date)), ecart = Math.abs(m - versCentimes(j.montant));
+    const meme = j.commercant && j.commercant === o.commercant;
+    if (!(ecart === 0 ? d <= 15 : meme && d <= 7 && ecart <= m * 0.25)) return null;
+    return {j, ecart: ecart / 100, cle: ecart + d * 10};
+  }).filter(Boolean).sort((a, b) => a.cle - b.cle);
+}
+/* Rapproche une pièce choisie depuis l'opération : le moyen de paiement de la pièce devient celui du relevé
+   (c'était l'erreur de saisie), l'écart de montant éventuel est noté. */
+function lierPieceSaisie(j, o){
+  const c = obtenir("comptes", o.compte);
+  if (c && c.carte && c.carte !== "LCL-NV" && (/^X\d+/.test(c.carte) || c.carte === "AMEX")) j.carte = c.carte;
+  if (versCentimes(Math.abs(o.montant)) !== versCentimes(j.montant)) rapprocherAvecEcart(j, o); else lier([j], o, false);
+  enregistrer("justificatifs", j);
+}
 function rapprocherAvecEcart(j, op){
   j.ecartMontant = Math.round((Math.abs(op.montant) - j.montant) * 100) / 100;
   lier([j], op, false);
@@ -6210,7 +6238,8 @@ function panneauOperation(o, etat){
     h("dl", {style: {marginTop: ".7rem"}}, h("dt", null, "Catégorie"), h("dd", null, selCat), h("dt", null, "Nature"), h("dd", null, selNat), h("dt", null, "Lieu"), h("dd", null, selLieu), nomsProjets().length ? [h("dt", null, "Projet"), h("dd", null, selProjet)] : null,
       o.ventilation ? [h("dt", null, "Ventilation"), h("dd", null, o.ventilation.map(v => euros(v.montant) + " " + v.sousCategorie + (v.natureExacte ? " (" + v.natureExacte + ")" : "")).join(" · "))] : null,
       h("dt", null, "Justificatifs"), h("dd", null, js.length ? js.map(j => h("button", {class: "lien", onclick: () => voirPiece(j)}, "📎 " + (TYPES_JUSTIF[j.type] || "pièce") + " ")) : h("span", {class: "discret"}, "aucun"),
-        h("br"), h("button", {class: "mini discret", style: {marginTop: ".3rem"}, onclick: () => ajouterPieceAOperation(o)}, "Joindre une pièce…")),
+        h("br"), h("button", {class: "mini discret", style: {marginTop: ".3rem"}, onclick: () => ajouterPieceAOperation(o)}, "Joindre une pièce…"),
+        o.montant < 0 ? h("button", {class: "mini discret", style: {marginTop: ".3rem", marginLeft: ".3rem"}, onclick: () => choisirPieceSaisie(o)}, "Choisir une pièce saisie…") : null),
       h("dt", null, "Origine"), h("dd", null, marqueOrigine(o), o.import ? " " + (obtenir("imports", o.import)?.fichier || "") : "")));
   p.appendChild(h("div", {class: "outils", style: {marginTop: ".8rem"}},
     h("button", {class: "primaire mini", onclick: () => {
@@ -6251,6 +6280,26 @@ async function voirPiece(j){
   corps.appendChild(h("p", {class: "note"}, (TYPES_JUSTIF[j.type] || "") + " · " + dateFr(j.date) + " · " + euros(j.montant) + (j.raisonSociale ? " · lu : « " + j.raisonSociale + " »" : "")));
   if (j.texteOCR) corps.appendChild(h("details", null, h("summary", null, "Texte lu"), h("div", {class: "texte-brut"}, j.texteOCR)));
   await dialogue({titre: j.commercantNom || "Justificatif", corps, large: true});
+}
+/* Rapprocher depuis l'opération une pièce déjà saisie (ticket du téléphone, facture), même si son moyen de paiement
+   est faux : la liste montre les pièces ouvertes de même montant, ou du même fournisseur à un écart près. */
+async function choisirPieceSaisie(o){
+  const liste = piecesSaisiesPour(o);
+  if (!liste.length){ message("Aucune pièce saisie de " + euros(Math.abs(o.montant)) + " à 15 jours près (ni du même fournisseur à un écart près).", true); return; }
+  const corps = h("div", null, h("p", null, "Opération du " + dateFr(o.date) + " · " + o.libelle + " · " + euros(o.montant)));
+  liste.forEach((x, i) => corps.appendChild(h("label", {class: "candidat" + (i === 0 ? " meilleur" : ""), style: {display: "flex", gap: ".6rem", alignItems: "baseline"}},
+    h("input", {type: "radio", name: "piece-saisie", value: x.j.id, checked: i === 0}),
+    h("span", null, dateFr(x.j.date) + " · " + ((x.j.commercant && obtenir("commercants", x.j.commercant)?.nom) || x.j.commercantNom || "—") + " · " + euros(x.j.montant)
+      + (x.j.natureExacte ? " · " + x.j.natureExacte : "") + " · payé avec " + (x.j.carte ? libelleMoyen(x.j.carte) : "—")
+      + (x.ecart ? " · écart " + euros(x.ecart) : "")))));
+  corps.appendChild(h("p", {class: "note"}, "Le moyen de paiement de la pièce prendra celui du relevé ; un écart de montant sera noté sur la pièce."));
+  const ok = await dialogue({titre: "Choisir une pièce saisie", corps, large: true, actions: [{libelle: "Annuler", classe: "discret", valeur: false},
+    {libelle: "Rapprocher", classe: "primaire", action: () => {
+      const id = corps.querySelector("input[name=piece-saisie]:checked")?.value; const j = id && obtenir("justificatifs", id);
+      if (!j) return false;
+      lierPieceSaisie(j, o); message("Pièce rapprochée."); return true;
+    }}]});
+  if (ok) rafraichirEcran();
 }
 async function ajouterPieceAOperation(o){
   const f = await choisirFichier("image/*,application/pdf"); if (!f) return;
@@ -7283,7 +7332,7 @@ function ecranRapprochement(j, etat, attente){
     const ligneOcr = (lib, ctl, conf) => h("div", {class: "champ-ocr"}, h("label", null, lib), ctl, h("span", {class: "confiance"}, conf || ""));
     // Note de frais : le moyen de paiement devient le compte sur lequel le remboursement est attendu
     const libPaye = () => estNoteFrais({type: type.value}) ? "Remboursé sur" : "Payé avec";
-    const ligneCarte = ligneOcr(libPaye(), carte, x.carte4 ? "carte ****" + x.carte4 : "");
+    const ligneCarte = ligneOcr(libPaye(), carte, [x.carte4 ? "carte ****" + x.carte4 : "", ticketNommeAmex(x) && x.carte !== "AMEX" ? "le ticket nomme American Express" : ""].filter(Boolean).join(" · "));
     type.addEventListener("change", () => { ligneCarte.querySelector("label").textContent = libPaye(); });
     saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier") : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
@@ -7346,6 +7395,11 @@ function ecranRapprochement(j, etat, attente){
       if (v){ const n = rapprocherTout(); message("Saisie validée" + (n ? " ; " + n + " rapprochement(s) fait(s) d'office." : "."));
         // Saisie suivante à valider, sinon justificatif suivant
         const suivant = attente.find(x => x.aValider && !groupe.includes(x)) || attente[idx + 1]; etat.choisi = suivant ? suivant.id : null;
+      } else if (groupe.some(x => x.statut === "a_rapprocher")){
+        // Une correction (moyen de paiement, montant, date) peut faire trouver le débit : rapprochement relancé (25/11/2026)
+        const n = rapprocherTout(); const reste = groupe.some(x => obtenir("justificatifs", x.id)?.statut === "a_rapprocher");
+        message("Saisie enregistrée" + (!reste ? " et rapprochée." : (obtenir("justificatifs", j.id)?.propositions || []).length ? " ; débit trouvé, à confirmer ci-contre." : ".") + (n > 1 ? " " + n + " rapprochement(s) fait(s) d'office." : ""));
+        etat.choisi = reste ? j.id : null;
       } else { message("Saisie enregistrée."); etat.choisi = null; } rafraichirEcran(); }}, j.aValider ? "Valider la saisie" : "Enregistrer la saisie"),
     h("button", {class: "mini danger", onclick: async () => { if (await confirmer("Supprimer ce justificatif ?", "Supprimer", true)){ for (const x of groupe){ delier(x); supprimer("justificatifs", x.id); } etat.choisi = null; rafraichirEcran(); } }}, "Supprimer")));
   if (j.texteOCR) saisie.appendChild(h("details", {style: {marginTop: ".5rem"}}, h("summary", {class: "petit"}, "Texte lu sur la pièce"), h("div", {class: "texte-brut"}, j.texteOCR)));
@@ -10102,6 +10156,22 @@ async function autotest(){
       v("anomalies : fournisseur non reconnu, débit carte sans pièce (puis écarté)", [an.some(a => a.j === jc || a.j?.id === jc.id && a.genre === "fournisseur non reconnu"), an.some(a => a.op?.id === oc.id)], [true, true]);
       enregistrer("operations", Object.assign(oc, {sansPiece: true}));
       vrai("anomalies : débit marqué « pas de pièce » retiré", !anomaliesRapprochement().some(a => a.op?.id === oc.id));
+      {
+        // Pièce corrigée après le rapprochement : le débit exact est annoncé ; ticket qui nomme Amex signalé
+        const oe = enregistrer("operations", {compte: carte.id, date: "2027-03-10", montant: -33.3, libelle: "DEBIT EXACT ESSAI"});
+        const je = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 33.3, carte: "X333", statut: "a_rapprocher", operations: []});
+        const jx = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 88.8, carte: "X333", statut: "a_rapprocher", operations: [], texteOCR: "MERCI\nAMERICAN EXPRESS\nDEBIT"});
+        const an2 = anomaliesRapprochement(), rs2 = id => an2.find(a => a.j && a.j.id === id && a.genre !== "fournisseur non reconnu")?.raison || "";
+        v("anomalies : débit exact sur la bonne carte annoncé ; ticket Amex signalé", [/^débit trouvé/.test(rs2(je.id)), /American Express/.test(rs2(jx.id))], [true, true]);
+        // Choisir une pièce saisie depuis l'opération : le moyen de paiement faux est corrigé
+        const jf = enregistrer("justificatifs", {type: "ticket", date: "2027-03-11", montant: 33.3, carte: "AMEX", statut: "a_rapprocher", operations: []});
+        const pc = piecesSaisiesPour(oe).map(x => x.j.id);
+        lierPieceSaisie(obtenir("justificatifs", je.id), oe);
+        v("choisir une pièce saisie : pièces de même montant, toutes cartes ; liée, carte du relevé", [pc.includes(je.id), pc.includes(jf.id), pc.includes(jx.id), obtenir("justificatifs", je.id).statut, obtenir("justificatifs", je.id).carte],
+          [true, true, false, "rapproche", "X333"]);
+        delier(obtenir("justificatifs", je.id));
+        for (const x of [je, jx, jf]) supprimer("justificatifs", x.id); supprimer("operations", oe.id);
+      }
       const jv = enregistrer("justificatifs", {type: "ticket", date: "2026-09-15", montant: 12, carte: "X333", statut: "a_rapprocher", operations: []});
       const jn = enregistrer("justificatifs", {type: "notefrais", date: "2026-09-15", montant: 12, statut: "a_rapprocher", operations: []});
       v("pièce antérieure au contrôle : close, hors en-cours ; note de frais et saisie à valider restent ouvertes",

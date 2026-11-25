@@ -739,6 +739,22 @@ async function autotest(){
       v("anomalies : fournisseur non reconnu, débit carte sans pièce (puis écarté)", [an.some(a => a.j === jc || a.j?.id === jc.id && a.genre === "fournisseur non reconnu"), an.some(a => a.op?.id === oc.id)], [true, true]);
       enregistrer("operations", Object.assign(oc, {sansPiece: true}));
       vrai("anomalies : débit marqué « pas de pièce » retiré", !anomaliesRapprochement().some(a => a.op?.id === oc.id));
+      {
+        // Pièce corrigée après le rapprochement : le débit exact est annoncé ; ticket qui nomme Amex signalé
+        const oe = enregistrer("operations", {compte: carte.id, date: "2027-03-10", montant: -33.3, libelle: "DEBIT EXACT ESSAI"});
+        const je = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 33.3, carte: "X333", statut: "a_rapprocher", operations: []});
+        const jx = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 88.8, carte: "X333", statut: "a_rapprocher", operations: [], texteOCR: "MERCI\nAMERICAN EXPRESS\nDEBIT"});
+        const an2 = anomaliesRapprochement(), rs2 = id => an2.find(a => a.j && a.j.id === id && a.genre !== "fournisseur non reconnu")?.raison || "";
+        v("anomalies : débit exact sur la bonne carte annoncé ; ticket Amex signalé", [/^débit trouvé/.test(rs2(je.id)), /American Express/.test(rs2(jx.id))], [true, true]);
+        // Choisir une pièce saisie depuis l'opération : le moyen de paiement faux est corrigé
+        const jf = enregistrer("justificatifs", {type: "ticket", date: "2027-03-11", montant: 33.3, carte: "AMEX", statut: "a_rapprocher", operations: []});
+        const pc = piecesSaisiesPour(oe).map(x => x.j.id);
+        lierPieceSaisie(obtenir("justificatifs", je.id), oe);
+        v("choisir une pièce saisie : pièces de même montant, toutes cartes ; liée, carte du relevé", [pc.includes(je.id), pc.includes(jf.id), pc.includes(jx.id), obtenir("justificatifs", je.id).statut, obtenir("justificatifs", je.id).carte],
+          [true, true, false, "rapproche", "X333"]);
+        delier(obtenir("justificatifs", je.id));
+        for (const x of [je, jx, jf]) supprimer("justificatifs", x.id); supprimer("operations", oe.id);
+      }
       const jv = enregistrer("justificatifs", {type: "ticket", date: "2026-09-15", montant: 12, carte: "X333", statut: "a_rapprocher", operations: []});
       const jn = enregistrer("justificatifs", {type: "notefrais", date: "2026-09-15", montant: 12, statut: "a_rapprocher", operations: []});
       v("pièce antérieure au contrôle : close, hors en-cours ; note de frais et saisie à valider restent ouvertes",

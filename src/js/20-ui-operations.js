@@ -77,7 +77,8 @@ function panneauOperation(o, etat){
     h("dl", {style: {marginTop: ".7rem"}}, h("dt", null, "Catégorie"), h("dd", null, selCat), h("dt", null, "Nature"), h("dd", null, selNat), h("dt", null, "Lieu"), h("dd", null, selLieu), nomsProjets().length ? [h("dt", null, "Projet"), h("dd", null, selProjet)] : null,
       o.ventilation ? [h("dt", null, "Ventilation"), h("dd", null, o.ventilation.map(v => euros(v.montant) + " " + v.sousCategorie + (v.natureExacte ? " (" + v.natureExacte + ")" : "")).join(" · "))] : null,
       h("dt", null, "Justificatifs"), h("dd", null, js.length ? js.map(j => h("button", {class: "lien", onclick: () => voirPiece(j)}, "📎 " + (TYPES_JUSTIF[j.type] || "pièce") + " ")) : h("span", {class: "discret"}, "aucun"),
-        h("br"), h("button", {class: "mini discret", style: {marginTop: ".3rem"}, onclick: () => ajouterPieceAOperation(o)}, "Joindre une pièce…")),
+        h("br"), h("button", {class: "mini discret", style: {marginTop: ".3rem"}, onclick: () => ajouterPieceAOperation(o)}, "Joindre une pièce…"),
+        o.montant < 0 ? h("button", {class: "mini discret", style: {marginTop: ".3rem", marginLeft: ".3rem"}, onclick: () => choisirPieceSaisie(o)}, "Choisir une pièce saisie…") : null),
       h("dt", null, "Origine"), h("dd", null, marqueOrigine(o), o.import ? " " + (obtenir("imports", o.import)?.fichier || "") : "")));
   p.appendChild(h("div", {class: "outils", style: {marginTop: ".8rem"}},
     h("button", {class: "primaire mini", onclick: () => {
@@ -118,6 +119,26 @@ async function voirPiece(j){
   corps.appendChild(h("p", {class: "note"}, (TYPES_JUSTIF[j.type] || "") + " · " + dateFr(j.date) + " · " + euros(j.montant) + (j.raisonSociale ? " · lu : « " + j.raisonSociale + " »" : "")));
   if (j.texteOCR) corps.appendChild(h("details", null, h("summary", null, "Texte lu"), h("div", {class: "texte-brut"}, j.texteOCR)));
   await dialogue({titre: j.commercantNom || "Justificatif", corps, large: true});
+}
+/* Rapprocher depuis l'opération une pièce déjà saisie (ticket du téléphone, facture), même si son moyen de paiement
+   est faux : la liste montre les pièces ouvertes de même montant, ou du même fournisseur à un écart près. */
+async function choisirPieceSaisie(o){
+  const liste = piecesSaisiesPour(o);
+  if (!liste.length){ message("Aucune pièce saisie de " + euros(Math.abs(o.montant)) + " à 15 jours près (ni du même fournisseur à un écart près).", true); return; }
+  const corps = h("div", null, h("p", null, "Opération du " + dateFr(o.date) + " · " + o.libelle + " · " + euros(o.montant)));
+  liste.forEach((x, i) => corps.appendChild(h("label", {class: "candidat" + (i === 0 ? " meilleur" : ""), style: {display: "flex", gap: ".6rem", alignItems: "baseline"}},
+    h("input", {type: "radio", name: "piece-saisie", value: x.j.id, checked: i === 0}),
+    h("span", null, dateFr(x.j.date) + " · " + ((x.j.commercant && obtenir("commercants", x.j.commercant)?.nom) || x.j.commercantNom || "—") + " · " + euros(x.j.montant)
+      + (x.j.natureExacte ? " · " + x.j.natureExacte : "") + " · payé avec " + (x.j.carte ? libelleMoyen(x.j.carte) : "—")
+      + (x.ecart ? " · écart " + euros(x.ecart) : "")))));
+  corps.appendChild(h("p", {class: "note"}, "Le moyen de paiement de la pièce prendra celui du relevé ; un écart de montant sera noté sur la pièce."));
+  const ok = await dialogue({titre: "Choisir une pièce saisie", corps, large: true, actions: [{libelle: "Annuler", classe: "discret", valeur: false},
+    {libelle: "Rapprocher", classe: "primaire", action: () => {
+      const id = corps.querySelector("input[name=piece-saisie]:checked")?.value; const j = id && obtenir("justificatifs", id);
+      if (!j) return false;
+      lierPieceSaisie(j, o); message("Pièce rapprochée."); return true;
+    }}]});
+  if (ok) rafraichirEcran();
 }
 async function ajouterPieceAOperation(o){
   const f = await choisirFichier("image/*,application/pdf"); if (!f) return;

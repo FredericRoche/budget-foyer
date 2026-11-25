@@ -227,6 +227,7 @@ function anomaliesRapprochement(){
   for (const o of vivants("operations")) if (o.date > (derniere.get(o.compte) || "")) derniere.set(o.compte, o.date);
   const r = [], nomJ = j => (j.commercant && obtenir("commercants", j.commercant)?.nom) || j.commercantNom || j.raisonSociale || "—";
   const pieces = vivants("justificatifs").filter(x => !x.aValider && !estNoteFrais(x));
+  const trouves = new Set();   // débits exacts déjà annoncés du côté de leur pièce
   for (const j of pieces.filter(x => x.statut === "a_rapprocher" && x.carte !== "ESPECES")){
     const jj = Object.assign({}, j); if (!jj.carte && jj.carte4) jj.carte = carteDesChiffres(jj.carte4);
     const [avant, apres] = fenetre(jj);
@@ -240,6 +241,10 @@ function anomaliesRapprochement(){
     if ((j.propositions || []).length) raison = "rapprochement proposé, à confirmer";
     else if (!compat.length) raison = "moyen de paiement inconnu ou sans relevé importé : préciser la carte";
     else {
+      // Débit exact sur le bon moyen de paiement : la pièce a été corrigée après le dernier rapprochement (25/11/2026)
+      const exact = vivants("operations").find(o => o.montant < 0 && -versCentimes(o.montant) === cents && dansFenetre(o) && libre(o) && compat.some(c => c.id === o.compte));
+      if (exact){ r.push({genre, j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant), debitTrouve: exact,
+        raison: "débit trouvé : " + dateFr(exact.date) + " · " + exact.libelle + " · " + euros(exact.montant) + " ; ouvrir la pièce pour rapprocher, ou « Relancer le rapprochement »"}); trouves.add(exact.id); continue; }
       const ailleurs = vivants("operations").find(o => o.montant < 0 && -versCentimes(o.montant) === cents && dansFenetre(o) && libre(o) && !compat.some(c => c.id === o.compte));
       const voisin = !ailleurs && vivants("operations").find(o => o.montant < 0 && compat.some(c => c.id === o.compte) && dansFenetre(o) && libre(o)
         && Math.abs(-versCentimes(o.montant) - cents) <= Math.max(10, cents * 0.03) && -versCentimes(o.montant) !== cents);
@@ -247,6 +252,7 @@ function anomaliesRapprochement(){
       raison = ailleurs ? "même montant le " + dateFr(ailleurs.date) + " sur " + libelleCompte(ailleurs.compte) + " : la carte de la pièce est-elle la bonne ?"
         : voisin ? "au relevé : " + euros(voisin.montant) + " le " + dateFr(voisin.date) + " (devise, pourboire, erreur de saisie ?)"
         : "aucun débit de ce montant au relevé (" + libelleMoyen(jj.carte) + ") : espèces, autre moyen, date ou montant mal lus ?";
+      if (!ailleurs && ticketNommeAmex(j) && jj.carte !== "AMEX") raison += " ; le ticket nomme American Express";
     }
     r.push({genre, j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant), raison});
   }
@@ -263,7 +269,7 @@ function anomaliesRapprochement(){
     const cartes = new Set(comptes.filter(c => c.type === "carte").map(c => c.id));
     const debits = [];
     for (const o of vivants("operations").filter(o => cartes.has(o.compte) && o.montant < 0 && o.date >= depuis && !(o.justificatifs || []).length && !o.sansPiece && !o.ndf && !(o.commercant && obtenir("commercants", o.commercant)?.sansPiece))){
-      if (pieces.some(j => j.statut === "a_rapprocher" && (j.propositions || []).some(p => p.op === o.id))) continue;
+      if (trouves.has(o.id) || pieces.some(j => j.statut === "a_rapprocher" && (j.propositions || []).some(p => p.op === o.id))) continue;
       debits.push(o);
     }
     // Pièces voisines : chaque pièce va à un seul débit, les paires les plus proches d'abord
@@ -299,6 +305,28 @@ function piecesPourDebit(o, pieces){
   return ok;
 }
 /* Rapprochement malgré un écart de montant, sur décision de l'utilisateur : l'écart est noté sur la pièce. */
+/* Le texte lu sur la pièce nomme Amex (facturette « AMERICAN EXPRESS », « CARTE AMEX ») */
+const ticketNommeAmex = j => /AMERICAN\s*EXPRESS|\bAMEX\b/i.test(j?.texteOCR || "");
+/* Pièces déjà saisies qui peuvent être celles d'une opération, quel que soit leur moyen de paiement (choix depuis
+   l'opération, 25/11/2026) : pièces ouvertes, montant exact à 15 jours près, ou même fournisseur à 25 % près et
+   7 jours ; les plus proches d'abord. */
+function piecesSaisiesPour(o){
+  const m = Math.abs(versCentimes(o.montant));
+  return vivants("justificatifs").filter(j => j.statut === "a_rapprocher" && !j.aValider && !(j.operations || []).length && j.type !== "engagement").map(j => {
+    const d = Math.abs(ecartJours(j.date, o.date)), ecart = Math.abs(m - versCentimes(j.montant));
+    const meme = j.commercant && j.commercant === o.commercant;
+    if (!(ecart === 0 ? d <= 15 : meme && d <= 7 && ecart <= m * 0.25)) return null;
+    return {j, ecart: ecart / 100, cle: ecart + d * 10};
+  }).filter(Boolean).sort((a, b) => a.cle - b.cle);
+}
+/* Rapproche une pièce choisie depuis l'opération : le moyen de paiement de la pièce devient celui du relevé
+   (c'était l'erreur de saisie), l'écart de montant éventuel est noté. */
+function lierPieceSaisie(j, o){
+  const c = obtenir("comptes", o.compte);
+  if (c && c.carte && c.carte !== "LCL-NV" && (/^X\d+/.test(c.carte) || c.carte === "AMEX")) j.carte = c.carte;
+  if (versCentimes(Math.abs(o.montant)) !== versCentimes(j.montant)) rapprocherAvecEcart(j, o); else lier([j], o, false);
+  enregistrer("justificatifs", j);
+}
 function rapprocherAvecEcart(j, op){
   j.ecartMontant = Math.round((Math.abs(op.montant) - j.montant) * 100) / 100;
   lier([j], op, false);
