@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-/6e5K4SNk8cp64QnN6fACN3Y7wXdxRnrrxDKhQBqRvw=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ikotNRPe0fmVN2wNbgOgxEdT75JXgJ2AlbU2Jww52LY=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -355,7 +355,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-25.1230";
+const VERSION_APP = "2026-11-25.1307";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -6302,12 +6302,36 @@ async function nouvelleOperation(){
     }}]});
   if (ok) rafraichirEcran();
 }
+/* État d'une pièce, en clair (export) : le même vocabulaire que la liste de l'écran Justificatifs. */
+function statutPiece(x){
+  if (x.aValider) return "à valider";
+  if (x.statut === "engagement") return x.dateSignature ? "devis signé le " + dateFr(x.dateSignature) : "devis à l'étude";
+  if (x.statut === "rapproche") return "rapprochée";
+  if (pieceClose(x)) return "close (avant le contrôle)";
+  if (estNoteFrais(x)) return "remboursement attendu";
+  if (x.datePaiement) return "payée le " + dateFr(x.datePaiement) + ", attend le relevé";
+  if (projetDePiece(x)) return "à payer";
+  return "à rapprocher";
+}
+/* Feuille « Justificatifs » de l'export : toutes les pièces, rapprochées ou non (les non rapprochées n'ont
+   pas d'opération, donc pas de ligne dans la feuille « Opérations »). */
+function feuilleJustificatifs(){
+  const pieces = vivants("justificatifs").slice().sort((a, b) => (a.date || "") < (b.date || "") ? 1 : -1);
+  return {nom: "Justificatifs", colonnes: [{titre: "Date", type: "date", largeur: 12}, {titre: "Type", largeur: 18}, {titre: "Fournisseur", largeur: 24},
+    {titre: "Nature exacte", largeur: 30}, {titre: "N° de pièce", largeur: 16}, {titre: "Montant", type: "euros", largeur: 13}, {titre: "Catégorie", largeur: 20},
+    {titre: "Sous-catégorie", largeur: 26}, {titre: "Lieu", largeur: 10}, {titre: "Payé avec", largeur: 22}, {titre: "Payée le", type: "date", largeur: 12},
+    {titre: "Origine", largeur: 10}, {titre: "État", largeur: 26}, {titre: "Opération rapprochée", largeur: 50}],
+    lignes: pieces.map(x => [x.date || "", TYPES_JUSTIF[x.type] || x.type || "", obtenir("commercants", x.commercant)?.nom || x.commercantNom || "",
+      x.natureExacte || "", x.numero || "", x.montant || 0, x.categorie || "", x.sousCategorie || "", x.lieu || "", x.carte ? libelleMoyen(x.carte) : "",
+      x.datePaiement || "", x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "sans pièce" : "PC", statutPiece(x),
+      (x.operations || []).map(id => obtenir("operations", id)).filter(Boolean).map(o => dateFr(o.date) + " · " + libelleCompte(o.compte) + " · " + o.libelle + " · " + nombre(o.montant)).join(" ; ")])};
+}
 function exporterOperations(ops){
   telecharger(ecrireClasseur([{nom: "Opérations", colonnes: [{titre: "Date d'achat", type: "date", largeur: 12}, {titre: "Débité le", type: "date", largeur: 12}, {titre: "Compte", largeur: 22},
     {titre: "Libellé bancaire", largeur: 40}, {titre: "Fournisseur", largeur: 24}, {titre: "Nature exacte", largeur: 30}, {titre: "Montant", type: "euros", largeur: 13},
     {titre: "Catégorie", largeur: 20}, {titre: "Sous-catégorie", largeur: 26}, {titre: "Nature", largeur: 14}, {titre: "Lieu", largeur: 10}, {titre: "Justificatifs", type: "nombre", largeur: 8}],
     lignes: ops.flatMap(o => partsDe(o).map(p => [o.date, o.dateDebit || "", libelleCompte(o.compte), o.libelle, obtenir("commercants", o.commercant)?.nom || "",
-      p.natureExacte || o.natureExacte || "", p.montant, p.categorie || "", p.sousCategorie || "", p.nature || "", p.lieu || "", (o.justificatifs || []).length]))}]),
+      p.natureExacte || o.natureExacte || "", p.montant, p.categorie || "", p.sousCategorie || "", p.nature || "", p.lieu || "", (o.justificatifs || []).length]))}, feuilleJustificatifs()]),
     "operations-" + aujourdhui() + ".xlsx");
 }
 
@@ -10445,6 +10469,12 @@ async function autotest(){
         [extraireTicket("FACTURE\nSASU au capital de 10 000 €\nTOTAL TTC 12,00 €").raisonSociale !== "SASU",
          extraireTicket("FACTURE\nDupont Essai SAS au capital de 5 000 €\nTOTAL TTC 12,00 €").raisonSociale],
         [true, "Dupont Essai SAS"]);
+      {
+        const fj = feuilleJustificatifs();
+        v("export : feuille Justificatifs, toutes les pièces, avec leur état", [fj.nom, fj.lignes.length === vivants("justificatifs").length, fj.colonnes.length === fj.lignes[0]?.length || !fj.lignes.length,
+          statutPiece({aValider: true}), statutPiece({statut: "engagement"}), statutPiece({statut: "rapproche"})],
+          ["Justificatifs", true, true, "à valider", "devis à l'étude", "rapprochée"]);
+      }
       v("rangement : année du fichier", [anneeFichier({periode: {fin: "2026-10-19"}}), anneeFichier({date: "2025-06-30"}), anneeFichier({arrete: "2027-01-28"})], ["2026", "2025", "2027"]);
       v("rangement : nom libre sans écraser", [nomLibre("a.csv", new Set()), nomLibre("a.csv", new Set(["a.csv", "a (2).csv"]))], ["a.csv", "a (3).csv"]);
       v("avis d'impôt reconnu", [reconnaitrePdf("x.pdf", "AVIS_TF_RG\nCENTRE DES FINANCES PUBLIQUES\nAVIS DE TAXES FONCIERES 2026", null).titre,

@@ -177,11 +177,35 @@ async function nouvelleOperation(){
     }}]});
   if (ok) rafraichirEcran();
 }
+/* État d'une pièce, en clair (export) : le même vocabulaire que la liste de l'écran Justificatifs. */
+function statutPiece(x){
+  if (x.aValider) return "à valider";
+  if (x.statut === "engagement") return x.dateSignature ? "devis signé le " + dateFr(x.dateSignature) : "devis à l'étude";
+  if (x.statut === "rapproche") return "rapprochée";
+  if (pieceClose(x)) return "close (avant le contrôle)";
+  if (estNoteFrais(x)) return "remboursement attendu";
+  if (x.datePaiement) return "payée le " + dateFr(x.datePaiement) + ", attend le relevé";
+  if (projetDePiece(x)) return "à payer";
+  return "à rapprocher";
+}
+/* Feuille « Justificatifs » de l'export : toutes les pièces, rapprochées ou non (les non rapprochées n'ont
+   pas d'opération, donc pas de ligne dans la feuille « Opérations »). */
+function feuilleJustificatifs(){
+  const pieces = vivants("justificatifs").slice().sort((a, b) => (a.date || "") < (b.date || "") ? 1 : -1);
+  return {nom: "Justificatifs", colonnes: [{titre: "Date", type: "date", largeur: 12}, {titre: "Type", largeur: 18}, {titre: "Fournisseur", largeur: 24},
+    {titre: "Nature exacte", largeur: 30}, {titre: "N° de pièce", largeur: 16}, {titre: "Montant", type: "euros", largeur: 13}, {titre: "Catégorie", largeur: 20},
+    {titre: "Sous-catégorie", largeur: 26}, {titre: "Lieu", largeur: 10}, {titre: "Payé avec", largeur: 22}, {titre: "Payée le", type: "date", largeur: 12},
+    {titre: "Origine", largeur: 10}, {titre: "État", largeur: 26}, {titre: "Opération rapprochée", largeur: 50}],
+    lignes: pieces.map(x => [x.date || "", TYPES_JUSTIF[x.type] || x.type || "", obtenir("commercants", x.commercant)?.nom || x.commercantNom || "",
+      x.natureExacte || "", x.numero || "", x.montant || 0, x.categorie || "", x.sousCategorie || "", x.lieu || "", x.carte ? libelleMoyen(x.carte) : "",
+      x.datePaiement || "", x.origine === "mobile" ? "téléphone" : x.origine === "depot" ? "dépôt" : x.sansPiece ? "sans pièce" : "PC", statutPiece(x),
+      (x.operations || []).map(id => obtenir("operations", id)).filter(Boolean).map(o => dateFr(o.date) + " · " + libelleCompte(o.compte) + " · " + o.libelle + " · " + nombre(o.montant)).join(" ; ")])};
+}
 function exporterOperations(ops){
   telecharger(ecrireClasseur([{nom: "Opérations", colonnes: [{titre: "Date d'achat", type: "date", largeur: 12}, {titre: "Débité le", type: "date", largeur: 12}, {titre: "Compte", largeur: 22},
     {titre: "Libellé bancaire", largeur: 40}, {titre: "Fournisseur", largeur: 24}, {titre: "Nature exacte", largeur: 30}, {titre: "Montant", type: "euros", largeur: 13},
     {titre: "Catégorie", largeur: 20}, {titre: "Sous-catégorie", largeur: 26}, {titre: "Nature", largeur: 14}, {titre: "Lieu", largeur: 10}, {titre: "Justificatifs", type: "nombre", largeur: 8}],
     lignes: ops.flatMap(o => partsDe(o).map(p => [o.date, o.dateDebit || "", libelleCompte(o.compte), o.libelle, obtenir("commercants", o.commercant)?.nom || "",
-      p.natureExacte || o.natureExacte || "", p.montant, p.categorie || "", p.sousCategorie || "", p.nature || "", p.lieu || "", (o.justificatifs || []).length]))}]),
+      p.natureExacte || o.natureExacte || "", p.montant, p.categorie || "", p.sousCategorie || "", p.nature || "", p.lieu || "", (o.justificatifs || []).length]))}, feuilleJustificatifs()]),
     "operations-" + aujourdhui() + ".xlsx");
 }
