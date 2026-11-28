@@ -904,6 +904,15 @@ async function autotest(){
       v("date lue au téléphone : écart au jour de la photo signalé, un chiffre mal lu repéré ; même jour ou 3 jours avant : rien",
         [alerteDateLue("2026-11-08", "2026-11-28"), alerteDateLue("2026-11-28", "2026-11-28"), alerteDateLue("2026-11-25", "2026-11-28"), !!alerteDateLue("2026-11-29", "2026-11-28"), alerteDateLue("2026-11-08", "")],
         ["photo du 28/11/2026 : date à vérifier (un chiffre mal lu ?)", "", "", true, ""]);
+      {
+        const dj = ajouterJours(aujourdhui(), -2), dv = ajouterJours(aujourdhui(), -22), txt = d => "BOUCHERIE ESSAI\n" + dateFr(d) + " 11:06\nTOTAL 15,57\n";
+        const jb1 = enregistrer("justificatifs", {type: "ticket", date: dj, montant: 15.57, texteOCR: txt(dj), statut: "rapproche", operations: []});
+        const jb2 = enregistrer("justificatifs", {type: "ticket", date: dj, montant: 15.57, texteOCR: txt(dv), statut: "rapproche", operations: []});
+        const jb3 = enregistrer("justificatifs", {type: "ticket", date: "2020-01-05", montant: 15.57, texteOCR: txt("2020-01-05"), statut: "rapproche", operations: []});
+        const bl = bilanLecture(), de = id => bl.find(x => x.j.id === id)?.dateOk;
+        v("fiabilité de la lecture : date lue comparée à la date validée, pièces de plus d'un an non jugées", [de(jb1.id), de(jb2.id), de(jb3.id)], [true, false, null]);
+        for (const x of [jb1, jb2, jb3]) supprimer("justificatifs", x.id);
+      }
       for (const x of [ja, jb, jc]) supprimer("justificatifs", x.id); supprimer("operations", oc.id); supprimer("operations", oa.id);
     }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});

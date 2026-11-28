@@ -311,7 +311,10 @@ declarerEcran("boite", {titre: "Boîte de saisies", rendre(c){
 
 /* ---------- Fiabilité de la lecture des tickets ----------
    La lecture (extraireTicket) est rejouée sur le texte lu de chaque pièce et comparée à ce qui a été validé :
-   montant au centime, fournisseur reconnu. Les écarts se téléchargent (texte lu, valeurs validées) pour analyse. */
+   montant au centime, date, fournisseur reconnu. Les écarts se téléchargent (texte lu, valeurs validées) pour analyse.
+   La date n'est jugée que sur les pièces de moins de 390 jours : la lecture écarte les dates de plus de 400 jours
+   et date les tickets sans année par rapport à aujourd'hui, si bien qu'une pièce plus ancienne serait comptée fausse à tort
+   (dateOk vaut alors null). */
 function bilanLecture(){
   const r = [];
   for (const j of vivants("justificatifs")){
@@ -319,7 +322,8 @@ function bilanLecture(){
     const t = extraireTicket(j.texteOCR);
     const fiche = j.commercant ? obtenir("commercants", j.commercant) : null;
     const reconnu = commercantPourTicket(t);
-    r.push({j, t, fiche, reconnu, montantOk: t.montant != null && versCentimes(t.montant) === versCentimes(j.montant), fournisseurOk: !fiche || (reconnu && reconnu.id === fiche.id)});
+    const dateOk = !j.date || j.date < ajouterJours(aujourdhui(), -390) ? null : t.date === j.date;
+    r.push({j, t, fiche, reconnu, montantOk: t.montant != null && versCentimes(t.montant) === versCentimes(j.montant), dateOk, fournisseurOk: !fiche || (reconnu && reconnu.id === fiche.id)});
   }
   return r.sort((a, b) => (a.j.date || "") < (b.j.date || "") ? 1 : -1);
 }
@@ -328,14 +332,17 @@ async function dialogueFiabiliteLecture(){
   if (!r.length) return message("Aucune pièce avec un texte lu à contrôler.");
   const pct = n => Math.round(n / r.length * 100) + " %";
   const nm = r.filter(x => x.montantOk).length, nf = r.filter(x => x.fournisseurOk).length;
-  const ecarts = r.filter(x => !x.montantOk || !x.fournisseurOk);
+  const rd = r.filter(x => x.dateOk !== null), nd = rd.filter(x => x.dateOk).length;
+  const ecarts = r.filter(x => !x.montantOk || x.dateOk === false || !x.fournisseurOk);
   const nomF = f => f ? f.nom : "—";
   await dialogue({titre: "Fiabilité de la lecture des tickets", corps: h("div", null,
-    h("p", null, r.length + " pièce(s) lue(s) : montant juste " + nm + " (" + pct(nm) + "), fournisseur reconnu " + nf + " (" + pct(nf) + ")."),
+    h("p", null, r.length + " pièce(s) lue(s) : montant juste " + nm + " (" + pct(nm) + "), fournisseur reconnu " + nf + " (" + pct(nf) + ")"
+      + (rd.length ? ", date juste " + nd + " sur " + rd.length + " (" + Math.round(nd / rd.length * 100) + " %, pièces de moins d'un an)" : "") + "."),
     h("p", {class: "note"}, "La lecture est rejouée aujourd'hui sur le texte lu de chaque pièce, avec les fiches et alias actuels, et comparée à ce que vous avez validé."),
-    ecarts.length ? tableau([{titre: "Date"}, {titre: "Validé"}, {titre: "Montant lu", num: true}, {titre: "Fournisseur reconnu"}], ecarts, {classe: "serre", limite: 40, ligne: x => h("tr", null,
+    ecarts.length ? tableau([{titre: "Date"}, {titre: "Validé"}, {titre: "Montant lu", num: true}, {titre: "Date lue"}, {titre: "Fournisseur reconnu"}], ecarts, {classe: "serre", limite: 40, ligne: x => h("tr", null,
       h("td", null, dateFr(x.j.date)), h("td", null, nomF(x.fiche) + " · " + euros(x.j.montant)),
-      h("td", {class: "num" + (x.montantOk ? "" : " neg")}, x.t.montant == null ? "—" : euros(x.t.montant)), h("td", {class: x.fournisseurOk ? "" : "neg"}, nomF(x.reconnu)))}) : null),
+      h("td", {class: "num" + (x.montantOk ? "" : " neg")}, x.t.montant == null ? "—" : euros(x.t.montant)),
+      h("td", {class: x.dateOk === false ? "neg" : ""}, x.dateOk === null ? "" : x.t.date ? dateFr(x.t.date) : "non lue"), h("td", {class: x.fournisseurOk ? "" : "neg"}, nomF(x.reconnu)))}) : null),
     actions: [{libelle: "Fermer", classe: "discret", valeur: null},
       {libelle: "Avec les photos des écarts", classe: "discret", action: () => { exporterAnalyseLecture(r, true); return null; }},
       {libelle: "Télécharger pour analyse", classe: "primaire", action: () => { exporterAnalyseLecture(r, false); return null; }}]});
@@ -346,9 +353,9 @@ async function exporterAnalyseLecture(r, avecPhotos){
   const pieces = [];
   for (const x of r){
     const p = {id: x.j.id, date: x.j.date, origine: x.j.origine || "", type: x.j.type, texte: x.j.texteOCR,
-      montantValide: x.j.montant, montantLu: x.t.montant, fournisseurValide: x.fiche ? {nom: x.fiche.nom, alias: x.fiche.alias || []} : null, fournisseurReconnu: x.reconnu ? x.reconnu.nom : null,
+      montantValide: x.j.montant, montantLu: x.t.montant, dateLue: x.t.date, photoLe: x.j.photoLe || "", fournisseurValide: x.fiche ? {nom: x.fiche.nom, alias: x.fiche.alias || []} : null, fournisseurReconnu: x.reconnu ? x.reconnu.nom : null,
       enseigneLue: x.t.enseigne, raisonSocialeLue: x.t.raisonSociale};
-    if (avecPhotos && x.j.origine === "mobile" && (!x.montantOk || !x.fournisseurOk)){
+    if (avecPhotos && x.j.origine === "mobile" && (!x.montantOk || x.dateOk === false || !x.fournisseurOk)){
       const ph = await lirePiece(x.j.id).catch(() => null);
       if (ph && /^image\//.test(ph.mime)) p.photo = {mime: ph.mime, b64: versB64(ph.octets)};
     }
