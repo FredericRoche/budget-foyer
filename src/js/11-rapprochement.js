@@ -254,6 +254,7 @@ function anomaliesRapprochement(){
         : "aucun débit de ce montant au relevé (" + libelleMoyen(jj.carte) + ") : espèces, autre moyen, date ou montant mal lus ?";
       if (!ailleurs && ticketNommeAmex(j) && jj.carte !== "AMEX") raison += " ; le ticket nomme American Express";
     }
+    if (alerteDateLue(j.date, j.photoLe)) raison += " ; " + alerteDateLue(j.date, j.photoLe);
     r.push({genre, j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant), raison});
   }
   // Fournisseur non reconnu (pièces rapprochées ou non)
@@ -449,7 +450,8 @@ async function fusionnerBoite(elements){
       await creerJustificatif({type: t.type || "ticket", date: t.date || s.date, heure: t.heure || "", montant: Math.abs(lireMontant(t.montant)),
         raisonSociale: t.raisonSociale || "", commercantNom: t.commercant || "", commercantCorrige: !!t.commercantCorrige, natureExacte: t.natureExacte || "",
         categorie: s.categorie || "", sousCategorie: s.sousCategorie || "", lieu: s.lieu || "", carte: s.carte || "", carte4: t.carte4 || "", siret: t.siret || "",
-        texteOCR: t.texte || "", origine: "mobile", auteur: s.auteur || "", saisie: e.nom, groupe, aValider: true}, piece);
+        texteOCR: t.texte || "", origine: "mobile", auteur: s.auteur || "", saisie: e.nom, groupe, aValider: true,
+        photoLe: t.photoLe || (s.creeLe ? isoDe(new Date(s.creeLe)) : "")}, piece);
       n++;
     }
     await SESSION.adaptateur.deplacer(e.chemin, "boite/traitees");

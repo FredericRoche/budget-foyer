@@ -119,6 +119,17 @@ function dateDe(iso){ const [a, m, j] = iso.split("-").map(Number); return new D
 const aujourdhui = () => isoDe(new Date());
 function ajouterJours(iso, n){ const d = dateDe(iso); d.setDate(d.getDate() + n); return isoDe(d); }
 function ecartJours(a, b){ return Math.round((dateDe(b) - dateDe(a)) / 86400000); }
+/* Date lue sur un ticket photographiée au téléphone, comparée au jour de la photo : la saisie se fait presque
+   toujours le jour de l'achat. Postérieure à la photo, ou antérieure de plus de 3 jours : à vérifier. Le cas
+   typique (28/11/2026 lu 08/11) ne diffère que d'un chiffre du jour ou du mois. Rend "" si rien à signaler. */
+function alerteDateLue(lue, photo){
+  if (!lue || !photo) return "";
+  const d = ecartJours(lue, photo);
+  if (d >= 0 && d <= 3) return "";
+  const a = dateFr(lue), b = dateFr(photo);
+  const unChiffre = a.length === b.length && [...a].filter((c, i) => c !== b[i]).length === 1;
+  return (d < 0 ? "postérieure à la photo du " : "photo du ") + b + " : date à vérifier" + (unChiffre ? " (un chiffre mal lu ?)" : "");
+}
 function finDeMois(iso){ const d = dateDe(iso); return isoDe(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
 function debutDeMois(iso){ return iso.slice(0, 8) + "01"; }
 function ajouterMois(iso, n){

@@ -900,6 +900,10 @@ async function autotest(){
       rapprocherAvecEcart(obtenir("justificatifs", jq.id), obtenir("operations", oq.id));
       v("rapprocher quand même : lié, écart noté, plus d'anomalie", [obtenir("justificatifs", jq.id).statut, obtenir("justificatifs", jq.id).ecartMontant, anomaliesRapprochement().some(a => a.op?.id === oq.id)], ["rapproche", 2.06, false]);
       supprimer("justificatifs", jq.id); supprimer("operations", oq.id); supprimer("commercants", fq.id);
+      // Date lue au téléphone loin du jour de la photo (28/11 lu 08/11, constaté le 28/11/2026)
+      v("date lue au téléphone : écart au jour de la photo signalé, un chiffre mal lu repéré ; même jour ou 3 jours avant : rien",
+        [alerteDateLue("2026-11-08", "2026-11-28"), alerteDateLue("2026-11-28", "2026-11-28"), alerteDateLue("2026-11-25", "2026-11-28"), !!alerteDateLue("2026-11-29", "2026-11-28"), alerteDateLue("2026-11-08", "")],
+        ["photo du 28/11/2026 : date à vérifier (un chiffre mal lu ?)", "", "", true, ""]);
       for (const x of [ja, jb, jc]) supprimer("justificatifs", x.id); supprimer("operations", oc.id); supprimer("operations", oa.id);
     }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});

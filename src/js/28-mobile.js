@@ -110,6 +110,8 @@ function photographier(corps, saisie){
     let t;
     try { t = await lireTicket(f, p => { barre.style.width = Math.round(p * 100) + "%"; }); }
     catch (e){ info.textContent = "Lecture impossible (" + e.message + ") : saisissez les champs à la main."; t = {photo: {mime: "image/jpeg", octets: new Uint8Array(await f.arrayBuffer())}, confiance: {}}; }
+    // Jour de la photo (fichier pris à l'appareil : aujourd'hui ; choisi dans la photothèque : sa date) : sert à contrôler la date lue
+    t.photoLe = f.lastModified ? isoDe(new Date(f.lastModified)) : aujourdhui();
     formulaireMobile(corps, saisie || nouvelleSaisieMobile(), t);
   });
   document.body.appendChild(entree); entree.click();
@@ -134,6 +136,15 @@ async function formulaireMobile(corps, saisie, t){
   const dernier = await reglage("mobile_dernier", {});
   const montant = h("input", {type: "text", inputmode: "decimal", class: "montant", value: t?.montant ? nombre(t.montant) : ""});
   const date = champDate({value: t?.date || aujourdhui()});
+  // Date lue qui s'écarte du jour de la photo : signalée en rouge, avec de quoi reprendre le jour de la photo (rien d'office)
+  const alerteDate = h("div", {class: "legende-tel neg", style: {margin: ".2rem 0 0"}});
+  const majAlerteDate = () => {
+    vider(alerteDate);
+    const msg = t?.photoLe ? alerteDateLue(date.value, t.photoLe) : "";
+    if (msg) alerteDate.append(msg + " ", h("button", {type: "button", class: "lien", onclick: () => { date.value = t.photoLe; majAlerteDate(); }}, "Mettre le " + dateFr(t.photoLe)));
+  };
+  date.addEventListener("blur", majAlerteDate); date.addEventListener("change", majAlerteDate);
+  majAlerteDate();
   const cartes = ex?.cartes || [];
   const chiffres = String(t?.carte4 || "").replace(/\D/g, "");
   const carteLue = chiffres ? (cartes.find(x => (x.chiffres || []).includes(chiffres.slice(-4)))
@@ -184,7 +195,7 @@ async function formulaireMobile(corps, saisie, t){
   };
   rendrePuces(); majSugg();
   const lu = t && (t.raisonSociale || t.type) ? h("div", {class: "legende-tel", style: {margin: ".2rem 0 0"}}, "lu sur le ticket : " + (t.raisonSociale ? "« " + t.raisonSociale + " » · " : "") + (TYPES_JUSTIF[t.type] || "")) : null;
-  const ticket = () => ({montant: montant.value, date: date.value, heure: t?.heure || "", commercant: cm.value.trim(), commercantCorrige: !!fiche && norm(cm.value) !== norm(fiche.nom) || (!fiche && !!cm.value),
+  const ticket = () => ({montant: montant.value, date: date.value, heure: t?.heure || "", photoLe: t?.photoLe || "", commercant: cm.value.trim(), commercantCorrige: !!fiche && norm(cm.value) !== norm(fiche.nom) || (!fiche && !!cm.value),
     raisonSociale: t?.raisonSociale || "", natureExacte: nat.value.trim(), type: t?.type || "ticket", carte4: t?.carte4 || "", siret: t?.siret || "", texte: (t?.texte || "").slice(0, 4000),
     photo: t?.photo ? {mime: t.photo.mime, b64: versB64(t.photo.octets)} : null});
   const valider = () => {
@@ -198,7 +209,7 @@ async function formulaireMobile(corps, saisie, t){
     saisie.tickets.length ? h("div", {class: "bandeau calme"}, "Paiement groupé : ticket " + (saisie.tickets.length + 1) + " (déjà : " + saisie.tickets.map(x => euros(lireMontant(x.montant))).join(" + ") + ")") : null,
     t?.photo ? h("img", {class: "apercu-photo", src: URL.createObjectURL(new Blob([t.photo.octets], {type: t.photo.mime})), alt: "Ticket", style: {maxHeight: "18vh"}}) : null,
     h("div", {class: "bloc"}, h("label", null, "Montant", t?.montant ? h("span", {class: "propose"}, "proposé") : null), montant),
-    h("div", {class: "bloc deux", style: {gap: ".6rem"}}, h("div", null, h("label", null, "Date", t?.date ? h("span", {class: "propose"}, "proposé") : null), date), h("div", null, h("label", null, "Payé avec"), carte)),
+    h("div", {class: "bloc deux", style: {gap: ".6rem"}}, h("div", null, h("label", null, "Date", t?.date ? h("span", {class: "propose"}, "proposé") : null), date), h("div", null, h("label", null, "Payé avec"), carte)), alerteDate,
     h("div", {class: "bloc"}, h("label", null, "Fournisseur", fiche ? h("span", {class: "propose"}, "reconnu") : t ? h("span", {class: "propose"}, "proposé") : null), cm, liste, lu),
     h("div", {class: "bloc"}, h("label", null, "Nature exacte de la dépense"), nat, sugg),
     h("label", null, "Catégorie"), puces, h("label", null, "Lieu"), pucesLieu,

@@ -6,7 +6,7 @@
 <title>Budget du foyer</title>
 <meta name="theme-color" content="#1E4636">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-si+GZ7bknl3B6OUneJuDpYb1XSziC876iZbAxcdiefM=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-EfBPtdtK2PE7Qp5Db/BnzcasFcTL1iGH7JcwnEhcQDk=' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data: https://login.microsoftonline.com https://login.live.com https://graph.microsoft.com https://*.1drv.com https://*.livefilestore.com https://*.sharepoint.com https://*.onedrive.com https://api.onedrive.com https://*.microsoftpersonalcontent.com; frame-src https://login.microsoftonline.com https://login.live.com; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icone-180.png">
 <link rel="icon" type="image/png" href="icone-192.png">
@@ -232,6 +232,7 @@ svg text{font-family:var(--serif)}
 .puces button{min-height:42px; padding:.4rem .7rem; font-size:1rem}
 .puces button.choisi{background:var(--vert-empire); color:#fff}
 .saisie .legende-tel{font-size:.82rem; color:var(--sauge); margin-bottom:.7rem}
+.saisie .legende-tel.neg{color:var(--garnet)}
 .saisie .bloc{margin-bottom:.8rem}
 .propose{font-size:.75rem; color:var(--or-bruni); letter-spacing:.06em; text-transform:uppercase; margin-left:.3rem}
 .recentes{list-style:none}
@@ -355,7 +356,7 @@ input.invalide{border-color:var(--garnet); background:var(--garnet-pale)}
    Règle d'or : aucune donnée importée (libellé bancaire, ticket, fichier) n'est
    insérée comme HTML. Tout passe par h(), qui crée des nœuds texte. */
 
-const VERSION_APP = "2026-11-25.1612";
+const VERSION_APP = "2026-11-28.1619";
 /* Journal des erreurs non rattrapées (consulté par la suite de contrôle et les captures) */
 window.__erreurs = [];
 addEventListener("error", e => window.__erreurs.push(String(e.message)));
@@ -471,6 +472,17 @@ function dateDe(iso){ const [a, m, j] = iso.split("-").map(Number); return new D
 const aujourdhui = () => isoDe(new Date());
 function ajouterJours(iso, n){ const d = dateDe(iso); d.setDate(d.getDate() + n); return isoDe(d); }
 function ecartJours(a, b){ return Math.round((dateDe(b) - dateDe(a)) / 86400000); }
+/* Date lue sur un ticket photographiée au téléphone, comparée au jour de la photo : la saisie se fait presque
+   toujours le jour de l'achat. Postérieure à la photo, ou antérieure de plus de 3 jours : à vérifier. Le cas
+   typique (28/11/2026 lu 08/11) ne diffère que d'un chiffre du jour ou du mois. Rend "" si rien à signaler. */
+function alerteDateLue(lue, photo){
+  if (!lue || !photo) return "";
+  const d = ecartJours(lue, photo);
+  if (d >= 0 && d <= 3) return "";
+  const a = dateFr(lue), b = dateFr(photo);
+  const unChiffre = a.length === b.length && [...a].filter((c, i) => c !== b[i]).length === 1;
+  return (d < 0 ? "postérieure à la photo du " : "photo du ") + b + " : date à vérifier" + (unChiffre ? " (un chiffre mal lu ?)" : "");
+}
 function finDeMois(iso){ const d = dateDe(iso); return isoDe(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
 function debutDeMois(iso){ return iso.slice(0, 8) + "01"; }
 function ajouterMois(iso, n){
@@ -3652,6 +3664,7 @@ function anomaliesRapprochement(){
         : "aucun débit de ce montant au relevé (" + libelleMoyen(jj.carte) + ") : espèces, autre moyen, date ou montant mal lus ?";
       if (!ailleurs && ticketNommeAmex(j) && jj.carte !== "AMEX") raison += " ; le ticket nomme American Express";
     }
+    if (alerteDateLue(j.date, j.photoLe)) raison += " ; " + alerteDateLue(j.date, j.photoLe);
     r.push({genre, j, date: j.date, nom: nomJ(j), montant: -Math.abs(j.montant), raison});
   }
   // Fournisseur non reconnu (pièces rapprochées ou non)
@@ -3847,7 +3860,8 @@ async function fusionnerBoite(elements){
       await creerJustificatif({type: t.type || "ticket", date: t.date || s.date, heure: t.heure || "", montant: Math.abs(lireMontant(t.montant)),
         raisonSociale: t.raisonSociale || "", commercantNom: t.commercant || "", commercantCorrige: !!t.commercantCorrige, natureExacte: t.natureExacte || "",
         categorie: s.categorie || "", sousCategorie: s.sousCategorie || "", lieu: s.lieu || "", carte: s.carte || "", carte4: t.carte4 || "", siret: t.siret || "",
-        texteOCR: t.texte || "", origine: "mobile", auteur: s.auteur || "", saisie: e.nom, groupe, aValider: true}, piece);
+        texteOCR: t.texte || "", origine: "mobile", auteur: s.auteur || "", saisie: e.nom, groupe, aValider: true,
+        photoLe: t.photoLe || (s.creeLe ? isoDe(new Date(s.creeLe)) : "")}, piece);
       n++;
     }
     await SESSION.adaptateur.deplacer(e.chemin, "boite/traitees");
@@ -7334,7 +7348,8 @@ function ecranRapprochement(j, etat, attente){
     const libPaye = () => estNoteFrais({type: type.value}) ? "Remboursé sur" : "Payé avec";
     const ligneCarte = ligneOcr(libPaye(), carte, [x.carte4 ? "carte ****" + x.carte4 : "", ticketNommeAmex(x) && x.carte !== "AMEX" ? "le ticket nomme American Express" : ""].filter(Boolean).join(" · "));
     type.addEventListener("change", () => { ligneCarte.querySelector("label").textContent = libPaye(); });
-    saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier") : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
+    saisie.append(ligneOcr("Type", type, "reconnu"), ligneOcr("Montant", montant, x.origine === "mobile" || x.sansPiece ? "saisi" : "lu"), ligneOcr("Date", date, x.date && x.date < ajouterJours((x.cree || aujourdhui()).slice(0, 10), -270) ? h("span", {class: "neg"}, "plus de 9 mois avant la saisie : à vérifier")
+        : alerteDateLue(x.date, x.photoLe) ? h("span", {class: "neg"}, alerteDateLue(x.date, x.photoLe)) : x.heure ? "heure " + x.heure : ""), ligneOcr("N° de facture", num, x.numero ? "lu" : ""),
       ligneOcr("Raison sociale lue", h("input", {type: "text", value: x.raisonSociale || "", readonly: true}), "lu, conservé"),
       ligneOcr("Fournisseur", h("span", {class: "pile"}, listeF, cm), connu && x.fournisseurDevine ? h("span", {class: "neg"}, "deviné dans le texte de la pièce : à confirmer") : connu ? "fichier des fournisseurs" : x.commercantNom ? (x.origine === "mobile" ? "provisoire, saisi sur le téléphone : à confirmer" : "nouveau, lu sur la pièce") : ""), ligneOcr("Nature exacte", nat, ""), sugg,
       ligneOcr("Catégorie", cat, fiche?.categorie ? "par défaut du fournisseur" : ""), ligneOcr("Lieu", lieu, ""), ligneCarte, ligneCheque, lignePayee, ligneSigne, ligneAssocies);
@@ -9276,6 +9291,8 @@ function photographier(corps, saisie){
     let t;
     try { t = await lireTicket(f, p => { barre.style.width = Math.round(p * 100) + "%"; }); }
     catch (e){ info.textContent = "Lecture impossible (" + e.message + ") : saisissez les champs à la main."; t = {photo: {mime: "image/jpeg", octets: new Uint8Array(await f.arrayBuffer())}, confiance: {}}; }
+    // Jour de la photo (fichier pris à l'appareil : aujourd'hui ; choisi dans la photothèque : sa date) : sert à contrôler la date lue
+    t.photoLe = f.lastModified ? isoDe(new Date(f.lastModified)) : aujourdhui();
     formulaireMobile(corps, saisie || nouvelleSaisieMobile(), t);
   });
   document.body.appendChild(entree); entree.click();
@@ -9300,6 +9317,15 @@ async function formulaireMobile(corps, saisie, t){
   const dernier = await reglage("mobile_dernier", {});
   const montant = h("input", {type: "text", inputmode: "decimal", class: "montant", value: t?.montant ? nombre(t.montant) : ""});
   const date = champDate({value: t?.date || aujourdhui()});
+  // Date lue qui s'écarte du jour de la photo : signalée en rouge, avec de quoi reprendre le jour de la photo (rien d'office)
+  const alerteDate = h("div", {class: "legende-tel neg", style: {margin: ".2rem 0 0"}});
+  const majAlerteDate = () => {
+    vider(alerteDate);
+    const msg = t?.photoLe ? alerteDateLue(date.value, t.photoLe) : "";
+    if (msg) alerteDate.append(msg + " ", h("button", {type: "button", class: "lien", onclick: () => { date.value = t.photoLe; majAlerteDate(); }}, "Mettre le " + dateFr(t.photoLe)));
+  };
+  date.addEventListener("blur", majAlerteDate); date.addEventListener("change", majAlerteDate);
+  majAlerteDate();
   const cartes = ex?.cartes || [];
   const chiffres = String(t?.carte4 || "").replace(/\D/g, "");
   const carteLue = chiffres ? (cartes.find(x => (x.chiffres || []).includes(chiffres.slice(-4)))
@@ -9350,7 +9376,7 @@ async function formulaireMobile(corps, saisie, t){
   };
   rendrePuces(); majSugg();
   const lu = t && (t.raisonSociale || t.type) ? h("div", {class: "legende-tel", style: {margin: ".2rem 0 0"}}, "lu sur le ticket : " + (t.raisonSociale ? "« " + t.raisonSociale + " » · " : "") + (TYPES_JUSTIF[t.type] || "")) : null;
-  const ticket = () => ({montant: montant.value, date: date.value, heure: t?.heure || "", commercant: cm.value.trim(), commercantCorrige: !!fiche && norm(cm.value) !== norm(fiche.nom) || (!fiche && !!cm.value),
+  const ticket = () => ({montant: montant.value, date: date.value, heure: t?.heure || "", photoLe: t?.photoLe || "", commercant: cm.value.trim(), commercantCorrige: !!fiche && norm(cm.value) !== norm(fiche.nom) || (!fiche && !!cm.value),
     raisonSociale: t?.raisonSociale || "", natureExacte: nat.value.trim(), type: t?.type || "ticket", carte4: t?.carte4 || "", siret: t?.siret || "", texte: (t?.texte || "").slice(0, 4000),
     photo: t?.photo ? {mime: t.photo.mime, b64: versB64(t.photo.octets)} : null});
   const valider = () => {
@@ -9364,7 +9390,7 @@ async function formulaireMobile(corps, saisie, t){
     saisie.tickets.length ? h("div", {class: "bandeau calme"}, "Paiement groupé : ticket " + (saisie.tickets.length + 1) + " (déjà : " + saisie.tickets.map(x => euros(lireMontant(x.montant))).join(" + ") + ")") : null,
     t?.photo ? h("img", {class: "apercu-photo", src: URL.createObjectURL(new Blob([t.photo.octets], {type: t.photo.mime})), alt: "Ticket", style: {maxHeight: "18vh"}}) : null,
     h("div", {class: "bloc"}, h("label", null, "Montant", t?.montant ? h("span", {class: "propose"}, "proposé") : null), montant),
-    h("div", {class: "bloc deux", style: {gap: ".6rem"}}, h("div", null, h("label", null, "Date", t?.date ? h("span", {class: "propose"}, "proposé") : null), date), h("div", null, h("label", null, "Payé avec"), carte)),
+    h("div", {class: "bloc deux", style: {gap: ".6rem"}}, h("div", null, h("label", null, "Date", t?.date ? h("span", {class: "propose"}, "proposé") : null), date), h("div", null, h("label", null, "Payé avec"), carte)), alerteDate,
     h("div", {class: "bloc"}, h("label", null, "Fournisseur", fiche ? h("span", {class: "propose"}, "reconnu") : t ? h("span", {class: "propose"}, "proposé") : null), cm, liste, lu),
     h("div", {class: "bloc"}, h("label", null, "Nature exacte de la dépense"), nat, sugg),
     h("label", null, "Catégorie"), puces, h("label", null, "Lieu"), pucesLieu,
@@ -10317,6 +10343,10 @@ async function autotest(){
       rapprocherAvecEcart(obtenir("justificatifs", jq.id), obtenir("operations", oq.id));
       v("rapprocher quand même : lié, écart noté, plus d'anomalie", [obtenir("justificatifs", jq.id).statut, obtenir("justificatifs", jq.id).ecartMontant, anomaliesRapprochement().some(a => a.op?.id === oq.id)], ["rapproche", 2.06, false]);
       supprimer("justificatifs", jq.id); supprimer("operations", oq.id); supprimer("commercants", fq.id);
+      // Date lue au téléphone loin du jour de la photo (28/11 lu 08/11, constaté le 28/11/2026)
+      v("date lue au téléphone : écart au jour de la photo signalé, un chiffre mal lu repéré ; même jour ou 3 jours avant : rien",
+        [alerteDateLue("2026-11-08", "2026-11-28"), alerteDateLue("2026-11-28", "2026-11-28"), alerteDateLue("2026-11-25", "2026-11-28"), !!alerteDateLue("2026-11-29", "2026-11-28"), alerteDateLue("2026-11-08", "")],
+        ["photo du 28/11/2026 : date à vérifier (un chiffre mal lu ?)", "", "", true, ""]);
       for (const x of [ja, jb, jc]) supprimer("justificatifs", x.id); supprimer("operations", oc.id); supprimer("operations", oa.id);
     }
     const j3 = enregistrer("justificatifs", {type: "ticket", date: "2027-03-10", montant: 12.3, carte: "X333", statut: "a_rapprocher", operations: []});

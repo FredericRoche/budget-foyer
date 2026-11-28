@@ -217,6 +217,7 @@ svg text{font-family:var(--serif)}
 .puces button{min-height:42px; padding:.4rem .7rem; font-size:1rem}
 .puces button.choisi{background:var(--vert-empire); color:#fff}
 .saisie .legende-tel{font-size:.82rem; color:var(--sauge); margin-bottom:.7rem}
+.saisie .legende-tel.neg{color:var(--garnet)}
 .saisie .bloc{margin-bottom:.8rem}
 .propose{font-size:.75rem; color:var(--or-bruni); letter-spacing:.06em; text-transform:uppercase; margin-left:.3rem}
 .recentes{list-style:none}
