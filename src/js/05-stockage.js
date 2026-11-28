@@ -39,10 +39,18 @@ const idbCles = m => idb(m, "readonly", s => s.getAllKeys());
 
 /* Réglages propres à l'appareil (jamais partagés) */
 /* Accès à un dossier gardé par Chrome. Une poignée devenue inutilisable (disque rechiffré, volume remonté…) laisse
-   queryPermission sans réponse, et l'écran restait muet (constaté le 18/11/2026) : au-delà du délai, « muet ». */
+   queryPermission sans réponse, et l'écran restait muet (constaté le 18/11/2026) : au-delà du délai, « muet ».
+   Un disque externe qui sort de veille peut dépasser les 4 s (disque de navette, 28/11/2026) : sans réponse, un
+   second essai de 10 s est fait avant de déclarer l'accès perdu, avec un message pour patienter. */
 async function accesDossier(d, mode, delai){
-  const attente = new Promise(r => setTimeout(() => r("muet"), delai || 4000));
-  try { return await Promise.race([d.queryPermission({mode: mode || "readwrite"}), attente]); } catch (e){ return "muet"; }
+  const essai = ms => {
+    const attente = new Promise(r => setTimeout(() => r("muet"), ms));
+    return Promise.race([d.queryPermission({mode: mode || "readwrite"}), attente]).catch(() => "muet");
+  };
+  const p = await essai(delai || 4000);
+  if (p !== "muet") return p;
+  if (typeof message === "function") message("Le dossier « " + (d?.name || "?") + " » tarde à répondre (disque en veille ?) : second essai, quelques secondes…");
+  return essai(delai ? delai * 2.5 : 10000);
 }
 const messageDossierMuet = (libelle, d) => libelle + " « " + (d?.name || "?") + " » ne répond plus dans Chrome (accès perdu)";
 async function reglage(cle, defaut){ try { const v = await idbLire("reglages", cle); return v === undefined ? defaut : v; } catch (e) { return defaut; } }

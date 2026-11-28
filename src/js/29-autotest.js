@@ -664,6 +664,10 @@ async function autotest(){
           v("facture : le destinataire n'est pas le fournisseur, le « sa » des conditions n'est pas une forme sociale", [fd.enseigne, /payée à sa date/.test(fd.raisonSociale)], ["ASTIC ESSAI CHAUFFAGE", false]);
         }
         {
+          let n = 0; const lente = {name: "Disque en veille", queryPermission: () => ++n === 1 ? new Promise(() => {}) : new Promise(r => setTimeout(() => r("granted"), 60))};
+          v("dossiers : un disque qui se réveille lentement répond au second essai, sans fausse alerte", [await accesDossier(lente, "readwrite", 40), n], ["granted", 2]);
+        }
+        {
           const figee = {name: "Dépôt essai", queryPermission: () => new Promise(() => {}), requestPermission: async () => "granted"};
           v("dossiers : une poignée qui ne répond plus est signalée au lieu de bloquer l'écran", [await accesDossier(figee, "readwrite", 40), await autoriserDossier(figee, true, "Dossier de dépôt", 40)], ["muet", "muet"]);
         }
